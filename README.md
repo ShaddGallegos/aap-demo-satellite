@@ -78,6 +78,42 @@ semantics. The Linux bootstrap below is **not** a macOS/Windows/WSL installer.
   Solution [4844461](https://access.redhat.com/solutions/4844461) for the
   supported REST automation workflow.
 
+### Python dependencies (manual virtual-environment setup)
+
+For manual Linux/macOS setup, install the core Python tools in a virtual
+environment rather than modifying the system Python. Python 3.11 is the tested
+baseline for this setup and CI. Install it with `venv` support if your default
+Python is newer than the versions supported by your selected Ansible release.
+
+From the repository root:
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+ansible-galaxy collection install -r requirements.yml
+python -m pip check
+```
+
+[requirements.txt](requirements.txt) declares `ansible-core` (including
+`ansible-vault`, `ansible-galaxy`, and `ansible-playbook`), `PyYAML` for credential
+storage, and the Kubernetes Python client for `kubernetes.core` modules.
+[requirements.yml](requirements.yml) declares Ansible collections, not Python
+packages. These are compatibility ranges, not a fully pinned lockfile.
+Other Python versions require an Ansible release supporting that interpreter;
+successful pip resolution alone does not prove runtime compatibility. Validation
+on this host found that stable `ansible-core` 2.21.5 fails on Python 3.15.
+
+Activate `.venv` in each shell before using these tools or `aap-demo`; use
+`deactivate` to leave it. The environment is ignored by Git. This setup does not
+install system tools such as CRC, `kubectl`, Helm, QEMU, or SSH, and is not a
+native Windows Ansible installation workflow.
+
+APME retains its separate [Python requirements](addons/apme-eap/requirements.txt)
+and managed addon virtual environment. The dashboard's JavaScript renderer
+remains separate (`npm ci --prefix dashboard`); its Python server and the Fleet
+RHC helper require no additional pip packages.
+
 ## Install
 
 Download your pull secret to `~/Downloads/pull-secret.txt`, then run:
@@ -192,7 +228,7 @@ aap-demo enable local-cache        # restore auto-load on future deploys
 ```bash
 # Deployment
 aap-demo deploy              # Deploy AAP 2.7
-aap-demo create --full-demo  # Create AAP + Ollama/AO + three RHEL 9 Fleet nodes + dashboard
+aap-demo create --full-demo  # Create AAP + Ollama/AO + three RHEL 9 Fleet nodes + boot recovery + dashboard
 
 # Cluster management
 aap-demo status              # Show cluster status and routes; secrets stay hidden
@@ -230,7 +266,9 @@ Automation Hub, enables the offline-token keepalive, enables Ollama and
 Automation Orchestrator, then enables Fleet, attaches the AAP subscription, and
 reconciles three started and registered RHEL 9 nodes. Product Demos is installed
 after licensing succeeds. A final strict `aap-demo wire` runs after all
-components are present, then the dashboard launches. Fleet image download
+components are present, then automatic boot recovery is installed and the
+dashboard launches. Recovery installation and dashboard startup must both succeed
+before full-demo reports success. Fleet image download
 and AAP subscription attachment require Red Hat credentials. Full-demo checks
 them first and starts the secure `fleet auth` prompts when they are missing or
 invalid. Runs with `QUIET=true` remain noninteractive and require credentials to
@@ -255,9 +293,36 @@ dashboard add-on operation.
 
 The default address is `http://127.0.0.1:8765`; set `AAP_DEMO_DASHBOARD_PORT`
 to choose another port. Logs go to `~/.aap-demo/dashboard.log` (or
-`$AAP_DEMO_DIR/dashboard.log`). For foreground debugging, run
+`$AAP_DEMO_DIR/dashboard.log`). It also starts automatically after `aap-demo create`,
+`start` and `restart` (set `AAP_DEMO_DASHBOARD_AUTOSTART=false` to disable). On Linux the first run also adds a
+desktop login entry (`~/.config/autostart/aap-demo-dashboard.desktop`) so the dashboard opens after reboot. For foreground debugging, run
 `python3 dashboard/server.py --no-open`. Background mode does not install a
 boot/login service.
+
+### OpenShift web console (single-node OpenShift preset)
+
+MicroShift, the default preset, has no web console. For the full single-node
+OpenShift console, create the cluster with the OpenShift preset:
+
+```bash
+CRC_PRESET=openshift aap-demo create --full-demo
+```
+
+The preset is saved as `CRC_PRESET` in `~/.aap-demo/config`, so later `start`,
+`restart` and boot recovery keep using it. `create`, `start`, `restart` and
+`create --full-demo` open the console automatically; run `aap-demo console` (add
+`--no-open` to only print the URL) at any time. Set
+`AAP_DEMO_CONSOLE_AUTOOPEN=false` to disable the automatic open. Routes use
+`*.apps-crc.testing` on this preset instead of nip.io. It needs more RAM than
+MicroShift (see ADR-020).
+
+To pick the tier automatically from host hardware, use
+`scripts/aap-demo-tier-select.sh`. It inspects vCPUs, RAM and root disk space,
+then deploys SNO (`CRC_PRESET=openshift`, >= 8 vCPUs / 16 GB RAM / 100 GB disk)
+or MicroShift (>= 2 vCPUs / 2 GB RAM / 10 GB disk). When both are supported it
+shows an interactive menu; otherwise it falls back to MicroShift or exits with
+the missing prerequisites. Use `--tier sno|microshift` to skip the menu,
+`--yes` for non-interactive runs, and `--dry-run` to preview.
 
 ### Resuming the demo
 
@@ -291,21 +356,28 @@ safe retry instead of repeatedly adding 20%.
 
 ### Automatic boot recovery
 
-On Linux with CRC/libvirt, optionally install a system service that saves the
-demo on graceful shutdown and restores the last completed backup on boot:
+On Linux with CRC/libvirt, `aap-demo create --full-demo` automatically installs
+a system service that resumes the latest CRC disks, settings, credentials and
+demo configuration in place at boot. It starts AAP, enabled addons/Fleet and the
+dashboard HTTP server before login; the browser opens at graphical login.
+There is no manual checkpoint step before reboot and no automatic rollback to an
+older backup. Recovery installation failures fail the full-demo command.
 
 ```bash
 aap-demo service install             # Retain only the latest completed state
 aap-demo service install --force-stop --stop-timeout 120  # Linux: opt in to crash-consistent CRC fallback
 aap-demo service retention 3         # Optionally keep three states instead
-aap-demo restart                     # Save, restore, and start the demo
+aap-demo restart                     # Save and restart the latest persistent demo
 ```
 
 This uses full cold backups of CRC/Fleet disks, configuration and required
 keys/credentials. It briefly stops the demo for each backup and requires host
 disk space. While enabled, `start`, `restart` and `stop` route through systemd.
-Starting restores the saved state and brings the demo fully online; newer local
-state can be replaced. See [shutdown backup and boot restore](docs/state-service.md)
+Starting uses the live persistent state and brings the demo fully online; it does
+not overwrite newer state with a checkpoint. Install it separately with
+`aap-demo service install` for an existing demo. Windows currently has only
+login-time checkpoint recovery, not pre-login full-demo parity.
+See [shutdown backups and boot recovery](docs/state-service.md)
 for retention, security, recovery and disabling instructions.
 
 `maintenance --apply` keeps running containers, images used by workloads,

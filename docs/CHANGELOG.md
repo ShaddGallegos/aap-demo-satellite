@@ -19,6 +19,45 @@ Current comparison point:
 - The earlier cumulative file/line counts predate these Fleet changes and are
   omitted rather than presented as current totals.
 
+### 39. Gate CI on clean Python dependencies and core smoke tests
+
+Added a gating `python-cli-smoke` job to the existing lint workflow. It sets
+up the tested Python 3.11 runtime, installs the root Python manifest and declared
+Ansible collections into the job environment, checks dependency consistency,
+imports, and Ansible CLI startup, then runs isolated Vault, Fleet, RHC, CLI,
+secret-handling, and dashboard tests. Each failure stops the job. The new job
+does not use live credentials, enroll systems, or require a cluster.
+
+**Validation:** Executed the job's dependency installation, collection
+installation, checks, and exact test command sequence in a disposable Python
+3.11 virtual environment. Both RHC tests and all 24 dashboard tests passed.
+Workflow YAML parsing and `git diff --check` passed.
+
+The existing `ansible-lint` job remains advisory pending a separate cleanup of
+its current baseline.
+
+### 38. Declare core Python dependencies for manual setup
+
+Added a root `requirements.txt` declaring `ansible-core>=2.16,<3`,
+`PyYAML>=6.0.1,<7`, and `kubernetes>=28.0.0`. These provide the Ansible CLI/Vault
+tools, YAML credential handling, and the Kubernetes client without installing the
+full optional Ansible distribution. Collections remain in `requirements.yml`.
+
+README and full documentation describe Python 3.11 virtual-environment setup,
+separate collection installation, dependency checks, and shell activation.
+`.venv/` is ignored by Git. APME's addon-managed environment, dashboard npm
+dependencies, and system prerequisites remain separate and unchanged. The
+manifest declares compatibility ranges, not an exact dependency lock.
+Validation exposed stable `ansible-core` 2.21.5 failing CLI startup under the
+host's Python 3.15, so the setup explicitly uses the Python 3.11 CI baseline
+rather than claiming pip resolution guarantees interpreter compatibility.
+
+**Validation:** A disposable Python 3.11 environment resolved and installed the
+manifest successfully (`ansible-core` 2.19.14). `pip check`, PyYAML/Kubernetes
+imports, all three Ansible CLI startup checks, and the existing Vault migration
+test passed. The temporary environments were removed; system packages and the
+shared credential store were not changed.
+
 ### 37. Add explicit Red Hat connection for Fleet systems
 
 **Type:** Feature / explicit opt-in system enrollment

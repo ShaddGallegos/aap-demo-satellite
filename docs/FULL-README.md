@@ -41,6 +41,33 @@ The 24GB default supports AAP plus EAP addons (AO, APME); use `CRC_MEMORY=16384`
 - [Homebrew](https://brew.sh/) — Install with: `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
 - [Operator SDK](https://sdk.operatorframework.io/docs/installation/) — Install with: `brew install operator-sdk`
 
+#### Core Python tools (manual Linux/macOS setup)
+
+Use a Python 3.11 virtual environment (the tested setup and CI baseline) from the
+repository root to avoid changing system-managed packages:
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+ansible-galaxy collection install -r requirements.yml
+python -m pip check
+```
+
+The root [requirements.txt](../requirements.txt) provides `ansible-core`,
+`PyYAML`, and the Kubernetes Python client. Ansible collections remain in
+[requirements.yml](../requirements.yml); version ranges are not a lockfile.
+Activate the environment in each CLI shell; `deactivate` restores the prior
+shell environment. `.venv` is ignored by Git. System tools still require the
+platform-specific prerequisites above/below.
+Other Python versions require compatible Ansible releases: pip resolution alone
+does not guarantee CLI compatibility. Stable `ansible-core` 2.21.5 failed its CLI
+startup check on this host's Python 3.15; use the tested interpreter instead.
+
+APME continues to manage its own environment using its addon-specific manifests;
+dashboard npm dependencies and system-installed RHC/Insights tools are separate.
+See the [manual Python setup](../README.md#python-dependencies-manual-virtual-environment-setup).
+
 #### Windows
 
 - Windows 11 Pro, Enterprise, or Server (Hyper-V is not available on Windows 11 Home)
@@ -197,6 +224,14 @@ other cluster data.
 Once deployed, `aap-demo status` shows routes and cluster health without
 printing credentials. Use `aap-demo status --show-secrets` in an interactive
 terminal when credentials must be revealed:
+
+On the Bash CLI, this output also includes `crc_ip`, the detected SSH identity
+file in a direct SSH command, and `aap-demo ssh`. Generated `system-info`
+reports include the same CRC access information alongside the credentials;
+JSON reports expose `cluster.crc_ip` and `cluster.ssh`. CRC's IP can be internal
+to user-mode networking, so use `aap-demo ssh` or the forwarded
+`core@127.0.0.1` endpoint on port 2222 from the host. SSH private key contents
+are never printed or included in the report.
 
 ```text
 Infra:       crc
@@ -405,6 +440,13 @@ as `aap_demo.redhat.offline_token`. The distinct Automation Hub token from
 `https://console.redhat.com/ansible/automation-hub/token` is stored as
 `ah_offline_token` (the older `aap_demo.galaxy.offline_token` key remains readable).
 They are validated and maintained separately.
+
+If Customer Portal authentication fails, run `aap-demo fleet auth configure`
+in an interactive terminal and paste the Customer Portal offline token at the
+hidden prompt, not into chat or a shell command. `invalid_grant` means SSO
+rejected the token; generate a replacement on the Customer Portal API page.
+Network failures, server errors, and malformed SSO responses are reported
+separately and do not trigger replacement of an existing stored token.
 
 Offline tokens can expire after 30 days without use. The optional keepalive
 reads configured Customer Portal and Automation Hub tokens directly from the

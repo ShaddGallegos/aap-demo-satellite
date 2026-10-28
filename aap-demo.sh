@@ -229,7 +229,7 @@ for arg in "$@"; do
         exit 1
       fi
       ;;
-    deploy | deploy-all | repair | clean | maintenance | credentials | stop | restart | service | setup | create | watch | update | config | redeploy | redeploy-all | redhat-status | rh-status | kubeconfig | idle | preflight | diagnose | must-gather | enable | disable | wire | system-info | dashboard | version | help | --help | -h | --version | -V)
+    deploy | deploy-all | repair | clean | maintenance | credentials | stop | restart | service | setup | create | watch | update | config | redeploy | redeploy-all | redhat-status | rh-status | kubeconfig | idle | preflight | diagnose | must-gather | enable | disable | wire | system-info | dashboard | console | version | help | --help | -h | --version | -V)
       if [ "$COMMAND" = "credentials" ]; then
         EXTRA_ARGS+=("$arg")
       else
@@ -336,8 +336,8 @@ if [ -n "$SYSTEM_INFO_OUTPUT" ] && [ "$COMMAND" != system-info ]; then
   exit 1
 fi
 if [ "$DASHBOARD_NO_OPEN" = true ] \
-  && ! { [ "$COMMAND" = dashboard ] || { [ "$COMMAND" = create ] && [ "$FULL_DEMO" = true ]; }; }; then
-  echo "ERROR: --no-open is supported only by dashboard" >&2
+  && ! { [ "$COMMAND" = dashboard ] || [ "$COMMAND" = console ] || { [ "$COMMAND" = create ] && [ "$FULL_DEMO" = true ]; }; }; then
+  echo "ERROR: --no-open is supported only by dashboard and console" >&2
   exit 1
 fi
 if [ "$FULL_DEMO" = true ] && [ "$COMMAND" != create ]; then
@@ -445,7 +445,13 @@ setup_kubeconfig() {
     if ! kubectl cluster-info --request-timeout=3s &>/dev/null 2>&1; then
       # Ensure infra backend is loaded to set CRC_SSH_KEY
       _infra_ensure_backend 2>/dev/null || true
-      if [ -n "$CRC_SSH_KEY" ]; then
+      if [ "$(_aap_demo_detect_crc_preset)" = "openshift" ]; then
+        if [ -s "$HOME/.crc/machines/crc/kubeconfig" ]; then
+          cp "$HOME/.crc/machines/crc/kubeconfig" "$AAP_DEMO_KUBECONFIG"
+          chmod 600 "$AAP_DEMO_KUBECONFIG"
+          export KUBECONFIG="$AAP_DEMO_KUBECONFIG"
+        fi
+      elif [ -n "$CRC_SSH_KEY" ]; then
         if ssh -p 2222 -i "$CRC_SSH_KEY" \
           -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
           -o ConnectTimeout=2 -o BatchMode=yes \
@@ -618,6 +624,7 @@ CORE COMMANDS:
     system-info [--redact] [--json] [--output FILE]
                                     Export redacted, JSON, or custom-path inventory
     dashboard [--no-open]           Start the localhost dashboard in the background
+    console [--no-open]             Show/open the OpenShift web console (CRC_PRESET=openshift only)
     watch                           Watch AAP deployment progress
     clean                           Remove AAP while keeping the cluster
     maintenance [--apply]           Preview or remove safe-to-delete VM data
@@ -1014,6 +1021,7 @@ _wait_for_ovn_ready() {
   local interval=5
   local elapsed=0
   local node_desired node_ready master_desired master_ready
+  local master_required=true
 
   if ! kubectl get namespace "$ovn_namespace" &>/dev/null; then
     echo ""
@@ -1023,20 +1031,30 @@ _wait_for_ovn_ready() {
   fi
 
   echo "Waiting for OVN networking to become ready..."
+  if ! kubectl get daemonset ovnkube-master -n "$ovn_namespace" >/dev/null 2>&1; then
+    master_required=false
+  fi
+
   while [ "$elapsed" -lt "$timeout" ]; do
     node_desired=$(kubectl get daemonset ovnkube-node -n "$ovn_namespace" \
       -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null || echo "")
     node_ready=$(kubectl get daemonset ovnkube-node -n "$ovn_namespace" \
       -o jsonpath='{.status.numberReady}' 2>/dev/null || echo "")
-    master_desired=$(kubectl get daemonset ovnkube-master -n "$ovn_namespace" \
-      -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null || echo "")
-    master_ready=$(kubectl get daemonset ovnkube-master -n "$ovn_namespace" \
-      -o jsonpath='{.status.numberReady}' 2>/dev/null || echo "")
+    if [ "$master_required" = true ]; then
+      master_desired=$(kubectl get daemonset ovnkube-master -n "$ovn_namespace" \
+        -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null || echo "")
+      master_ready=$(kubectl get daemonset ovnkube-master -n "$ovn_namespace" \
+        -o jsonpath='{.status.numberReady}' 2>/dev/null || echo "")
+    else
+      master_desired="0"
+      master_ready="0"
+    fi
 
     if [ "$node_desired" -gt 0 ] 2>/dev/null \
       && [ "$node_ready" -eq "$node_desired" ] 2>/dev/null \
-      && [ "$master_desired" -gt 0 ] 2>/dev/null \
-      && [ "$master_ready" -eq "$master_desired" ] 2>/dev/null; then
+      && { [ "$master_required" = false ] \
+        || { [ "$master_desired" -gt 0 ] 2>/dev/null \
+          && [ "$master_ready" -eq "$master_desired" ] 2>/dev/null; }; }; then
       echo "  ✓ OVN networking is ready"
       return 0
     fi
@@ -2140,6 +2158,20 @@ cmd_status() {
     fi
   fi
 
+  if [ "$SHOW_SECRETS" = true ]; then
+    local crc_access crc_identity
+    crc_access=$(_aap_demo_inventory_crc_access) || return 1
+    crc_identity=$(jq -r '.ssh_key // empty' <<<"$crc_access")
+    echo "CRC SSH Access:"
+    echo "---------------"
+    printf '  crc_ip: %s\n' "$(jq -r '.crc_ip // "unavailable"' <<<"$crc_access")"
+    echo "  SSH: aap-demo ssh"
+    if [ -n "$crc_identity" ]; then
+      printf '  Direct command: ssh -i %q -o IdentitiesOnly=yes -p 2222 core@127.0.0.1\n' "$crc_identity"
+    fi
+    echo ""
+  fi
+
   # Show addons with URLs or enable instructions
   local saved_addons
   saved_addons=$(_addons_list)
@@ -2272,6 +2304,86 @@ cmd_dashboard() {
     args+=(--no-open)
   fi
   python3 "$dashboard_script" "${args[@]}"
+}
+
+# Resolve the configured CRC preset without requiring infra backend helpers.
+_aap_demo_detect_crc_preset() {
+  local config preset_raw preset
+  if [ -n "${CRC_PRESET:-}" ]; then
+    echo "$CRC_PRESET"
+    return 0
+  fi
+
+  config="${AAP_DEMO_CONFIG:-${AAP_DEMO_DIR:-$HOME/.aap-demo}/config}"
+  if [ -f "$config" ]; then
+    preset=$(grep '^CRC_PRESET=' "$config" 2>/dev/null | cut -d= -f2)
+    if [ -n "$preset" ]; then
+      echo "$preset"
+      return 0
+    fi
+  fi
+
+  if command -v crc >/dev/null 2>&1; then
+    preset_raw=$(crc config get preset 2>&1 || true)
+    if ! echo "$preset_raw" | grep -q "not set"; then
+      preset=$(echo "$preset_raw" | awk '{print $NF}')
+      if [ -n "$preset" ]; then
+        echo "$preset"
+        return 0
+      fi
+    fi
+  fi
+
+  echo "microshift"
+  return 0
+}
+
+# Print (and optionally open) the OpenShift web console. Only the full
+# OpenShift preset ships one; MicroShift does not.
+cmd_console() {
+  local preset url
+  preset="$(_aap_demo_detect_crc_preset)"
+  if [ "$preset" != "openshift" ]; then
+    echo "The ${preset} preset has no OpenShift web console." >&2
+    echo "  Recreate with the full OpenShift preset: CRC_PRESET=openshift aap-demo create --full-demo" >&2
+    return 1
+  fi
+  if ! command -v crc >/dev/null 2>&1; then
+    echo "ERROR: crc not found" >&2
+    return 1
+  fi
+  url="$(crc console --url 2>/dev/null | tail -1)"
+  if [ -z "$url" ]; then
+    echo "ERROR: OpenShift console URL unavailable (is the cluster running? crc status)" >&2
+    return 1
+  fi
+  echo "OpenShift console: $url"
+  crc console --credentials 2>/dev/null | sed 's/^/  /' | sed -E 's/(-p )[^ ]+/\1********/'
+  echo "  (full credentials: crc console --credentials)"
+  if [ "$DASHBOARD_NO_OPEN" != true ]; then
+    xdg-open "$url" >/dev/null 2>&1 || open "$url" >/dev/null 2>&1 || true
+  fi
+}
+
+# Best-effort: open the OpenShift console when the full preset is in use.
+_aap_demo_auto_console() {
+  [ "${AAP_DEMO_CONSOLE_AUTOOPEN:-true}" = false ] && return 0
+  [ "$(_aap_demo_detect_crc_preset)" = "openshift" ] || return 0
+  cmd_console >/dev/null 2>&1 || true
+  return 0
+}
+
+# Best-effort: start/reuse the dashboard after a successful lifecycle command.
+# Opt out with AAP_DEMO_DASHBOARD_AUTOSTART=false.
+_aap_demo_auto_dashboard() {
+  [ "${AAP_DEMO_DASHBOARD_AUTOSTART:-true}" = false ] && return 0
+  if [ "$(uname -s)" = Linux ] && [ ! -e "${XDG_CONFIG_HOME:-$HOME/.config}/autostart/aap-demo-dashboard.desktop" ]; then
+    source "${SCRIPT_DIR}/includes/state-service.sh"
+    aap_demo_dashboard_autostart_install --always 2>/dev/null || true
+  fi
+  cmd_dashboard || echo "WARNING: Could not start the dashboard (run: aap-demo dashboard)" >&2
+  _aap_demo_auto_console
+  return 0
 }
 
 cmd_redeploy() {
@@ -2564,7 +2676,8 @@ cmd_full_demo() {
   echo "  5. Enable Ollama and Automation Orchestrator"
   echo "  6. Enable Fleet, attach the AAP subscription, and register three RHEL 9 nodes"
   echo "  7. Enable Product Demos"
-  echo "  8. Reapply all integrations and launch dashboard"
+  echo "  8. Reapply all integrations"
+  echo "  9. Install boot recovery (restores CRC settings/state on reboot) and launch dashboard"
   echo ""
 
   if ! cmd_fleet auth status; then
@@ -2597,6 +2710,9 @@ cmd_full_demo() {
   cluster_state=$(infra_get_state 2>/dev/null || echo "not_created")
   if [ "$cluster_state" = running ]; then
     echo "✓ OpenShift Local cluster is already running; reusing it"
+  elif aap_demo_service_managed; then
+    echo "Resuming the existing managed demo without recreating CRC..."
+    cmd_start || return 1
   else
     cmd_create || return 1
   fi
@@ -2623,13 +2739,19 @@ cmd_full_demo() {
   aap_demo_generate_system_info || return 1
 
   echo ""
-  echo "✓ Full demo environment is ready"
-  echo "  AAP, Product Demos, Automation Orchestrator, Ollama, and three Fleet nodes are configured."
-  echo "  Launching the aap-demo dashboard..."
-  echo ""
-
   _aap_demo_release_operation_lock
-  cmd_dashboard
+  echo "  Installing boot recovery (requires sudo)..."
+  cmd_service install || {
+    echo "ERROR: Full demo boot recovery could not be installed. Resolve the error and rerun: aap-demo create --full-demo" >&2
+    return 1
+  }
+  echo ""
+  echo "  Launching the aap-demo dashboard..."
+  cmd_dashboard || return 1
+  _aap_demo_auto_console
+  echo ""
+  echo "✓ Full demo environment and automatic recovery are ready"
+  echo "  AAP, Product Demos, Automation Orchestrator, Ollama, and three Fleet nodes are configured."
 }
 
 cmd_credentials() {
@@ -3127,10 +3249,14 @@ create_aap_instance() {
     sed "s|__PUBLIC_BASE_URL__|${PUBLIC_URL}|g" "$cr_file" | kubectl apply -f - -n "$NAMESPACE"
   else
     echo "Using CR: $cr_name"
-    # Inject route_host for nip.io domain resolution
-    awk -v host="aap-hub-${NAMESPACE}.apps.127.0.0.1.nip.io" \
-      '/storage_type: file/{print; print "    route_host: " host; next} {print}' \
-      "$cr_file" | kubectl apply -f - -n "$NAMESPACE"
+    if [ "$(_detect_crc_preset 2>/dev/null || echo microshift)" = "openshift" ]; then
+      kubectl apply -f "$cr_file" -n "$NAMESPACE"
+    else
+      # Inject route_host for nip.io domain resolution
+      awk -v host="aap-hub-${NAMESPACE}.apps.127.0.0.1.nip.io" \
+        '/storage_type: file/{print; print "    route_host: " host; next} {print}' \
+        "$cr_file" | kubectl apply -f - -n "$NAMESPACE"
+    fi
   fi
 
   # Patch gateway deployment for OpenShift Local compatibility
@@ -3816,8 +3942,14 @@ esac
 
 if aap_demo_service_managed; then
   case "$COMMAND" in
-    create | destroy | redeploy-all)
-      _err "Disable automatic state restore before rebuilding or deleting the demo: aap-demo service disable"
+    create)
+      if [ "$FULL_DEMO" != true ] || [ "$(uname -s)" != Linux ]; then
+        _err "Disable automatic recovery before rebuilding the demo: aap-demo service disable"
+        exit 1
+      fi
+      ;;
+    destroy | redeploy-all)
+      _err "Disable automatic recovery before rebuilding or deleting the demo: aap-demo service disable"
       exit 1
       ;;
   esac
@@ -3832,7 +3964,7 @@ fi
 
 # Setup KUBECONFIG based on infrastructure type (skip for help/config commands)
 case "$COMMAND" in
-  help | --help | -h | config | update | version | "" | destroy | status | system-info | dashboard | service | credentials)
+  help | --help | -h | config | update | version | "" | destroy | status | system-info | dashboard | console | service | credentials)
     # These commands don't need cluster access
     ;;
   redeploy-all | deploy | deploy-all | redeploy | create | start | restart | preflight)
@@ -3887,10 +4019,12 @@ case "$COMMAND" in
     ;;
   start)
     cmd_start
+    _aap_demo_auto_dashboard
     ;;
   restart)
     cmd_stop
     cmd_start
+    _aap_demo_auto_dashboard
     ;;
   service)
     cmd_service "${EXTRA_ARGS[@]}"
@@ -3902,6 +4036,7 @@ case "$COMMAND" in
       fi
     else
       cmd_create
+      _aap_demo_auto_dashboard
     fi
     ;;
   setup)
@@ -3925,6 +4060,9 @@ case "$COMMAND" in
     ;;
   dashboard)
     cmd_dashboard
+    ;;
+  console)
+    cmd_console
     ;;
   update)
     cmd_update

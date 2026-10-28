@@ -6,10 +6,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 AAP_DEMO_SH="$REPO_ROOT/aap-demo.sh"
 LOG_FILE=$(mktemp)
-trap 'rm -f "$LOG_FILE"' EXIT
+trap 'rm -f "$LOG_FILE" "$LOG_FILE.output"' EXIT
 
 cmd_create() {
   printf 'create quiet=%s addons=%s\n' "$QUIET" "$ADDONS" >>"$LOG_FILE"
+}
+
+cmd_start() {
+  printf 'start-existing\n' >>"$LOG_FILE"
+}
+
+aap_demo_service_managed() {
+  [ "${MANAGED_DEMO:-false}" = true ]
 }
 
 # shellcheck disable=SC2329
@@ -57,12 +65,38 @@ _aap_demo_release_operation_lock() {
   printf 'release-lock\n' >>"$LOG_FILE"
 }
 
+cmd_service() {
+  printf 'service %s\n' "$*" >>"$LOG_FILE"
+  [ "${FAIL_SERVICE_INSTALL:-false}" != true ]
+}
+
 cmd_dashboard() {
   printf 'dashboard\n' >>"$LOG_FILE"
+  [ "${FAIL_DASHBOARD:-false}" != true ]
+}
+
+_aap_demo_auto_console() {
+  printf 'console\n' >>"$LOG_FILE"
 }
 
 full_demo_function=$(sed -n '/^cmd_full_demo()/,/^}$/p' "$AAP_DEMO_SH")
 eval "$full_demo_function"
+managed_guard=$(sed -n '/^if aap_demo_service_managed; then$/,/^fi$/p' "$AAP_DEMO_SH")
+_err() { printf 'ERROR: %s\n' "$*" >&2; }
+(
+  uname() { echo Linux; }
+  MANAGED_DEMO=true COMMAND=create FULL_DEMO=true eval "$managed_guard"
+)
+for command in create destroy redeploy-all; do
+  if (
+    uname() { echo Linux; }
+    MANAGED_DEMO=true COMMAND="$command" FULL_DEMO=false eval "$managed_guard"
+  ) >"$LOG_FILE.output" 2>&1; then
+    echo "FAIL: managed guard allowed destructive command: $command"
+    exit 1
+  fi
+  grep -Fq 'Disable automatic recovery' "$LOG_FILE.output"
+done
 cmd_full_demo >/dev/null
 
 cat >"$LOG_FILE.expected" <<'EOF'
@@ -81,7 +115,9 @@ enable product-demos provider=unset
 wire
 system-info
 release-lock
+service install
 dashboard
+console
 EOF
 
 if ! cmp -s "$LOG_FILE" "$LOG_FILE.expected"; then
@@ -91,6 +127,35 @@ if ! cmp -s "$LOG_FILE" "$LOG_FILE.expected"; then
   exit 1
 fi
 rm -f "$LOG_FILE.expected"
+
+: >"$LOG_FILE"
+if FAIL_SERVICE_INSTALL=true cmd_full_demo >"$LOG_FILE.output" 2>&1; then
+  echo "FAIL: full demo reported success without boot recovery"
+  exit 1
+fi
+grep -Fq 'ERROR: Full demo boot recovery could not be installed' "$LOG_FILE.output"
+if grep -Fq 'dashboard' "$LOG_FILE" || grep -Fq 'automatic recovery are ready' "$LOG_FILE.output"; then
+  echo "FAIL: full demo continued after boot recovery failed"
+  exit 1
+fi
+: >"$LOG_FILE"
+if FAIL_DASHBOARD=true cmd_full_demo >"$LOG_FILE.output" 2>&1; then
+  echo "FAIL: full demo reported success without the dashboard"
+  exit 1
+fi
+if grep -Fq 'automatic recovery are ready' "$LOG_FILE.output"; then
+  echo "FAIL: full demo printed success before dashboard readiness"
+  exit 1
+fi
+rm -f "$LOG_FILE.output"
+
+: >"$LOG_FILE"
+MANAGED_DEMO=true cmd_full_demo >/dev/null
+grep -Fxq 'start-existing' "$LOG_FILE"
+if grep -Fq 'create quiet=' "$LOG_FILE"; then
+  echo "FAIL: full demo recreated a stopped managed CRC"
+  exit 1
+fi
 
 fleet_count() {
   printf '3'

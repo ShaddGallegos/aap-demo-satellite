@@ -355,11 +355,19 @@ if [ "$CRC_STATUS" = "Running" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Preset: always MicroShift
+# Preset: MicroShift (default) or full single-node OpenShift (CRC_PRESET=openshift,
+# includes the OpenShift web console).
 # ---------------------------------------------------------------------------
-crc config set preset "microshift" 2>/dev/null || true
-CURRENT_PRESET="microshift"
-_save_config_key "CRC_PRESET" "microshift"
+CURRENT_PRESET="$(_detect_crc_preset 2>/dev/null || echo microshift)"
+case "$CURRENT_PRESET" in
+  microshift | openshift) ;;
+  *)
+    printf "${_RED}▸${_NC} Unsupported CRC_PRESET '${CURRENT_PRESET}' (use microshift or openshift)\n"
+    exit 1
+    ;;
+esac
+crc config set preset "$CURRENT_PRESET" 2>/dev/null || true
+_save_config_key "CRC_PRESET" "$CURRENT_PRESET"
 
 printf "${_GREEN}▸${_NC} CRC preset: ${CURRENT_PRESET}\n"
 
@@ -375,7 +383,7 @@ if [ "$HOST_CPUS" -gt 0 ] && [ "$HOST_MEMORY_MB" -gt 0 ]; then
 
   if [ "$HOST_CPUS" -lt 4 ] || [ "$HOST_MEMORY_MB" -lt 10240 ]; then
     echo ""
-    printf "  ${_RED}Warning:${_NC} MicroShift requires at least 4 CPUs and 10GB RAM.\n"
+    printf "  ${_RED}Warning:${_NC} ${CURRENT_PRESET} requires at least 4 CPUs and 10GB RAM.\n"
     printf "  Your host has ${HOST_CPUS} CPUs and $((HOST_MEMORY_MB / 1024))GB RAM.\n"
     echo ""
   fi
@@ -580,6 +588,7 @@ else
   exit 1
 fi
 
+if [ "$CURRENT_PRESET" = "microshift" ]; then
 # ---------------------------------------------------------------------------
 # Configure nip.io baseDomain
 # ---------------------------------------------------------------------------
@@ -645,6 +654,29 @@ mkdir -p "$AAP_DEMO_DIR"
 ssh -p 2222 "${CRC_SSH_OPTS[@]}" core@127.0.0.1 'sudo cat /var/lib/microshift/resources/kubeadmin/kubeconfig' >"$AAP_DEMO_KUBECONFIG" 2>/dev/null || true
 chmod 600 "$AAP_DEMO_KUBECONFIG" 2>/dev/null || true
 echo "  ✓ nip.io baseDomain configured (data wiped)"
+else
+  # Full OpenShift keeps the CRC apps-crc.testing domain and the kubeconfig CRC generates.
+  mkdir -p "$AAP_DEMO_DIR"
+  _crc_oc_kubeconfig="$HOME/.crc/machines/crc/kubeconfig"
+  _api_ready=false
+  printf "${_GREEN}▸${_NC} Waiting for OpenShift API..."
+  for i in $(seq 1 60); do
+    if [ -s "$_crc_oc_kubeconfig" ] && KUBECONFIG="$_crc_oc_kubeconfig" kubectl cluster-info --request-timeout=5s &>/dev/null; then
+      echo " ready"
+      _api_ready=true
+      break
+    fi
+    printf "."
+    sleep 5
+  done
+  if [ "$_api_ready" = false ]; then
+    echo " timeout"
+    printf "${_RED}▸${_NC} OpenShift API not ready after 5 minutes\n"
+    exit 1
+  fi
+  cp "$_crc_oc_kubeconfig" "$AAP_DEMO_KUBECONFIG"
+  chmod 600 "$AAP_DEMO_KUBECONFIG"
+fi
 
 # ---------------------------------------------------------------------------
 # CoreDNS configuration is deferred to the end of the create flow.
@@ -690,7 +722,9 @@ echo "  podman --connection aap-demo build ."
 printf "${_GREEN}▸${_NC} Installing metrics-server...\n"
 KUBECONFIG="$(aap_demo_resolve_kubeconfig)"
 export KUBECONFIG
-if kubectl get deployment metrics-server -n kube-system &>/dev/null; then
+if [ "$CURRENT_PRESET" = "openshift" ]; then
+  echo "  Built into OpenShift monitoring (skipped)"
+elif kubectl get deployment metrics-server -n kube-system &>/dev/null; then
   echo "  Already installed"
 else
   kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml 2>/dev/null
@@ -763,7 +797,9 @@ fi
 # (Deferred to end of create flow — MicroShift's DNS controller overwrites
 # the configmap during startup, so we must wait for it to finish first)
 # ---------------------------------------------------------------------------
-configure_coredns
+if [ "$CURRENT_PRESET" = "microshift" ]; then
+  configure_coredns
+fi
 
 # ---------------------------------------------------------------------------
 # Set sysctl for performance (inotify limits for operator watchers)
@@ -771,7 +807,7 @@ configure_coredns
 # (128 instances) cause "too many open files" errors under heavy load.
 # Matches infra-ci deployment settings.
 # ---------------------------------------------------------------------------
-if [ ${#CRC_SSH_OPTS[@]} -gt 0 ]; then
+if [ "$CURRENT_PRESET" = "microshift" ] && [ ${#CRC_SSH_OPTS[@]} -gt 0 ]; then
   printf "${_GREEN}▸${_NC} Setting sysctl for performance...\n"
   ssh -p 2222 "${CRC_SSH_OPTS[@]}" core@127.0.0.1 'sudo sysctl -w fs.inotify.max_user_watches=2099999999 fs.inotify.max_user_instances=2099999999 fs.inotify.max_queued_events=2099999999' 2>/dev/null
   echo "  ✓ inotify limits configured"
@@ -816,11 +852,15 @@ echo -e "${RED}         MMMMMMMMMMMMMMMMMMMMMMMMMMMMMM${NC}"
 echo -e "${RED}            \`MMMMMMMMMMMMMMMMMMMMMMMM:${NC}"
 echo -e "${RED}                \`\`MMMMMMMMMMMMMMMMM'${NC}"
 echo ""
-echo -e "${RED}✓ CRC MicroShift cluster ready for AAP development!${NC}"
+echo -e "${RED}✓ CRC ${CURRENT_PRESET} cluster ready for AAP development!${NC}"
 echo ""
 echo "Features:"
-echo "  - baseDomain: apps.127.0.0.1.nip.io (nip.io routes auto-configured)"
-echo "  - CoreDNS template for in-cluster route resolution"
+if [ "$CURRENT_PRESET" = "microshift" ]; then
+  echo "  - baseDomain: apps.127.0.0.1.nip.io (nip.io routes auto-configured)"
+  echo "  - CoreDNS template for in-cluster route resolution"
+else
+  echo "  - OpenShift web console: run 'aap-demo console'"
+fi
 echo "  - LVMS storage (topolvm-provisioner, ${CRC_PV_SIZE}GB for PVCs)"
 echo "  - nfs-local-rwx StorageClass (RWX support for hub file storage)"
 echo "  - Pull secret configured for registry.redhat.io"
@@ -831,7 +871,12 @@ if [ -n "$SAVED_ADDONS" ]; then
   echo "  - Addons deployed: $SAVED_ADDONS"
 fi
 echo ""
-echo "  Routes:     *.apps.127.0.0.1.nip.io"
+if [ "$CURRENT_PRESET" = "microshift" ]; then
+  echo "  Routes:     *.apps.127.0.0.1.nip.io"
+else
+  echo "  Routes:     *.apps-crc.testing"
+  echo "  Console:    aap-demo console"
+fi
 
 echo "  Kubeconfig: export KUBECONFIG=$AAP_DEMO_KUBECONFIG"
 echo "  SSH:        aap-demo ssh"
