@@ -25,6 +25,7 @@ test/testing-framework/
 *.secrets.local.yml
 
 # Linting and pre-commit
+.venv/
 .venv-lint/
 .pre-commit-cache/
 *.log
