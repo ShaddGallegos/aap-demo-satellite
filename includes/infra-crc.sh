@@ -138,29 +138,9 @@ _infra_crc_get_kubeconfig() {
 }
 
 _detect_crc_preset() {
-  if [ -n "${CRC_PRESET:-}" ]; then
-    echo "$CRC_PRESET"
-    return 0
-  fi
-
-  local config="${AAP_DEMO_CONFIG:-${AAP_DEMO_DIR:-$HOME/.aap-demo}/config}"
-  if [ -f "$config" ]; then
-    local saved
-    saved=$(grep '^CRC_PRESET=' "$config" 2>/dev/null | cut -d= -f2)
-    if [ -n "$saved" ]; then
-      echo "$saved"
-      return 0
-    fi
-  fi
-
-  local preset_raw
-  preset_raw=$(crc config get preset 2>&1 || true)
-  if echo "$preset_raw" | grep -q "not set"; then
-    echo "microshift"
-    return 0
-  fi
-
-  echo "$preset_raw" | awk '{print $NF}'
+  # shellcheck source=preset.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/preset.sh"
+  aap_demo_detect_crc_preset
 }
 
 _infra_crc_get_name() {

@@ -42,6 +42,8 @@ source "${SCRIPT_DIR}/includes/aap-demo-version.sh"
 
 # shellcheck source=includes/aap-demo-paths.sh
 source "${SCRIPT_DIR}/includes/aap-demo-paths.sh"
+# shellcheck source=includes/preset.sh
+source "${SCRIPT_DIR}/includes/preset.sh"
 # shellcheck source=includes/operation-lock.sh
 source "${SCRIPT_DIR}/includes/operation-lock.sh"
 # shellcheck source=includes/kubernetes-readiness.sh
@@ -445,7 +447,7 @@ setup_kubeconfig() {
     if ! kubectl cluster-info --request-timeout=3s &>/dev/null 2>&1; then
       # Ensure infra backend is loaded to set CRC_SSH_KEY
       _infra_ensure_backend 2>/dev/null || true
-      if [ "$(_aap_demo_detect_crc_preset)" = "openshift" ]; then
+      if [ "$(aap_demo_detect_crc_preset)" = "openshift" ]; then
         if [ -s "$HOME/.crc/machines/crc/kubeconfig" ]; then
           cp "$HOME/.crc/machines/crc/kubeconfig" "$AAP_DEMO_KUBECONFIG"
           chmod 600 "$AAP_DEMO_KUBECONFIG"
@@ -2306,43 +2308,11 @@ cmd_dashboard() {
   python3 "$dashboard_script" "${args[@]}"
 }
 
-# Resolve the configured CRC preset without requiring infra backend helpers.
-_aap_demo_detect_crc_preset() {
-  local config preset_raw preset
-  if [ -n "${CRC_PRESET:-}" ]; then
-    echo "$CRC_PRESET"
-    return 0
-  fi
-
-  config="${AAP_DEMO_CONFIG:-${AAP_DEMO_DIR:-$HOME/.aap-demo}/config}"
-  if [ -f "$config" ]; then
-    preset=$(grep '^CRC_PRESET=' "$config" 2>/dev/null | cut -d= -f2)
-    if [ -n "$preset" ]; then
-      echo "$preset"
-      return 0
-    fi
-  fi
-
-  if command -v crc >/dev/null 2>&1; then
-    preset_raw=$(crc config get preset 2>&1 || true)
-    if ! echo "$preset_raw" | grep -q "not set"; then
-      preset=$(echo "$preset_raw" | awk '{print $NF}')
-      if [ -n "$preset" ]; then
-        echo "$preset"
-        return 0
-      fi
-    fi
-  fi
-
-  echo "microshift"
-  return 0
-}
-
 # Print (and optionally open) the OpenShift web console. Only the full
 # OpenShift preset ships one; MicroShift does not.
 cmd_console() {
   local preset url
-  preset="$(_aap_demo_detect_crc_preset)"
+  preset="$(aap_demo_detect_crc_preset)"
   if [ "$preset" != "openshift" ]; then
     echo "The ${preset} preset has no OpenShift web console." >&2
     echo "  Recreate with the full OpenShift preset: CRC_PRESET=openshift aap-demo create --full-demo" >&2
@@ -2368,7 +2338,7 @@ cmd_console() {
 # Best-effort: open the OpenShift console when the full preset is in use.
 _aap_demo_auto_console() {
   [ "${AAP_DEMO_CONSOLE_AUTOOPEN:-true}" = false ] && return 0
-  [ "$(_aap_demo_detect_crc_preset)" = "openshift" ] || return 0
+  [ "$(aap_demo_detect_crc_preset)" = "openshift" ] || return 0
   cmd_console >/dev/null 2>&1 || true
   return 0
 }
@@ -2920,7 +2890,7 @@ deploy_latest() {
   source "${SCRIPT_DIR}/includes/infra-crc.sh" 2>/dev/null || true
   # shellcheck source=includes/olm-catalog-signature.sh
   source "${SCRIPT_DIR}/includes/olm-catalog-signature.sh"
-  _deploy_preset="$(_detect_crc_preset 2>/dev/null || echo microshift)"
+  _deploy_preset="$(aap_demo_detect_crc_preset)"
   if [ "$_deploy_preset" = "microshift" ] && needs_signature_policy_relaxation; then
     echo ""
     echo "Relaxing container signature policy for registry.redhat.io (MicroShift 4.22+)..."
@@ -3249,7 +3219,7 @@ create_aap_instance() {
     sed "s|__PUBLIC_BASE_URL__|${PUBLIC_URL}|g" "$cr_file" | kubectl apply -f - -n "$NAMESPACE"
   else
     echo "Using CR: $cr_name"
-    if [ "$(_detect_crc_preset 2>/dev/null || echo microshift)" = "openshift" ]; then
+    if [ "$(aap_demo_detect_crc_preset)" = "openshift" ]; then
       kubectl apply -f "$cr_file" -n "$NAMESPACE"
     else
       # Inject route_host for nip.io domain resolution
