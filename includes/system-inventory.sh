@@ -376,10 +376,29 @@ _aap_demo_inventory_storage() {
         }'
 }
 
+_aap_demo_inventory_crc_access() {
+  local crc_ip="" key=""
+  if ! crc_ip=$(crc ip 2>/dev/null); then
+    echo "WARNING: CRC IP unavailable; use 'aap-demo ssh' after CRC networking recovers" >&2
+    crc_ip=""
+  fi
+  if declare -F _detect_crc_ssh_key >/dev/null; then
+    key=$(_detect_crc_ssh_key) || key=""
+  fi
+  jq -cn --arg ip "$crc_ip" --arg key "$key" '{
+    crc_ip: ($ip | select(length > 0) // null),
+    ssh_host: "127.0.0.1",
+    ssh_port: 2222,
+    ssh_user: "core",
+    ssh_key: ($key | select(length > 0) // null),
+    ssh_command: "aap-demo ssh"
+  }'
+}
+
 aap_demo_collect_system_inventory() {
   local secret_mode="${1:-omit}"
   local cluster_state cluster_name generated_at addons addons_text host_os host_arch aap_subscription context kubernetes_version
-  local namespaces services pods namespace_status routes credentials api_keys ingress vm storage fleet
+  local namespaces services pods namespace_status routes credentials api_keys ingress vm storage fleet crc_access
   # shellcheck source=fleet-access.sh
   source "$(dirname "${BASH_SOURCE[0]}")/fleet-access.sh"
   fleet=$(fleet_access_inventory "$secret_mode") || return 1
@@ -435,6 +454,7 @@ aap_demo_collect_system_inventory() {
     vm=$(_aap_demo_inventory_vm)
   fi
   storage=$(_aap_demo_inventory_storage "$addons_text" "$vm")
+  crc_access=$(_aap_demo_inventory_crc_access)
 
   jq -cn \
     --arg generated_at "$generated_at" \
@@ -463,6 +483,7 @@ aap_demo_collect_system_inventory() {
     --argjson ingress "$ingress" \
     --argjson vm "$vm" \
     --argjson storage "$storage" \
+    --argjson crc_access "$crc_access" \
     '{
       schema_version: 1,
       generated_at: $generated_at,
@@ -486,6 +507,8 @@ aap_demo_collect_system_inventory() {
         context: $context,
         kubeconfig: $kubeconfig,
         kubernetes_version: $kubernetes_version,
+        crc_ip: $crc_access.crc_ip,
+        ssh: ($crc_access | del(.crc_ip)),
         vm: $vm
       },
       storage: {

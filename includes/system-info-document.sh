@@ -215,6 +215,17 @@ $(jq -r '
 
 $(_aap_demo_system_info_credentials_markdown "$inventory")
 
+### CRC SSH Access
+
+- crc_ip: \`$(jq -r '.cluster.crc_ip // "unavailable"' "$inventory")\`
+- SSH: \`aap-demo ssh\`
+- Forwarded endpoint: \`core@127.0.0.1:2222\`
+- SSH identity file: \`$(jq -r '.cluster.ssh.ssh_key // "unavailable"' "$inventory")\`
+
+The CRC IP may be internal to user-mode networking. From this host, use
+the forwarded endpoint with the identity file, or use \`aap-demo ssh\`.
+Private key contents are never included.
+
 ## API Keys and Tokens
 
 $(_aap_demo_system_info_api_keys_markdown "$inventory")

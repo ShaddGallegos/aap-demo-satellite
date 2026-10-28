@@ -35,6 +35,15 @@ infra_get_state() {
   printf 'running'
 }
 
+crc() {
+  [ "$*" = ip ] || return 1
+  printf '192.168.127.2\n'
+}
+
+_detect_crc_ssh_key() {
+  printf '/fixture/id_ed25519\n'
+}
+
 _addons_list() {
   printf 'mcp-server ao'
 }
@@ -118,6 +127,9 @@ omitted_inventory=$(aap_demo_collect_system_inventory omit)
 [ "$(jq -r '.credentials[] | select(.component == "AAP") | .password' <<<"$include_inventory")" = "aap-password" ]
 [ "$(jq -r '.credentials[] | select(.component == "AAP") | .password' <<<"$redacted_inventory")" = "******" ]
 [ "$(jq -r '.credentials[] | select(.component == "AAP") | .password' <<<"$omitted_inventory")" = "null" ]
+[ "$(jq -r '.cluster.crc_ip' <<<"$include_inventory")" = "192.168.127.2" ]
+[ "$(jq -r '.cluster.ssh.ssh_key' <<<"$include_inventory")" = /fixture/id_ed25519 ]
+[ "$(jq -r '.cluster.ssh.ssh_port' <<<"$include_inventory")" = 2222 ]
 [ "$(jq -r '.addons | join(",")' <<<"$include_inventory")" = "mcp-server,ao" ]
 [ "$(jq -r '.namespaces[] | select(.name == "aap-operator") | .ready' <<<"$include_inventory")" = "true" ]
 [ "$(jq -r '.storage.capacity_planning.actual_vm_disk_gib' <<<"$include_inventory")" = 50 ]
@@ -144,6 +156,17 @@ crc() {
 }
 crc_error_storage=$(_aap_demo_inventory_storage "" '{"disk_gib":{}}')
 [ "$(jq -r '.configured_crc_disk_gib' <<<"$crc_error_storage")" = null ]
+unavailable_access=$(_aap_demo_inventory_crc_access 2>"$TEST_DIR/crc-warning")
+[ "$(jq -r '.crc_ip' <<<"$unavailable_access")" = null ]
+grep -q 'CRC IP unavailable' "$TEST_DIR/crc-warning"
+
+crc() {
+  case "$*" in
+    ip) printf '192.168.127.2\n' ;;
+    "config get disk-size") printf 'disk-size : 120\n' ;;
+    *) return 1 ;;
+  esac
+}
 
 aap_demo_generate_system_info include markdown "$AAP_DEMO_SYSTEM_INFO_FILE" >/dev/null
 
@@ -155,6 +178,9 @@ grep -q 'ao.example.test' "$report"
 grep -q 'aap-password' "$report"
 grep -q 'ao-password' "$report"
 grep -q 'llm-key-fixture' "$report"
+grep -q 'crc_ip: `192.168.127.2`' "$report"
+grep -q 'aap-demo ssh' "$report"
+grep -q '/fixture/id_ed25519' "$report"
 grep -q '10.43.1.2' "$report"
 grep -q '10.42.0.3' "$report"
 grep -q '80/TCP -> 8000' "$report"
