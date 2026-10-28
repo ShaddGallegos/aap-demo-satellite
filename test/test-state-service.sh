@@ -4,6 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_DIR=$(mktemp -d)
 trap 'rm -rf "$TEST_DIR"' EXIT
+export XDG_CONFIG_HOME="$TEST_DIR/desktop-config"
 source "$REPO_ROOT/scripts/aap-demo-state.sh"
 STATE_USER="$(id -un)"
 STATE_UID="$(id -u)"
@@ -232,36 +233,55 @@ grep -q 'Usage: aap-demo service' <<<"$output"
 echo "PASS: nested service actions and start/restart/stop route through systemd"
 
 (
+  LOG="$TEST_DIR/activate-log"
+  systemctl() {
+    echo "$*" >>"$LOG"
+    [ "$1" != "${FAIL_ACTION:-}" ]
+  }
+  state_activate
+  test "$(cat "$LOG")" = "$(printf 'daemon-reload\nrestart aap-demo.service\nenable aap-demo.service\n')"
+  : >"$LOG"
+  if FAIL_ACTION=restart state_activate >"$TEST_DIR/activate-output" 2>&1; then
+    echo "FAIL: a failed recovery installation was enabled" >&2
+    exit 1
+  fi
+  test "$(cat "$LOG")" = "$(printf 'daemon-reload\nrestart aap-demo.service\ndisable aap-demo.service\n')"
+  grep -q 'Recovery validation failed' "$TEST_DIR/activate-output"
+  : >"$LOG"
+  if FAIL_ACTION=daemon-reload state_activate; then exit 1; fi
+  test "$(cat "$LOG")" = daemon-reload
+  : >"$LOG"
+  if FAIL_ACTION=enable state_activate; then exit 1; fi
+  test "$(cat "$LOG")" = "$(printf 'daemon-reload\nrestart aap-demo.service\nenable aap-demo.service\n')"
+)
+echo "PASS: reinstall restarts and validates recovery before enabling boot startup; failures propagate"
+
+(
   LOG="$TEST_DIR/boot-log"
   state_stop() { echo stop >>"$LOG"; }
   state_save() { echo save >>"$LOG"; }
   state_restore() { echo restore >>"$LOG"; }
   state_user() { echo "user $*" >>"$LOG"; }
   state_cli() { echo "cli $*" >>"$LOG"; }
+  printf 'latest-live-configuration\n' >"$STATE_HOME/.aap-demo/config"
+  printf 'latest-live-vault\n' >"$STATE_HOME/.ansible/conf/env.yml"
   state_boot
-  test "$(cat "$LOG")" = "$(printf 'stop\nrestore\nuser systemctl --user restart crc-daemon.service\ncli start\n')"
+  expected=$(printf 'user systemctl --user restart crc-daemon.service\ncli start\ncli dashboard --no-open\n')
+  test "$(cat "$LOG")" = "$expected"
+  grep -qx 'latest-live-configuration' "$STATE_HOME/.aap-demo/config"
+  grep -qx 'latest-live-vault' "$STATE_HOME/.ansible/conf/env.yml"
   : >"$LOG"
   STATE_ROOT="$TEST_DIR/no-backup"
   state_boot
-  test "$(cat "$LOG")" = "$(printf 'stop\nsave\nrestore\nuser systemctl --user restart crc-daemon.service\ncli start\n')"
+  test "$(cat "$LOG")" = "$expected"
   : >"$LOG"
   state_shutdown
-  test "$(cat "$LOG")" = "$(printf 'stop\nsave\n')"
-  state_restore() { return 1; }
-  : >"$LOG"
-  if state_boot; then
-    echo "FAIL: boot ignored restore failure" >&2
-    exit 1
-  fi
   test "$(cat "$LOG")" = "$(printf 'stop\nsave\n')"
   mkdir -p "$STATE_ROOT"
   ln -s missing-state "$STATE_ROOT/latest"
   : >"$LOG"
-  if state_boot; then
-    echo "FAIL: dangling latest state pointer was accepted" >&2
-    exit 1
-  fi
-  test "$(cat "$LOG")" = stop
+  state_boot
+  test "$(cat "$LOG")" = "$expected"
   state_save() { echo save >>"$LOG"; return 1; }
   : >"$LOG"
   if state_shutdown; then
@@ -270,22 +290,31 @@ echo "PASS: nested service actions and start/restart/stop route through systemd"
   fi
   test -f "$STATE_ROOT/.shutdown-pending"
   : >"$LOG"
-  if state_boot >"$TEST_DIR/pending-output" 2>&1; then
-    echo "FAIL: failed shutdown was followed by rollback of newer local state" >&2
-    exit 1
-  fi
-  test ! -s "$LOG"
-  grep -q 'shutdown backup failed' "$TEST_DIR/pending-output"
+  state_boot >"$TEST_DIR/pending-output" 2>&1
+  test "$(cat "$LOG")" = "$expected"
+  test ! -e "$STATE_ROOT/.shutdown-pending"
+  grep -q 'last shutdown backup did not complete' "$TEST_DIR/pending-output"
+  grep -qx 'latest-live-configuration' "$STATE_HOME/.aap-demo/config"
   printf 'previous-host-boot\n' >"$STATE_ROOT/.shutdown-pending"
   : >"$LOG"
-  if state_boot; then
-    echo "FAIL: mock restore failure was ignored after a host reboot" >&2
-    exit 1
-  fi
-  test "$(cat "$LOG")" = stop
+  state_boot >"$TEST_DIR/pending-output" 2>&1
+  test "$(cat "$LOG")" = "$expected"
+  test ! -e "$STATE_ROOT/.shutdown-pending"
+  state_cli() { echo "cli $*" >>"$LOG"; [ "$1" != start ]; }
+  : >"$LOG"
+  if state_boot; then echo "FAIL: CRC startup failure was ignored" >&2; exit 1; fi
+  test "$(cat "$LOG")" = "$(printf 'user systemctl --user restart crc-daemon.service\ncli start\n')"
+  state_cli() { echo "cli $*" >>"$LOG"; [ "$1" != dashboard ]; }
+  : >"$LOG"
+  if state_boot; then echo "FAIL: dashboard startup failure was ignored" >&2; exit 1; fi
+  test "$(cat "$LOG")" = "$expected"
+  state_user() { echo "user $*" >>"$LOG"; return 1; }
+  : >"$LOG"
+  if state_boot; then echo "FAIL: CRC daemon failure was ignored" >&2; exit 1; fi
+  test "$(cat "$LOG")" = "user systemctl --user restart crc-daemon.service"
 )
-echo "PASS: boot restores before starting, first boot captures a baseline, and shutdown saves only stopped state"
-echo "PASS: a failed shutdown checkpoint prevents same-boot restart from rolling back newer disks"
+echo "PASS: boot preserves latest live state without copying old checkpoints; shutdown saves only stopped state"
+echo "PASS: incomplete or stale backups cannot cause automatic rollback; startup failures propagate"
 
 (
   AAP_DEMO_LOCK_DIR="$TEST_DIR/service-operation.lock"

@@ -227,6 +227,7 @@ _maintenance_remove_state_service() {
       rm -rf -- "$mac_root"
       ;;
     Linux)
+      rm -f -- "${XDG_CONFIG_HOME:-$HOME/.config}/autostart/aap-demo-dashboard.desktop" || return 1
       [ "$(basename "$system_config")" = aap-demo ] \
         && [ "$(basename "$(dirname "$system_backups")")" = aap-demo ] || {
         echo "ERROR: Refusing unsafe Linux state-service paths" >&2

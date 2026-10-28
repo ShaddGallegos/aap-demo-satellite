@@ -283,7 +283,7 @@ state_config_write() {
 state_unit() {
   cat <<EOF
 [Unit]
-Description=AAP demo shutdown backup and boot restore ($STATE_USER)
+Description=AAP demo shutdown backup and latest-state boot recovery ($STATE_USER)
 Wants=network-online.target
 Requires=user@${STATE_UID}.service
 After=network-online.target user@${STATE_UID}.service libvirtd.service virtqemud.service
@@ -303,6 +303,17 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
+}
+
+state_activate() {
+  systemctl daemon-reload || return 1
+  # Restart also validates upgrades of an already-active installation.
+  if ! systemctl restart aap-demo.service; then
+    systemctl disable aap-demo.service || return 1
+    state_error "Recovery validation failed; automatic recovery is disabled"
+    return 1
+  fi
+  systemctl enable aap-demo.service
 }
 
 state_install() {
@@ -336,10 +347,6 @@ state_install() {
       return 1
     fi
   fi
-  if [ -e /etc/aap-demo/state.conf ] && systemctl is-active --quiet aap-demo.service; then
-    state_error "Stop the existing service before reinstalling; use 'service retention N' to change retention"
-    return 1
-  fi
   install -d -m 755 /etc/aap-demo /usr/local/libexec
   install -m 755 "$STATE_REPO/scripts/aap-demo-state.sh" /usr/local/libexec/aap-demo-state
   install -m 644 "$STATE_REPO/includes/operation-lock.sh" /usr/local/libexec/aap-demo-operation-lock.sh
@@ -349,34 +356,19 @@ state_install() {
   state_unit >/etc/systemd/system/aap-demo.service
   systemd-analyze verify /etc/systemd/system/aap-demo.service
   loginctl enable-linger "$STATE_USER"
-  systemctl daemon-reload
-  if ! systemctl start aap-demo.service; then
-    systemctl disable aap-demo.service
-    state_error "Recovery validation failed; automatic recovery is disabled"
-    return 1
-  fi
-  systemctl enable aap-demo.service
+  state_activate
 }
 
 state_boot() {
-  local boot_id
-  boot_id=$(cat /proc/sys/kernel/random/boot_id) || return 1
-  if [ -f "$STATE_ROOT/.shutdown-pending" ] \
-    && [ "$(cat "$STATE_ROOT/.shutdown-pending")" = "$boot_id" ]; then
-    state_error "The shutdown backup failed in this boot; refusing to roll back newer disks. Resolve the error and run 'aap-demo service backup'"
-    return 1
+  if [ -f "$STATE_ROOT/.shutdown-pending" ]; then
+    echo "WARNING: The last shutdown backup did not complete; preserving the current disks and configuration, not restoring an older checkpoint." >&2
   fi
-  if [ ! -e "$STATE_ROOT/latest" ] && [ ! -L "$STATE_ROOT/latest" ]; then
-    echo "No completed state yet; capturing the existing demo before first boot restore."
-    state_stop || return 1
-    state_save || return 1
-  else
-    state_stop || return 1
-  fi
-  state_restore || return 1
-  # The daemon can cache authentication/configuration from newer live files.
+  # Live persistent state is authoritative, even after an interrupted shutdown.
+  # Automatic checkpoint rollback would discard changes made since that copy.
+  echo "Starting the latest persistent CRC and demo state in place."
   state_user systemctl --user restart crc-daemon.service || return 1
   state_cli start || return 1
+  state_cli dashboard --no-open || return 1
   rm -f "$STATE_ROOT/.shutdown-pending"
 }
 

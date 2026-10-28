@@ -1,5 +1,30 @@
 #!/usr/bin/env bash
 
+aap_demo_dashboard_autostart_install() {
+  local launcher_args="${1:-}"
+  local directory="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
+  local launcher="${SCRIPT_DIR}/scripts/aap-demo-dashboard-login.sh"
+  mkdir -p "$directory" || return 1
+  # Escape Desktop Entry quoted arguments, including literal field-code markers.
+  launcher="${launcher//\\/\\\\}"
+  launcher="${launcher//\"/\\\"}"
+  launcher="${launcher//\`/\\\`}"
+  launcher="${launcher//\$/\\\$}"
+  launcher="${launcher//%/%%}"
+  cat >"$directory/aap-demo-dashboard.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=AAP Demo Dashboard
+Comment=Open the local dashboard when AAP demo boot recovery is enabled
+Exec=bash "$launcher"${launcher_args:+ $launcher_args}
+Terminal=false
+EOF
+}
+
+aap_demo_dashboard_autostart_remove() {
+  rm -f -- "${XDG_CONFIG_HOME:-$HOME/.config}/autostart/aap-demo-dashboard.desktop"
+}
+
 aap_demo_service_managed() {
   if [ "$(uname -s)" = Darwin ]; then
     [ "${AAP_DEMO_SERVICE_INTERNAL:-0}" != 1 ] \
@@ -74,7 +99,11 @@ cmd_service() {
         return 1
       fi
       sudo bash "${SCRIPT_DIR}/scripts/aap-demo-state.sh" install "$(id -un)" \
-        "$HOME" "$SCRIPT_DIR" "$keep" "$force_stop" "$stop_timeout"
+        "$HOME" "$SCRIPT_DIR" "$keep" "$force_stop" "$stop_timeout" || return 1
+      aap_demo_dashboard_autostart_install || {
+        _err "Boot recovery is installed, but dashboard desktop autostart could not be installed"
+        return 1
+      }
       ;;
     retention)
       [ "$#" -eq 1 ] || { _err "Usage: aap-demo service retention N"; return 1; }
@@ -96,7 +125,8 @@ cmd_service() {
       fi
       ;;
     disable)
-      sudo systemctl disable --now aap-demo.service
+      sudo systemctl disable --now aap-demo.service || return 1
+      aap_demo_dashboard_autostart_remove
       ;;
     *)
       _err "Usage: aap-demo service {install [--keep N]|retention N|status|backups|backup|disable}"
