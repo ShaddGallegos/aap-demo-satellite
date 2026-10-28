@@ -246,9 +246,12 @@ Credentials: hidden (run 'aap-demo status --show-secrets' in a terminal to revea
 
 Enabled Addons:
 ---------------
-  console         https://console.apps.127.0.0.1.nip.io
-  registry        https://registry.apps.127.0.0.1.nip.io
+  mcp-server      https://aap-mcp-aap-operator.apps.127.0.0.1.nip.io/mcp
 ```
+
+On the OpenShift preset (`CRC_PRESET=openshift`), routes use
+`*.apps-crc.testing` and the full OpenShift web console is available via
+`aap-demo console`.
 
 ### Self-Service Portal (AAP 2.7)
 

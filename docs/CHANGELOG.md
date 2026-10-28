@@ -19,6 +19,83 @@ Current comparison point:
 - The earlier cumulative file/line counts predate these Fleet changes and are
   omitted rather than presented as current totals.
 
+### 43. Modularize preset detection and dashboard/console handlers
+
+`includes/preset.sh` is now the single source of truth for CRC preset
+resolution (`aap_demo_detect_crc_preset`: env var → `~/.aap-demo/config` →
+`crc config get preset` → `microshift` default) and for preset-derived domain
+knowledge: `aap_demo_route_domain` (`apps-crc.testing` on OpenShift,
+`apps.127.0.0.1.nip.io` on MicroShift) and
+`aap_demo_microshift_kubeconfig_vm_path`. The duplicate detector in
+`aap-demo.sh` was removed and `_detect_crc_preset` in `includes/infra-crc.sh`
+delegates to the canonical helper. `aap-demo.sh`, `includes/crc-create.sh`,
+`includes/addon-wire.sh`, and `includes/infra-crc.sh` consume the helpers
+instead of hardcoding domains and VM paths.
+
+`cmd_dashboard`, `cmd_console`, `_aap_demo_auto_console`, and
+`_aap_demo_auto_dashboard` moved from `aap-demo.sh` into the new
+`includes/cmd-dashboard.sh` module (double-source guarded), leaving the entry
+point closer to parse-and-dispatch only.
+
+**Validation:** `bash -n` and `shellcheck --severity=warning` clean on all
+touched files; test-cli-parsing, test-full-demo, test-state-service,
+test-dashboard-autostart, test-ovn-readiness, test-tier-select,
+test-crc-create-stability, test-crc-storage, test-crc-pull-secret,
+test-crc-daemon, test-crc-version-check, and test-dashboard.py all pass;
+`aap-demo console --no-open` and `aap-demo dashboard --no-open` verified live
+against the running OpenShift-preset cluster.
+
+### 42. Add hardware-aware SNO/MicroShift tier selection
+
+Added `scripts/aap-demo-tier-select.sh`, which inspects host vCPUs, RAM, and
+root disk space and deploys Single Node OpenShift (`CRC_PRESET=openshift`,
+>= 8 vCPUs / 16 GB RAM / 100 GB disk) or MicroShift (>= 2 vCPUs / 2 GB RAM /
+10 GB disk). When both tiers are supported it shows an interactive menu with
+specs, footprint, and UI availability; otherwise it falls back to MicroShift
+with a warning or exits 1 listing the missing prerequisites. Supports
+`--tier sno|microshift`, `--yes`, and `--dry-run`, color-coded output, and
+distinct exit codes (0 success, 1 insufficient resources, 2 invalid input,
+3 deploy failure).
+
+**Validation:** `test/test-tier-select.sh` covers menu choices, invalid-input
+retry, forced tiers, exact-minimum boundaries, fallback warning,
+insufficient-resource error text, and dry-run; shellcheck clean; real dry-run
+on a 16 vCPU / 125 GB host selects SNO.
+
+### 41. Support the OpenShift preset with web console
+
+`CRC_PRESET=openshift` is now an opt-in single-node OpenShift tier.
+`includes/crc-create.sh` selects and persists the preset, uses the
+CRC-generated kubeconfig and `apps-crc.testing` domain on OpenShift, and skips
+MicroShift-only steps (nip.io baseDomain rewrite, CoreDNS patch,
+metrics-server, inotify sysctls). New `aap-demo console [--no-open]` command
+prints/opens the OpenShift web console and is auto-opened after
+create/start/restart/full-demo on the OpenShift preset
+(`AAP_DEMO_CONSOLE_AUTOOPEN=false` disables). `_wait_for_ovn_ready` handles
+OpenShift's `ovnkube-control-plane` topology (no `ovnkube-master` daemonset).
+ADR-020 is updated to partially accepted (opt-in only).
+
+**Validation:** live OpenShift-preset cluster created and AAP operator CSV
+reached Succeeded; `test/test-ovn-readiness.sh` covers both OVN topologies;
+`aap-demo console --no-open` prints the console URL and masked credentials.
+
+### 40. Restore latest CRC state on boot and auto-open the dashboard
+
+The Linux boot service now resumes the latest CRC disks, settings, credentials
+and demo configuration in place at boot instead of restoring an older
+checkpoint: `state_boot` restarts the CRC daemon, starts the cluster and the
+dashboard HTTP server before login, and warns about (then clears) a stale
+shutdown-pending marker. The browser opens at graphical login via
+`~/.config/autostart/aap-demo-dashboard.desktop`, installed on the first
+create/start/restart. `create --full-demo` installs boot recovery and fails if
+recovery installation or dashboard startup fails. Windows gains a native
+dashboard command, `status --json`, and dashboard auto-open after login-time
+state restore; pre-login recovery remains Linux-only.
+
+**Validation:** test-state-service, test-dashboard-autostart, test-full-demo,
+test-windows-platform (292 checks), test-windows-dashboard, and
+test-dashboard.py pass.
+
 ### 39. Gate CI on clean Python dependencies and core smoke tests
 
 Added a gating `python-cli-smoke` job to the existing lint workflow. It sets

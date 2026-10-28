@@ -29,14 +29,18 @@ be added without rewriting the CLI.
 
 ### CRC presets
 
-During `aap-demo create`, users choose:
+The preset is selected with the `CRC_PRESET` environment variable (or an
+existing `CRC_PRESET` entry in `~/.aap-demo/config`):
 
 | Preset | Use when |
 |--------|----------|
 | **microshift** (default) | Day-to-day AAP dev; fastest startup; ~16 GB RAM |
-| **openshift** | DevSpaces, OperatorHub, full OCP operator ecosystem |
+| **openshift** | Full single-node OpenShift with the web console (`aap-demo console`) |
 
-Selection persists as `CRC_PRESET` in `~/.aap-demo/config`.
+Selection persists as `CRC_PRESET` in `~/.aap-demo/config`. Preset resolution
+lives in `includes/preset.sh` (`aap_demo_detect_crc_preset`), which is the
+single source of truth for all callers. `scripts/aap-demo-tier-select.sh`
+automates the choice from host hardware.
 
 ### Resource defaults
 
