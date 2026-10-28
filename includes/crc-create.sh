@@ -737,9 +737,10 @@ fi
 
 # ---------------------------------------------------------------------------
 # Create nfs-local-rwx StorageClass (in-cluster NFS server for RWX volumes)
-# Backing PVC uses topolvm-provisioner. NFS eliminates UID ownership issues
-# that the CSI hostpath provisioner causes for non-root pods (postgres, hub,
-# redis).
+# Backing PVC uses the cluster default StorageClass (topolvm-provisioner on
+# MicroShift, crc-csi-hostpath-provisioner on the OpenShift preset). NFS
+# eliminates UID ownership issues that the CSI hostpath provisioner causes
+# for non-root pods (postgres, hub, redis).
 # ---------------------------------------------------------------------------
 if kubectl get sc nfs-local-rwx &>/dev/null; then
   echo "  nfs-local-rwx StorageClass already exists"
@@ -752,7 +753,11 @@ else
   # Resolve default StorageClass for NFS backing PVC
   DEFAULT_SC=$(kubectl get sc -o jsonpath='{.items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")].metadata.name}' 2>/dev/null | awk '{print $1}')
   if [ -z "$DEFAULT_SC" ]; then
-    DEFAULT_SC="topolvm-provisioner"
+    if [ "$CURRENT_PRESET" = "openshift" ]; then
+      DEFAULT_SC="crc-csi-hostpath-provisioner"
+    else
+      DEFAULT_SC="topolvm-provisioner"
+    fi
   fi
   sed "s/__DEFAULT_SC__/${DEFAULT_SC}/g" "${SCRIPT_DIR}/config/manifests/nfs-server.yaml" | kubectl apply -f -
   echo "  Waiting for NFS server..."
