@@ -38,6 +38,11 @@ file_mode() {
 curl() {
   local offline_token
   offline_token=$(cat)
+  case "${SSO_TEST_MODE:-normal}" in
+    network) return 7 ;;
+    unavailable) printf '{"error":"temporarily_unavailable"}\n503'; return ;;
+    malformed) printf '{}\n200'; return ;;
+  esac
 
   if [ "$offline_token" = "valid-offline-token" ]; then
     printf '{"access_token":"short-lived-access-token"}\n200'
@@ -95,6 +100,29 @@ if [ "$(fleet_redhat_auth status)" = "Red Hat Customer Portal authentication: va
   echo "✓ validates_stored_token_without_prompt"
 else
   fail "validates_stored_token_without_prompt"
+fi
+
+for mode in network unavailable malformed; do
+  if SSO_TEST_MODE="$mode" fleet_redhat_access_token true >"$TEST_DIR/result" 2>"$TEST_DIR/error"; then
+    fail "rejects_$mode"
+  elif [ "$?" -ne 2 ]; then
+    fail "distinguishes_${mode}_from_invalid_token"
+  elif grep -q 'new token is required' "$TEST_DIR/error"; then
+    fail "does_not_replace_token_on_$mode"
+  elif [ "$(aap_demo_vault_get "$FLEET_REDHAT_SECRET_KEY")" != valid-offline-token ]; then
+    fail "preserves_token_on_$mode"
+  else
+    echo "✓ preserves_token_and_reports_$mode"
+  fi
+done
+
+if _fleet_redhat_exchange_token expired-offline-token >"$TEST_DIR/result" 2>"$TEST_DIR/error"; then
+  fail "rejects_invalid_grant"
+elif grep -q 'HTTP 400, invalid_grant' "$TEST_DIR/error" \
+  && ! grep -q 'expired-offline-token' "$TEST_DIR/error"; then
+  echo "✓ explains_rejected_token_without_exposing_it"
+else
+  fail "explains_rejected_token_without_exposing_it"
 fi
 
 aap_demo_vault_set "$FLEET_REDHAT_SECRET_KEY" "expired-offline-token"

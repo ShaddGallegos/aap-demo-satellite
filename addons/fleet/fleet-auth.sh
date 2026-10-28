@@ -39,7 +39,11 @@ _fleet_redhat_prompt_offline_token() {
   local token
   _fleet_redhat_open_token_page >"$AAP_DEMO_SECRET_PROMPT_OUTPUT"
   printf "Red Hat Customer Portal offline token: " >"$AAP_DEMO_SECRET_PROMPT_OUTPUT"
-  IFS= read -r -s token <"$AAP_DEMO_SECRET_PROMPT_DEVICE"
+  if ! IFS= read -r -s token <"$AAP_DEMO_SECRET_PROMPT_DEVICE"; then
+    printf "\n" >"$AAP_DEMO_SECRET_PROMPT_OUTPUT"
+    _err "Could not read the Red Hat offline token; retry in an interactive terminal"
+    return 1
+  fi
   printf "\n" >"$AAP_DEMO_SECRET_PROMPT_OUTPUT"
   if [ -z "$token" ]; then
     _err "Red Hat offline token must not be empty"
@@ -133,6 +137,7 @@ _fleet_redhat_exchange_token() {
   local offline_token="$1"
   local response
   response=$(printf '%s' "$offline_token" | curl --silent --show-error \
+    --connect-timeout 10 --max-time 30 \
     --write-out '\n%{http_code}' \
     --request POST \
     --data-urlencode "grant_type=refresh_token" \
@@ -140,14 +145,28 @@ _fleet_redhat_exchange_token() {
     --data-urlencode "refresh_token@-" \
     "$FLEET_REDHAT_TOKEN_URL") || {
       _err "Unable to contact Red Hat SSO"
-      return 1
+      return 2
     }
 
   local http_code="${response##*$'\n'}"
-  if [ "$http_code" != "200" ]; then
-    return 1
-  fi
   response="${response%$'\n'*}"
+  if [ "$http_code" != "200" ]; then
+    local error_code
+    error_code=$(python3 -c '
+import json, sys
+try:
+    value = json.load(sys.stdin).get("error", "")
+except (ValueError, AttributeError):
+    value = ""
+sys.stdout.write(value if isinstance(value, str) else "")
+' <<<"$response") || return 2
+    if [ "$http_code" = "400" ] && [ "$error_code" = invalid_grant ]; then
+      _err "Red Hat SSO rejected the offline token (HTTP 400, invalid_grant). Generate a new Customer Portal token at $FLEET_REDHAT_TOKEN_PAGE; do not use an Automation Hub token."
+      return 1
+    fi
+    _err "Red Hat SSO token exchange failed (HTTP $http_code); stored credentials have not been replaced"
+    return 2
+  fi
 
   local access_token
   access_token=$(python3 -c '
@@ -158,7 +177,8 @@ if not value:
     raise SystemExit(1)
 sys.stdout.write(value)
 ' <<<"$response") || {
-    return 1
+    _err "Red Hat SSO returned an invalid access-token response"
+    return 2
   }
   printf '%s' "$access_token"
 }
@@ -173,6 +193,9 @@ fleet_redhat_access_token() {
     if access_token=$(_fleet_redhat_exchange_token "$offline_token"); then
       printf '%s' "$access_token"
       return 0
+    else
+      local exchange_status=$?
+      [ "$exchange_status" -eq 1 ] || return "$exchange_status"
     fi
   fi
 
@@ -218,7 +241,7 @@ fleet_redhat_auth() {
         unset access_token
         echo "Red Hat Customer Portal authentication: valid"
       else
-        echo "Red Hat Customer Portal authentication: expired or invalid"
+        echo "Red Hat Customer Portal authentication: validation failed (see error above)"
         return 1
       fi
       ;;
