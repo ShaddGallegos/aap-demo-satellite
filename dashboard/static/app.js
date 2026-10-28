@@ -188,7 +188,9 @@ function renderAddons(addons) {
         ? `VM allowance: ${estimate.vm_gib ?? 0} GiB`
         : `Projected recommendation: ${addon.projected_vm_disk_gib ?? "?"} GiB` +
           (estimate.host_gib ? ` · Host-only: ${estimate.host_gib} GiB` : "");
-      const button = addon.enabled
+      const button = addon.supported === false
+        ? '<button class="button" type="button" disabled>Unavailable on Windows</button>'
+        : addon.enabled
         ? `<button class="button danger" type="button" data-action="disable" data-addon="${addon.id}" ${operationRunning ? "disabled" : ""}>Disable</button>`
         : `<button class="button primary" type="button" data-action="enable" data-addon="${addon.id}" ${operationRunning ? "disabled" : ""}>Enable</button>`;
       return `

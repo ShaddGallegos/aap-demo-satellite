@@ -94,6 +94,53 @@ class DashboardUnitTests(unittest.TestCase):
         self.catalog = dashboard.load_catalog(REPO_ROOT)
         self.addons = {addon["id"]: addon for addon in self.catalog["addons"]}
 
+    def test_windows_cli_uses_native_powershell_with_separate_arguments(self) -> None:
+        app = dashboard.DashboardApp(REPO_ROOT, 0)
+        app.repo_root = REPO_ROOT / "checkout with spaces"
+        with patch.object(dashboard.sys, "platform", "win32"), \
+                patch.object(dashboard.subprocess, "run") as run:
+            app.run_cli("status", "--json")
+            command = run.call_args.args[0]
+            self.assertEqual(command, [
+                "powershell.exe", "-NoProfile", "-NonInteractive",
+                "-ExecutionPolicy", "Bypass", "-File",
+                str(app.repo_root / "powershell/aap-demo.ps1"), "status", "--json",
+            ])
+            self.assertEqual(run.call_args.kwargs["encoding"], "utf-8")
+            self.assertEqual(run.call_args.kwargs["env"]["AAP_DEMO_DASHBOARD_COMMAND"], "1")
+            self.assertNotIn("aap-demo.sh", " ".join(command))
+
+    def test_windows_inventory_marks_unsupported_addons_and_rejects_operations(self) -> None:
+        app = dashboard.DashboardApp(REPO_ROOT, 0)
+        inventory = fixture_inventory()
+        inventory["supported_addons"] = ["mcp-server", "portal"]
+        app.inventory = lambda: inventory
+        payload = app.status_payload()
+        addons = {addon["id"]: addon for addon in payload["addons"]}
+        self.assertTrue(addons["mcp-server"]["supported"])
+        self.assertFalse(addons["ollama"]["supported"])
+        with patch.object(dashboard.sys, "platform", "win32"), \
+                patch.object(dashboard.threading.Thread, "start") as start:
+            with self.assertRaisesRegex(RuntimeError, "not supported"):
+                app.start_operation("ollama", "enable")
+            start.assert_not_called()
+
+    def test_windows_addon_operations_use_native_powershell(self) -> None:
+        app = dashboard.DashboardApp(REPO_ROOT, 0)
+        process = subprocess.CompletedProcess([], 0)
+        with patch.object(dashboard.sys, "platform", "win32"), \
+                patch.object(dashboard.subprocess, "Popen") as popen:
+            popen.return_value.poll.return_value = 0
+            popen.return_value.stdout = iter([])
+            popen.return_value.wait.return_value = process.returncode
+            app._execute_operation("test", "mcp-server", "enable")
+            self.assertEqual(popen.call_args.args[0], [
+                "powershell.exe", "-NoProfile", "-NonInteractive",
+                "-ExecutionPolicy", "Bypass", "-File",
+                str(REPO_ROOT / "powershell/aap-demo.ps1"), "enable", "mcp-server",
+            ])
+            self.assertEqual(popen.call_args.kwargs["encoding"], "utf-8")
+
     def test_fleet_terminal_runs_fixed_ssh_command_and_cleans_up(self) -> None:
         popen = subprocess.Popen
         commands: list[list[str]] = []

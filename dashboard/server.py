@@ -284,14 +284,24 @@ class DashboardApp:
 
     def run_cli(self, *arguments: str, timeout: int = 120) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [str(self.cli), *arguments],
+            self.cli_command(*arguments),
             cwd=self.repo_root,
             env=self.command_environment(),
             capture_output=True,
             text=True,
+            encoding="utf-8" if sys.platform == "win32" else None,
             timeout=timeout,
             check=False,
         )
+
+    def cli_command(self, *arguments: str) -> list[str]:
+        if sys.platform == "win32":
+            return [
+                "powershell.exe", "-NoProfile", "-NonInteractive",
+                "-ExecutionPolicy", "Bypass", "-File",
+                str(self.repo_root / "powershell" / "aap-demo.ps1"), *arguments,
+            ]
+        return [str(self.cli), *arguments]
 
     @staticmethod
     def command_environment() -> dict[str, str]:
@@ -302,6 +312,8 @@ class DashboardApp:
                 "AAP_DEMO_NOTICE_SHOWN": "1",
             }
         )
+        if sys.platform == "win32":
+            environment["AAP_DEMO_DASHBOARD_COMMAND"] = "1"
         return environment
 
     def inventory(self) -> dict[str, Any]:
@@ -320,6 +332,10 @@ class DashboardApp:
         addons = []
         for definition in self.catalog["addons"]:
             addon = dict(definition)
+            supported = inventory.get("supported_addons")
+            addon["supported"] = supported is None or definition["id"] in supported
+            if not addon["supported"]:
+                addon["availability"] = "Not supported by native Windows PowerShell"
             addon["state"] = addon_state(definition, inventory)
             addon["enabled"] = definition["id"] in enabled
             addon["active_dependencies"] = active_dependencies(definition, inventory)
@@ -347,6 +363,8 @@ class DashboardApp:
         ]
 
     def start_operation(self, addon_id: str, action: str) -> dict[str, Any]:
+        if sys.platform == "win32" and addon_id not in self.inventory().get("supported_addons", []):
+            raise RuntimeError(f"Add-on '{addon_id}' is not supported by native Windows PowerShell")
         with self.operation.lock:
             if self.restart_requested:
                 raise RuntimeError("The dashboard is restarting")
@@ -382,12 +400,13 @@ class DashboardApp:
         output_lines: list[str] = []
         try:
             process = subprocess.Popen(
-                [str(self.cli), action, addon_id],
+                self.cli_command(action, addon_id),
                 cwd=self.repo_root,
                 env=self.command_environment(),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                encoding="utf-8" if sys.platform == "win32" else None,
                 bufsize=1,
             )
             output_queue: queue.Queue[str | None] = queue.Queue()

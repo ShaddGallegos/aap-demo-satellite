@@ -19,7 +19,8 @@ available natively (use the Bash/Linux CLI).
 
 `kubectl` is **not** required on Windows — all commands use `oc` exclusively.
 
-Optional: `python`, `jq`.
+The dashboard requires **Python 3.10+** on PATH (`python`, `python3` or `py -3`).
+Optional for other commands: `jq`.
 
 ## Install
 
@@ -66,6 +67,12 @@ aap-demo status --show-secrets # Reveal credentials interactively
 On first `create`, you are prompted to choose a CRC preset (MicroShift is
 recommended). The choice is saved to `%USERPROFILE%\.aap-demo\config`.
 
+Native `create` also registers the current-user recovery task. Hyper-V access
+and Task Scheduler are required; installation failures make `create` fail
+explicitly. To create without recovery, set
+`$env:AAP_DEMO_SKIP_BOOT_RECOVERY = 'true'` before running it.
+This does not enable native `create --full-demo` or Fleet support.
+
 After deploy, open the AAP route from `aap-demo status`. If your browser shows a
 certificate warning, trust the ingress CA from an elevated PowerShell — see
 [Ingress CA and browser TLS](#ingress-ca-and-browser-tls) below.
@@ -87,6 +94,8 @@ All commands run in PowerShell. Run `aap-demo help` for the full list.
 | `aap-demo stop`                | Stop CRC cluster (saves a cold checkpoint when the service is on)  |
 | `aap-demo restart`             | Stop and start (managed: checkpoint, restore, start)               |
 | `aap-demo service ...`         | Cold checkpoint and logon restore service (see below)              |
+| `aap-demo dashboard [--no-open]` | Start/reuse the localhost dashboard; optionally skip the browser |
+| `aap-demo status --json`       | Machine-readable dashboard inventory without secret values       |
 | `aap-demo status`              | Cluster health, namespaces, routes, and addons; secrets hidden     |
 | `aap-demo status --show-secrets` | Reveal login credentials in an interactive terminal             |
 | `aap-demo diagnose`            | Environment health checks                                          |
@@ -127,6 +136,11 @@ API is used for this; growth relies on CRC applying `disk-size` on start (not
 validated on native Windows/Hyper-V by these tests).
 
 ## State service (cold checkpoints)
+
+`aap-demo create` installs this task automatically, but does not take a checkpoint.
+After `aap-demo deploy`, save the first checkpoint with `aap-demo service backup`,
+then resume with `aap-demo start`. Save another checkpoint before every reboot
+to avoid restoring older state.
 
 The native state service saves the full **cold** OpenShift Local state and restores it
 when you sign in to Windows. It does not run at shutdown: a checkpoint is taken only by
@@ -169,6 +183,26 @@ Constraints:
 - `create`, `destroy`, `redeploy-all` and `maintenance uninstall --apply` are refused while
   the service is enabled. Run `aap-demo service disable` first.
 - Logon logs: `%LOCALAPPDATA%\aap-demo\state\logs`; the result is shown by `service status`.
+
+## Dashboard startup
+
+The dashboard starts in the background and opens your default browser after a
+successful `create`, `start` or `restart`. The recovery task also starts it
+after a successful restore and AAP readiness at sign-in. It listens only on
+`http://127.0.0.1:8765/`; set `AAP_DEMO_DASHBOARD_PORT` to change the port.
+`aap-demo dashboard --no-open` starts it without opening a browser.
+An existing dashboard for the same checkout is reused.
+
+Set `$env:AAP_DEMO_DASHBOARD_AUTOSTART = 'false'` to skip automatic dashboard
+launch for the current session. Set this as a Windows user environment variable
+to apply it to future sign-ins too. Explicit `aap-demo dashboard` still works.
+Dashboard failures show a warning and do not undo a successful cluster recovery.
+Logs are in `%USERPROFILE%\.aap-demo\dashboard.log`.
+
+The dashboard uses the native PowerShell backend on Windows, not WSL or Bash
+for cluster status. Unsupported add-ons are marked unavailable; Fleet/browser SSH
+and Linux capacity planning are not available. Supported shell-based add-ons
+still require Git for Windows Bash.
 
 ## Environment variables
 

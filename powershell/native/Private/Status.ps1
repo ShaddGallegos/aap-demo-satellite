@@ -181,6 +181,9 @@ DEPLOY:
 
 STATUS:
     status          Show cluster and AAP status without secret values
+    status --json   Dashboard inventory as JSON (no secret values)
+    dashboard [--no-open]
+                    Start/reuse the localhost dashboard (Python 3.10+ required)
     status --show-secrets
                     Reveal credentials in an interactive terminal
     version         Show aap-demo version and build timestamp

@@ -44,9 +44,15 @@ jobs:
       - name: Run isolated Windows platform tests
         shell: powershell
         run: .\test\test-windows-platform.ps1
+      - name: Run isolated Windows dashboard tests
+        shell: powershell
+        run: .\test\test-windows-dashboard.ps1
       - name: Run isolated PowerShell 7 platform tests
         shell: pwsh
         run: .\test\test-windows-platform.ps1
+      - name: Run isolated PowerShell 7 dashboard tests
+        shell: pwsh
+        run: .\test\test-windows-dashboard.ps1
 
   syntax-check:
     name: Shell Syntax Check

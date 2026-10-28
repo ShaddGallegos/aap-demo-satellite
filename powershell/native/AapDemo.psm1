@@ -28,6 +28,8 @@ $PrivateDir = Join-Path $PSScriptRoot 'Private'
 
 . (Join-Path $PrivateDir 'StateService.ps1')
 
+. (Join-Path $PrivateDir 'Dashboard.ps1')
+
 . (Join-Path $PrivateDir 'Collections.ps1')
 
 
@@ -95,6 +97,14 @@ Export-ModuleMember -Function @(
   'Invoke-AapDemoRestart'
 
   'Invoke-AapDemoService'
+
+  'Invoke-AapDemoDashboard'
+
+  'Invoke-AapDemoAutoDashboard'
+
+  'Initialize-AapDemoRecovery'
+
+  'Get-AapDemoDashboardInventory'
 
   'Enter-AapOperationLock'
 

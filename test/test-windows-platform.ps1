@@ -58,7 +58,7 @@ foreach ($f in $files) {
   if ($errors -and $errors.Count -gt 0) { Fail "parse $rel" (($errors | ForEach-Object { "$($_.Extent.StartLineNumber): $($_.Message)" }) -join '; ') } else { Pass "parse $rel" }
 }
 
-foreach ($name in @('OperationLock.ps1', 'Start.ps1', 'StateService.ps1')) {
+foreach ($name in @('OperationLock.ps1', 'Start.ps1', 'StateService.ps1', 'Dashboard.ps1')) {
   $text = [IO.File]::ReadAllText((Join-Path $Private $name))
   Assert-True "PS 5.1 syntax $name (no ?? or ?.)" (-not ($text -match '\?\?|\?\.')) 'null-coalescing operators are PowerShell 7 only'
   Assert-True "ASCII $name" (-not ($text -match '[^\x00-\x7F]')) 'non-ASCII characters break Windows PowerShell 5.1 without a BOM'
@@ -109,6 +109,7 @@ foreach ($k in @('AAP_DEMO_STATE_TEST', 'AAP_DEMO_STATE_ROOT', 'AAP_DEMO_STATE_H
 function Write-AapStep { param([string]$Message) }
 function Write-AapWarn { param([string]$Message) }
 function Write-AapErr { param([string]$Message) }
+function Invoke-AapDemoAutoDashboard { }
 
 $Script:AapDemoRepoRoot = $RepoRoot
 $Script:AapDemoConfigDir = Join-Path $TmpRoot 'config'
@@ -504,6 +505,11 @@ try {
   }
 
   Invoke-Case 'login start and disable' {
+    $Script:DashboardCalls = 0
+    function Invoke-AapDemoAutoDashboard {
+      Assert-Equal 'login dashboard after cluster readiness' 1 $Script:Fake.StartCalls
+      $Script:DashboardCalls++
+    }
     $Script:Fake.CrcStatus = 'Stopped'; $Script:Fake.VmState = 'Off'
     $Script:Fake.StartCalls = 0
     function Start-Transcript { param([string]$LiteralPath, [switch]$Force) }
@@ -513,6 +519,7 @@ try {
     $last = Read-AapStateJsonFile -Path (Get-AapStateLastLoginFile)
     Assert-Equal 'login-start result' 'success' $last.result
     Assert-Equal 'login-start started' 1 $Script:Fake.StartCalls
+    Assert-Equal 'login-start opens dashboard' 1 $Script:DashboardCalls
     Assert-True 'login-start released lock' (-not (Test-Path -LiteralPath (Join-Path $Script:AapDemoConfigDir 'operation.lock')))
 
     $Script:Fake.VmState = 'Saved'
@@ -520,6 +527,7 @@ try {
     $env:AAP_DEMO_SERVICE_INTERNAL = $null
     $last = Read-AapStateJsonFile -Path (Get-AapStateLastLoginFile)
     Assert-Equal 'login-start failure recorded' 'failed' $last.result
+    Assert-Equal 'failed restore does not open dashboard' 1 $Script:DashboardCalls
     $Script:Fake.VmState = 'Off'
 
     function Get-ScheduledTask { param([string]$TaskName) return $null }
@@ -529,6 +537,7 @@ try {
     Invoke-AapDemoService -Arguments @('login-start')
     $env:AAP_DEMO_SERVICE_INTERNAL = $null
     Assert-Equal 'disabled login-start is a no-op' 0 $Script:Fake.StartCalls
+    Assert-Equal 'disabled login does not open dashboard' 1 $Script:DashboardCalls
     Assert-Throws 'backup requires enabled service' { Invoke-AapDemoService -Arguments @('backup') } '*not enabled*'
     Assert-Throws 'unknown service command' { Invoke-AapDemoService -Arguments @('bogus') } '*Unknown service command*'
   }

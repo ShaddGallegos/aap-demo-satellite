@@ -992,6 +992,7 @@ function Invoke-AapStateLoginStart {
   try {
     $lockToken = Enter-AapOperationLock -Command 'service login-start'
     Invoke-AapStateRecoverAndStart
+    Invoke-AapDemoAutoDashboard
     Write-AapStateLastLogin -Result 'success' -Message 'Checkpoint restored (or unchanged) and AAP ready' -Log $log
   } catch {
     Write-AapStateLastLogin -Result 'failed' -Message $_.Exception.Message -Log $log
