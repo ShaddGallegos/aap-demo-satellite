@@ -132,7 +132,7 @@ _infra_crc_get_state() {
 
 _infra_crc_get_kubeconfig() {
   local dest="$1"
-  _crc_exec sudo cat /var/lib/microshift/resources/kubeadmin/kubeconfig >"$dest" 2>/dev/null \
+  _crc_exec sudo cat "$(aap_demo_microshift_kubeconfig_vm_path)" >"$dest" 2>/dev/null \
     || cp "${AAP_DEMO_KUBECONFIG:-${AAP_DEMO_DIR:-$HOME/.aap-demo}/kubeconfig.microshift}" "$dest" 2>/dev/null \
     || cp ~/.crc/machines/crc/kubeconfig "$dest" 2>/dev/null
 }

@@ -23,6 +23,8 @@ _WIRE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-${_WIRE_SCRIPT_DIR}/..}"
 # shellcheck source=aap-demo-paths.sh
 source "${_WIRE_SCRIPT_DIR}/aap-demo-paths.sh"
+# shellcheck source=preset.sh
+source "${_WIRE_SCRIPT_DIR}/preset.sh"
 # shellcheck source=ao-llm.sh
 source "${_WIRE_SCRIPT_DIR}/ao-llm.sh"
 
@@ -153,7 +155,7 @@ wire_mcp_url_for_ao() {
     printf 'https://%s/mcp' "$route"
     return 0
   fi
-  host="aap-mcp-${NAMESPACE}.apps.127.0.0.1.nip.io"
+  host="aap-mcp-${NAMESPACE}.$(aap_demo_route_domain)"
   if kubectl get route -n "$NAMESPACE" -o jsonpath='{.items[*].spec.host}' 2>/dev/null | grep -qF "$host"; then
     printf 'https://%s/mcp' "$host"
     return 0

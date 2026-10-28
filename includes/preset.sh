@@ -53,3 +53,19 @@ aap_demo_detect_crc_preset() {
   echo "microshift"
   return 0
 }
+
+# Route domain for the configured preset. MicroShift uses the nip.io baseDomain
+# aap-demo writes into the VM; full OpenShift keeps CRC's apps-crc.testing.
+aap_demo_route_domain() {
+  if [ "$(aap_demo_detect_crc_preset)" = "openshift" ]; then
+    echo "apps-crc.testing"
+  else
+    echo "apps.127.0.0.1.nip.io"
+  fi
+}
+
+# Path to the kubeadmin kubeconfig inside the CRC VM (MicroShift only; the
+# OpenShift preset uses the kubeconfig CRC writes to ~/.crc/machines/crc).
+aap_demo_microshift_kubeconfig_vm_path() {
+  echo "/var/lib/microshift/resources/kubeadmin/kubeconfig"
+}

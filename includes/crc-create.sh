@@ -629,13 +629,14 @@ fi
 # CRC starts MicroShift with crc.testing before we can write the dropin,
 # so we must wipe the data generated with the wrong domain.
 printf "${_GREEN}▸${_NC} Restarting MicroShift with nip.io domain (clean start, ~2 min)...\n"
+_ms_kubeconfig="$(aap_demo_microshift_kubeconfig_vm_path)"
 ssh -p 2222 "${CRC_SSH_OPTS[@]}" core@127.0.0.1 'sudo systemctl stop microshift 2>/dev/null; sudo rm -rf /var/lib/microshift; sudo systemctl start microshift' 2>/dev/null || true
 
 # Wait for API
 printf "${_GREEN}▸${_NC} Waiting for MicroShift API..."
 _api_ready=false
 for i in $(seq 1 60); do
-  if ssh -p 2222 "${CRC_SSH_OPTS[@]}" core@127.0.0.1 'sudo kubectl --kubeconfig /var/lib/microshift/resources/kubeadmin/kubeconfig cluster-info' &>/dev/null; then
+  if ssh -p 2222 "${CRC_SSH_OPTS[@]}" core@127.0.0.1 "sudo kubectl --kubeconfig ${_ms_kubeconfig} cluster-info" &>/dev/null; then
     echo " ready"
     _api_ready=true
     break
@@ -651,7 +652,7 @@ fi
 
 # Refresh kubeconfig
 mkdir -p "$AAP_DEMO_DIR"
-ssh -p 2222 "${CRC_SSH_OPTS[@]}" core@127.0.0.1 'sudo cat /var/lib/microshift/resources/kubeadmin/kubeconfig' >"$AAP_DEMO_KUBECONFIG" 2>/dev/null || true
+ssh -p 2222 "${CRC_SSH_OPTS[@]}" core@127.0.0.1 "sudo cat ${_ms_kubeconfig}" >"$AAP_DEMO_KUBECONFIG" 2>/dev/null || true
 chmod 600 "$AAP_DEMO_KUBECONFIG" 2>/dev/null || true
 echo "  ✓ nip.io baseDomain configured (data wiped)"
 else
@@ -695,7 +696,7 @@ mkdir -p "$AAP_DEMO_DIR"
 # Save cluster credentials under ~/.aap-demo (never touch ~/.kube/config)
 if [ ! -s "$AAP_DEMO_KUBECONFIG" ]; then
   ssh -p 2222 "${CRC_SSH_OPTS[@]}" core@127.0.0.1 \
-    'sudo cat /var/lib/microshift/resources/kubeadmin/kubeconfig' >"$AAP_DEMO_KUBECONFIG" 2>/dev/null || true
+    "sudo cat ${_ms_kubeconfig}" >"$AAP_DEMO_KUBECONFIG" 2>/dev/null || true
   chmod 600 "$AAP_DEMO_KUBECONFIG" 2>/dev/null || true
 fi
 

@@ -457,7 +457,7 @@ setup_kubeconfig() {
         if ssh -p 2222 -i "$CRC_SSH_KEY" \
           -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
           -o ConnectTimeout=2 -o BatchMode=yes \
-          core@127.0.0.1 'sudo cat /var/lib/microshift/resources/kubeadmin/kubeconfig' \
+          core@127.0.0.1 "sudo cat $(aap_demo_microshift_kubeconfig_vm_path)" \
           >"${AAP_DEMO_KUBECONFIG}.tmp" 2>/dev/null; then
           mv "${AAP_DEMO_KUBECONFIG}.tmp" "$AAP_DEMO_KUBECONFIG"
           chmod 600 "$AAP_DEMO_KUBECONFIG"
@@ -2205,7 +2205,7 @@ cmd_status() {
         ;;
       mcp-server)
         if [ "$enabled" = true ]; then
-          url="https://aap-mcp-${NAMESPACE:-aap-operator}.apps.127.0.0.1.nip.io/mcp"
+          url="https://aap-mcp-${NAMESPACE:-aap-operator}.$(aap_demo_route_domain)/mcp"
           if ! kubectl get ansiblemcpserver aap-mcp-server -n "${NAMESPACE:-aap-operator}" &>/dev/null; then
             label="not-deployed"
           fi
@@ -3223,7 +3223,7 @@ create_aap_instance() {
       kubectl apply -f "$cr_file" -n "$NAMESPACE"
     else
       # Inject route_host for nip.io domain resolution
-      awk -v host="aap-hub-${NAMESPACE}.apps.127.0.0.1.nip.io" \
+      awk -v host="aap-hub-${NAMESPACE}.$(aap_demo_route_domain)" \
         '/storage_type: file/{print; print "    route_host: " host; next} {print}' \
         "$cr_file" | kubectl apply -f - -n "$NAMESPACE"
     fi
