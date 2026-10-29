@@ -232,8 +232,13 @@ _aap_demo_inventory_api_keys() {
 }
 
 _aap_demo_inventory_ingress() {
-  local service endpoints
-  service=$(kubectl get service router-default -n openshift-ingress -o json 2>/dev/null \
+  local service endpoints router_svc
+  # MicroShift exposes router-default; the OpenShift preset exposes
+  # router-internal-default. Use whichever exists.
+  router_svc=$(kubectl get svc -n openshift-ingress -o jsonpath='{.items[*].metadata.name}' 2>/dev/null \
+    | tr ' ' '\n' | grep -E '^router-(internal-)?default$' | head -1)
+  router_svc="${router_svc:-router-default}"
+  service=$(kubectl get service "$router_svc" -n openshift-ingress -o json 2>/dev/null \
     | jq -c '{
         name: .metadata.name,
         cluster_ip: (.spec.clusterIP // null),
@@ -251,7 +256,10 @@ _aap_demo_inventory_ingress() {
             }
         ]
       }' 2>/dev/null || printf 'null')
-  endpoints=$(kubectl get endpoints router-default -n openshift-ingress -o json 2>/dev/null \
+  # kubectl prints a deprecation warning to stdout before the JSON; keep only
+  # the JSON document so jq never receives the warning text.
+  endpoints=$(kubectl get endpoints "$router_svc" -n openshift-ingress -o json 2>/dev/null \
+    | sed -n '/^{/,$p' \
     | jq -c '[
         .subsets[]?
         | .addresses[]? as $address
@@ -262,6 +270,9 @@ _aap_demo_inventory_ingress() {
             protocol: (.protocol // "TCP")
           }
       ]' 2>/dev/null || printf '[]')
+  # Never pass empty text to --argjson.
+  [ -n "$service" ] || service='null'
+  [ -n "$endpoints" ] || endpoints='[]'
   jq -cn --argjson service "$service" --argjson endpoints "$endpoints" \
     '{service: $service, endpoints: $endpoints}'
 }
@@ -289,6 +300,13 @@ _aap_demo_inventory_vm() {
   ' 2>/dev/null || true)
   IFS=$'\t' read -r guest_os openshift cpus memory_used memory_total memory_available load disk \
     disk_total_gib disk_used_gib disk_free_gib <<<"$vm_info"
+  # On the OpenShift preset the VM has no microshift binary, so the version
+  # field comes back empty and shifts every later field left. Fall back to the
+  # host-side `crc version` OpenShift version.
+  if [ -z "$openshift" ] || [ "$openshift" = "unknown" ]; then
+    openshift=$(crc version 2>/dev/null | awk -F': *' '/^OpenShift version:/ {print $2}' || true)
+    openshift="${openshift:-unknown}"
+  fi
   jq -cn \
     --arg guest_os "${guest_os:-unknown}" \
     --arg openshift "${openshift:-unknown}" \
@@ -313,9 +331,9 @@ _aap_demo_inventory_vm() {
       load: $load,
       disk: $disk,
       disk_gib: {
-        size: ($disk_total_gib | tonumber?),
-        used: ($disk_used_gib | tonumber?),
-        free: ($disk_free_gib | tonumber?)
+        size: (if $disk_total_gib == "" then null else ($disk_total_gib | tonumber?) end),
+        used: (if $disk_used_gib == "" then null else ($disk_used_gib | tonumber?) end),
+        free: (if $disk_free_gib == "" then null else ($disk_free_gib | tonumber?) end)
       }
     }'
 }
