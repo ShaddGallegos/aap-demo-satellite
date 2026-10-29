@@ -56,9 +56,12 @@ fleet_reconcile_stack() {
       and (.status.addresses | type == "array"))' <<<"$nodes" >/dev/null; then
     _err "Invalid cluster machine discovery response"; return 1
   fi
+  # Some routes (e.g. the OpenShift preset's openshift-ingress-canary) have no
+  # spec.host. Require a valid namespace on every route, but only require a
+  # host on routes that carry one.
   if ! jq -e '(.items | type == "array")
     and all(.items[]; (.metadata.namespace | type == "string")
-      and (.spec.host | type == "string" and length > 0))' <<<"$routes" >/dev/null; then
+      and ((.spec.host // "") | type == "string"))' <<<"$routes" >/dev/null; then
     _err "Invalid route discovery response"; return 1
   fi
   stack_hosts="# Fleet names use the host gateway; SSH config selects forwarded ports."
