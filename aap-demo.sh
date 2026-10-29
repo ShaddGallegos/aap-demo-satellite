@@ -2645,7 +2645,12 @@ cmd_full_demo() {
   cmd_fleet start || return 1
   cmd_fleet register || return 1
 
-  cmd_enable product-demos || return 1
+  # The OpenShift demo domain provisions Windows/CNV VMs (BSOD Recovery,
+  # WinPE, CNV) that cannot run on the all-Linux Fleet nodes, and its
+  # upstream workflow content fails on this environment. Skip it by default;
+  # override with PRODUCT_DEMOS_DOMAINS to include it.
+  PRODUCT_DEMOS_DOMAINS="${PRODUCT_DEMOS_DOMAINS:-linux windows network cloud}" \
+    cmd_enable product-demos || return 1
   cmd_wire || return 1
   aap_demo_generate_system_info || return 1
 
