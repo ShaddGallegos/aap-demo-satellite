@@ -145,7 +145,7 @@
       "id": "satellite-manifest",
       "name": "Satellite Build and Configure",
       "category": "Infrastructure",
-      "description": "Create and download a Red Hat Satellite subscription manifest via the RHSM API, ready for the satellite-lab content stage.",
+      "description": "Build a Red Hat Satellite 6 demo lab on this host: generate the subscription manifest, provision the Satellite VM, and configure content, provisioning, and AAP integration via the satellite-lab workflow.",
       "dependencies": [],
       "health": {
         "type": "configured"
