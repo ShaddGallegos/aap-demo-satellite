@@ -261,13 +261,41 @@ echo "PASS: reinstall restarts and validates recovery before enabling boot start
   state_stop() { echo stop >>"$LOG"; }
   state_save() { echo save >>"$LOG"; }
   state_restore() { echo restore >>"$LOG"; }
-  state_user() { echo "user $*" >>"$LOG"; }
+  # Default: VM is stopped, so the daemon restart runs. The status probe is
+  # consumed from the log; reply "Stopped" without logging it as a user action.
+  state_user() {
+    if [ "$1" = crc ] && [ "$2" = status ]; then
+      printf 'CRC VM:                  Stopped\n'
+      return 0
+    fi
+    echo "user $*" >>"$LOG"
+  }
   state_cli() { echo "cli $*" >>"$LOG"; }
   printf 'latest-live-configuration\n' >"$STATE_HOME/.aap-demo/config"
   printf 'latest-live-vault\n' >"$STATE_HOME/.ansible/conf/env.yml"
   state_boot
   expected=$(printf 'user systemctl --user restart crc-daemon.service\ncli start\ncli dashboard --no-open\n')
   test "$(cat "$LOG")" = "$expected"
+  # When the VM is already running, the daemon restart is skipped so the vsock
+  # SSH forward is not dropped.
+  state_user() {
+    if [ "$1" = crc ] && [ "$2" = status ]; then
+      printf 'CRC VM:                  Running\n'
+      return 0
+    fi
+    echo "user $*" >>"$LOG"
+  }
+  : >"$LOG"
+  state_boot
+  test "$(cat "$LOG")" = "$(printf 'cli start\ncli dashboard --no-open\n')"
+  state_user() {
+    if [ "$1" = crc ] && [ "$2" = status ]; then
+      printf 'CRC VM:                  Stopped\n'
+      return 0
+    fi
+    echo "user $*" >>"$LOG"
+  }
+  : >"$LOG"
   grep -qx 'latest-live-configuration' "$STATE_HOME/.aap-demo/config"
   grep -qx 'latest-live-vault' "$STATE_HOME/.ansible/conf/env.yml"
   : >"$LOG"
@@ -308,7 +336,14 @@ echo "PASS: reinstall restarts and validates recovery before enabling boot start
   : >"$LOG"
   if state_boot; then echo "FAIL: dashboard startup failure was ignored" >&2; exit 1; fi
   test "$(cat "$LOG")" = "$expected"
-  state_user() { echo "user $*" >>"$LOG"; return 1; }
+  state_user() {
+    if [ "$1" = crc ] && [ "$2" = status ]; then
+      printf 'CRC VM:                  Stopped\n'
+      return 0
+    fi
+    echo "user $*" >>"$LOG"
+    return 1
+  }
   : >"$LOG"
   if state_boot; then echo "FAIL: CRC daemon failure was ignored" >&2; exit 1; fi
   test "$(cat "$LOG")" = "user systemctl --user restart crc-daemon.service"

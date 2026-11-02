@@ -366,7 +366,12 @@ state_boot() {
   # Live persistent state is authoritative, even after an interrupted shutdown.
   # Automatic checkpoint rollback would discard changes made since that copy.
   echo "Starting the latest persistent CRC and demo state in place."
-  state_user systemctl --user restart crc-daemon.service || return 1
+  # Restarting the daemon on an already-running VM drops the vsock SSH forward
+  # (port 2222) and leaves the VM unreachable. Only restart it when the VM is
+  # not yet running; a running VM keeps its daemon connection from crc start.
+  if [ "$(state_user crc status 2>/dev/null | awk -F': *' '/^CRC VM:/ {print $2}')" != "Running" ]; then
+    state_user systemctl --user restart crc-daemon.service || return 1
+  fi
   state_cli start || return 1
   state_cli dashboard --no-open || return 1
   rm -f "$STATE_ROOT/.shutdown-pending"

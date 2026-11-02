@@ -2552,8 +2552,28 @@ _recover_aap_catalog_after_start() {
   echo "✓ AAP operator catalog ready"
 }
 
+# Wait for the CRC VM SSH forward (port 2222) to accept connections. crc start
+# returns once MicroShift is up, but the daemon's vsock forward can lag; boot
+# recovery must not treat the transient gap as a down cluster.
+_aap_demo_wait_crc_ssh() {
+  local attempt
+  for attempt in $(seq 1 20); do
+    if infra_exec_cmd true 2>/dev/null; then
+      return 0
+    fi
+    sleep 3
+  done
+  return 1
+}
+
 _start_crc_cluster() {
-  if ! crc start; then
+  # crc start on an already-running VM restarts the CRC daemon, which can drop
+  # the vsock SSH forward (port 2222) and leave the VM unreachable. When the VM
+  # is already running and SSH answers, reuse it instead of restarting.
+  if [ "$(crc status 2>/dev/null | awk -F': *' '/^CRC VM:/ {print $2}')" = "Running" ] \
+    && _aap_demo_wait_crc_ssh; then
+    echo "✓ CRC VM is already running and reachable; skipping crc start"
+  elif ! crc start; then
     _err "Failed to start the CRC cluster"
     return 1
   fi

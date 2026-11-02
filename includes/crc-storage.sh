@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 
 _aap_demo_crc_filesystem_size() {
-  local values total used available
-  values=$(infra_exec_cmd df -Pk /var) || return 1
+  local values total used available attempt
+  # crc start returns once MicroShift is up, but the daemon's vsock SSH forward
+  # (port 2222) can lag several seconds behind. Retry the SSH probe before
+  # giving up so boot recovery does not fail on the transient gap.
+  for attempt in $(seq 1 15); do
+    if values=$(infra_exec_cmd df -Pk /var 2>/dev/null); then
+      break
+    fi
+    values=""
+    sleep 2
+  done
+  [ -n "$values" ] || return 1
   read -r total used available <<<"$(awk 'NR == 2 {print $2, $3, $4}' <<<"$values")"
   if ! [[ "$total" =~ ^[1-9][0-9]*$ && "$used" =~ ^[0-9]+$ && "$available" =~ ^[0-9]+$ ]] \
     || [ "$used" -gt "$total" ] || [ "$available" -gt "$total" ]; then
