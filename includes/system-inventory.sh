@@ -12,6 +12,7 @@ _aap_demo_inventory_ipv4() {
 }
 
 _aap_demo_inventory_routes() {
+  local addons_text="${1:-}"
   local raw_routes routes row host ip
   raw_routes=$(kubectl get route -A -o json 2>/dev/null || printf '{"items":[]}')
   routes='[]'
@@ -34,7 +35,51 @@ _aap_demo_inventory_routes() {
         admitted: ([.status.ingress[]?.conditions[]? | select(.type == "Admitted") | .status] | any(. == "True"))
       }
   ' <<<"$raw_routes")
+
+  # Append external (non-cluster) routes such as the Satellite lab VM.
+  local ext
+  while IFS= read -r ext; do
+    [ -n "$ext" ] || continue
+    routes=$(jq -c --argjson row "$ext" '. + [$row]' <<<"$routes")
+  done < <(_aap_demo_inventory_external_routes "$addons_text")
+
   printf '%s' "$routes"
+}
+
+# External routes: services that are not Kubernetes routes but should appear in
+# the dashboard Routes list. Currently the Satellite lab VM, surfaced once the
+# satellite-manifest addon is enabled and the VM answers on its lab address.
+_aap_demo_inventory_external_routes() {
+  local addons_text="$1"
+  # Only when the satellite-manifest addon is enabled.
+  grep -qw 'satellite-manifest' <<<"$addons_text" || return 0
+
+  local sat_host sat_ip
+  sat_host="${SATELLITE_LAB_HOST:-satellite.demo.lab}"
+  sat_ip=$(_aap_demo_inventory_ipv4 "$sat_host")
+  # Fall back to the well-known lab NIC1 address when the FQDN does not resolve.
+  if [ -z "$sat_ip" ]; then
+    sat_ip="${SATELLITE_LAB_IP:-192.168.122.20}"
+  fi
+  # Only surface the route when the Satellite VM answers HTTPS on its address.
+  curl -sk --connect-timeout 3 --max-time 5 -o /dev/null \
+    "https://${sat_ip}/" 2>/dev/null || return 0
+
+  jq -cn \
+    --arg host "$sat_host" \
+    --arg ip "$sat_ip" \
+    '{
+      namespace: "satellite-lab",
+      name: "satellite",
+      host: $host,
+      url: ("https://" + $host),
+      service: "satellite",
+      target_port: "https",
+      tls: "edge",
+      admitted: true,
+      resolved_ipv4: $ip,
+      external: true
+    }'
 }
 
 _aap_demo_inventory_app_namespaces() {
@@ -466,7 +511,7 @@ aap_demo_collect_system_inventory() {
     services=$(_aap_demo_inventory_services "$namespaces")
     pods=$(_aap_demo_inventory_pods "$namespaces")
     namespace_status=$(_aap_demo_inventory_namespaces "$namespaces" "$pods")
-    routes=$(_aap_demo_inventory_routes)
+    routes=$(_aap_demo_inventory_routes "$addons_text")
     credentials=$(_aap_demo_inventory_credentials "$secret_mode")
     ingress=$(_aap_demo_inventory_ingress)
     vm=$(_aap_demo_inventory_vm)
