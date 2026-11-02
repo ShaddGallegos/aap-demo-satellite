@@ -63,9 +63,13 @@ the `default` gateway (`192.168.122.1`). No extra DNS wiring is needed.
   This host's aap-demo Vault already holds `RHSM_ORG_ID` + `RHSM_ACTIVATION_KEY`;
   export them before step 1:
   `RHSM_ORG=$(ansible-vault view --vault-password-file ~/.ansible/conf/.vaultpass.txt ~/.ansible/conf/env.yml | awk '/RHSM_ORG_ID:/ {print $2}')`
-- A **manifest** (from access.redhat.com → Subscription Allocations) with
-  Satellite infrastructure + RHEL entitlements → save as `/root/manifest.zip`
-  on the Satellite VM.
+- A **manifest** with Satellite infrastructure + RHEL entitlements. Generate it
+  programmatically with the aap-demo addon (writes `~/.aap-demo/satellite/manifest.zip`):
+  `aap-demo enable satellite-manifest` — then `scp` it to the Satellite VM as
+  `/root/manifest.zip`. Or download manually from access.redhat.com →
+  Subscription Allocations. The addon requires the account's "View/Renew
+  Subscription Information" permission; see
+  [../addons/satellite-manifest/README.md](../addons/satellite-manifest/README.md).
 - **Satellite 6.17+ recommended**: RHEL 10 content support and the image-mode
   (`bootc`) host plugin land there. The Satellite *server* itself still
   installs on RHEL 9 — RHEL 10 is in scope for managed content/hosts only.

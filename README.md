@@ -181,6 +181,7 @@ Addons:
   local-cache     disabled
   product-demos       disabled
   product-demo-satellite  disabled
+  satellite-manifest  disabled
 ```
 
 ## Addons to add additional functionality
@@ -198,6 +199,10 @@ aap-demo enable local-cache  # Caches AAP containers locally so you don't re-dow
 # Ansible Product Demos - Official demo content from ansible/product-demos
 aap-demo enable product-demos        # Five domains at once (includes base; Satellite opt-in)
 aap-demo enable product-demo-satellite  # Satellite demos (requires a Satellite server)
+
+# Satellite lab
+aap-demo enable satellite-manifest   # Create + download a Satellite subscription manifest
+                                     # via the RHSM API (for satellite-lab/03-content-hammer.sh)
 aap-demo disable addon_name  # Disables addon
 ```
 

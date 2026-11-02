@@ -305,6 +305,25 @@ aap-demo enable mcp-server     # MCP server for AI assistants
 aap-demo disable mcp-server
 ```
 
+## Satellite Lab
+
+The `satellite-lab/` folder builds a Satellite 6 demo lab (Satellite VM +
+PXE-provisioned fleet) on the same KVM host. The `satellite-manifest` addon
+creates and downloads the required subscription manifest programmatically via
+the RHSM API, so no manual portal download is needed:
+
+```bash
+aap-demo enable satellite-manifest   # writes ~/.aap-demo/satellite/manifest.zip
+```
+
+The addon reuses the credential Vault's Red Hat offline token. The account must
+hold the **"View/Renew Subscription Information"** permission
+(console.redhat.com → Settings → User Access); without it the RHSM allocations
+API returns 401 and the addon stops with guidance. See
+[satellite-lab/README.md](../satellite-lab/README.md) for the full lab run order
+(network setup → VM provision → installer → content → provisioning → bootc →
+integrations → AAP inventory).
+
 ### Common Commands
 
 ```bash

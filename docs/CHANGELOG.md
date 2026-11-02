@@ -19,6 +19,53 @@ Current comparison point:
 - The earlier cumulative file/line counts predate these Fleet changes and are
   omitted rather than presented as current totals.
 
+### 46. Add the satellite-manifest addon and adapt satellite-lab for CRC user-mode networking
+
+The new `satellite-manifest` addon (`aap-demo enable satellite-manifest`, also
+available as "Build satellite" on the dashboard Add-ons page) creates and
+downloads a Red Hat Satellite subscription manifest programmatically via the
+RHSM management API, removing the manual portal download from the
+satellite-lab content stage. It reuses the credential Vault's Red Hat offline
+token (the same `rhsm-api` exchange the fleet addon uses) to find-or-create the
+allocation, trigger the export job, poll to completion, and download a signed
+`manifest.zip` to `~/.aap-demo/satellite/manifest.zip`. The RHSM allocations
+API requires the account to hold the "View/Renew Subscription Information"
+permission; the addon detects the 401/403 case and prints guidance to grant the
+role (console.redhat.com → Settings → User Access) instead of failing
+cryptically. `_rhsm_api` returns the HTTP status on the first stdout line so
+callers capture it through the command-substitution subshell.
+
+The `satellite-lab/` scripts assumed a bridged libvirt `crc` network, which
+does not exist on hosts running CRC with the MicroShift preset (QEMU user-mode
+networking + vsock). The lab is adapted to attach the Satellite VM's first NIC
+to the libvirt `default` network (NAT to host/upstream) and reach AAP/CRC
+through the host's forwarded ports; the isolated `satlab` network still hosts
+Satellite-owned DHCP/PXE for fleet provisioning. `00-network-setup.sh`,
+`01-provision-satellite-vm.sh`, `satellite-vm.ks`, `02-satellite-installer.sh`,
+`06-integrations.sh`, and the README architecture/teardown were updated.
+
+**Validation:** manifest flow verified live (allocation found/created, export
+job completed, signed Candlepin `manifest.zip` downloaded); `satlab` network
+defined/started/autostarted alongside `default`; kickstart rendering verified
+against the Vault's RHSM credentials; `test-dashboard.py`,
+`test-cli-parsing.sh`, `bash -n`, and `shellcheck --severity=warning` all pass.
+
+### 45. Keep the CRC VM reachable during boot recovery
+
+Boot recovery failed on an already-running VM because two steps dropped the CRC
+daemon's vsock SSH forward (port 2222), leaving the VM unreachable and failing
+the disk-usage check: `state_boot` restarted `crc-daemon.service`
+unconditionally, and `_start_crc_cluster` always ran `crc start` (which restarts
+the daemon on a running VM). Now `state_boot` only restarts the daemon when the
+VM is not running, `_start_crc_cluster` reuses a running, SSH-reachable VM
+instead of restarting it, and the storage disk check retries the SSH probe to
+ride out the brief forward lag after a genuine `crc start`.
+
+**Validation:** `test/test-state-service.sh` (updated for the conditional
+daemon restart), `test/test-crc-storage.sh`, `test/test-crc-create-stability.sh`,
+`bash -n`, and `shellcheck --severity=warning` all pass; boot recovery service
+installs and validates successfully on a running VM.
+
 ### 44. Preserve the credential Vault across uninstall/rebuild cycles
 
 `aap-demo maintenance uninstall` no longer removes the `aap_demo` section from

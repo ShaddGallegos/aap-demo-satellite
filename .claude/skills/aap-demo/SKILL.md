@@ -52,7 +52,7 @@ This environment includes characteristics specific to local development:
 | Destroy and rebuild from scratch | `aap-demo redeploy-all` |
 | Show help | `aap-demo help` |
 
-Available addons: olm, console, registry, mcp-server, devspaces, prometheus, portal, **ao** (Automation Orchestrator)
+Available addons: olm, console, registry, mcp-server, devspaces, prometheus, portal, **ao** (Automation Orchestrator), fleet, ollama, product-demos, setup-pah, local-cache, opa, **satellite-manifest** (build a Satellite subscription manifest via the RHSM API)
 
 ## Portal Addon
 
