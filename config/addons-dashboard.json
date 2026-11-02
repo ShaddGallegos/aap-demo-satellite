@@ -140,6 +140,16 @@
       "health": {
         "type": "configured"
       }
+    },
+    {
+      "id": "satellite-manifest",
+      "name": "Satellite Manifest",
+      "category": "Infrastructure",
+      "description": "Create and download a Red Hat Satellite subscription manifest via the RHSM API, ready for the satellite-lab content stage.",
+      "dependencies": [],
+      "health": {
+        "type": "configured"
+      }
     }
   ]
 }
