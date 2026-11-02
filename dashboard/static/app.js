@@ -204,7 +204,7 @@ function renderAddons(addons) {
           <p class="addon-meta">${escapeHtml(dependencies + availability)}</p>
           <p class="addon-capacity">${escapeHtml(capacityText)}</p>
           <div class="addon-footer">
-            <span class="muted">${escapeHtml(addon.id)}</span>
+            <span class="muted">${escapeHtml(addon.short_name || addon.id)}</span>
             ${button}
           </div>
         </article>`;

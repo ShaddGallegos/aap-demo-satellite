@@ -144,6 +144,7 @@
     {
       "id": "satellite-manifest",
       "name": "Satellite Build and Configure",
+      "short_name": "satellite-lab",
       "category": "Infrastructure",
       "description": "Build a Red Hat Satellite 6 demo lab on this host: generate the subscription manifest, provision the Satellite VM, and configure content, provisioning, and AAP integration via the satellite-lab workflow.",
       "dependencies": [],
