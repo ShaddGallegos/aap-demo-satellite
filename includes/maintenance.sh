@@ -4,15 +4,19 @@ if [ -n "${_AAP_DEMO_MAINTENANCE_LOADED:-}" ]; then return 0; fi
 _AAP_DEMO_MAINTENANCE_LOADED=1
 
 cmd_maintenance() {
-  local action="${1:-preview}" apply="${2:-false}"
+  local action="${1:-preview}" apply="${2:-false}" reconfigure="${3:-false}"
 
   if [ "$action" = "uninstall" ]; then
-    _maintenance_uninstall "$apply"
+    _maintenance_uninstall "$apply" "$reconfigure"
     return
+  fi
+  if [ "$reconfigure" = true ]; then
+    echo "ERROR: --reconfigure is supported only by maintenance uninstall" >&2
+    return 1
   fi
   if [ "$action" != "preview" ]; then
     echo "ERROR: Unknown maintenance action: $action" >&2
-    echo "Usage: aap-demo maintenance [uninstall] [--apply]" >&2
+    echo "Usage: aap-demo maintenance [uninstall] [--apply] [--reconfigure]" >&2
     return 1
   fi
 
@@ -100,6 +104,7 @@ EOF
 }
 
 _maintenance_uninstall_preview() {
+  local reconfigure="${1:-false}"
   local data_dir="${AAP_DEMO_DIR:-$HOME/.aap-demo}"
   local crc_dir="${AAP_DEMO_CRC_DIR:-$HOME/.crc}"
 
@@ -111,7 +116,9 @@ _maintenance_uninstall_preview() {
   echo "  • All Fleet VMs, overlays, SSH keys, and cached Fleet images"
   echo "  • Downloaded CRC bundle and cache: ${crc_dir}"
   echo "  • Generated credentials, kubeconfig, addon state, caches, and virtualenvs"
-  echo "  • The aap_demo section of the encrypted credential Vault"
+  if [ "$reconfigure" = true ]; then
+    echo "  • The aap_demo entries in the encrypted credential Vault (Vault files are kept)"
+  fi
   echo "  • Persistent CRI-O image disk and local OCI image cache"
   echo "  • Temporary swap file created by aap-demo"
   echo "  • Ingress CA entries from system and browser trust stores"
@@ -123,6 +130,13 @@ _maintenance_uninstall_preview() {
   echo ""
   echo "Preserved:"
   echo "  • Source repository: ${SCRIPT_DIR}"
+  if [ "$reconfigure" = true ]; then
+    echo "  • Vault files env.yml and .vaultpass.txt (shared with other products/projects;"
+    echo "    only the aap_demo entries are stripped)"
+  else
+    echo "  • Encrypted credential Vault env.yml and .vaultpass.txt, including the"
+    echo "    aap_demo credentials, so rebuilds do not re-prompt (use --reconfigure to strip them)"
+  fi
   echo "  • Unrelated keys in $HOME/.ansible/conf/env.yml"
   echo "  • Shared OS packages, command-line tools, and libvirt group membership"
   echo ""
@@ -266,6 +280,7 @@ _maintenance_remove_managed_credentials() {
 }
 
 _maintenance_uninstall_apply() {
+  local reconfigure="${1:-false}"
   local data_dir="${AAP_DEMO_DIR:-$HOME/.aap-demo}"
   local crc_dir="${AAP_DEMO_CRC_DIR:-$HOME/.crc}"
   local image_disk cli_path
@@ -335,10 +350,14 @@ _maintenance_uninstall_apply() {
     }
   fi
 
-  _maintenance_remove_managed_credentials || {
-    echo "ERROR: Failed to remove aap-demo credentials from the encrypted Vault" >&2
-    return 1
-  }
+  if [ "$reconfigure" = true ]; then
+    _maintenance_remove_managed_credentials || {
+      echo "ERROR: Failed to remove aap-demo credentials from the encrypted Vault" >&2
+      return 1
+    }
+  else
+    echo "  Preserved the encrypted credential Vault (env.yml and .vaultpass.txt)"
+  fi
   _maintenance_remove_data_dir "$data_dir"
   rm -rf -- "$crc_dir"
   cli_path="$HOME/.local/bin/aap-demo"
@@ -358,14 +377,18 @@ _maintenance_uninstall_apply() {
 
   echo ""
   echo "✓ aap-demo environment uninstalled"
-  echo "  Removed all aap-demo settings and managed credentials"
+  if [ "$reconfigure" = true ]; then
+    echo "  Removed all aap-demo settings and managed credentials"
+  else
+    echo "  Removed all aap-demo settings; kept the credential Vault for rebuilds"
+  fi
   echo "  Preserved source repository: ${SCRIPT_DIR}"
   echo "  Preserved shared tools and unrelated Vault content"
 }
 
 _maintenance_uninstall() {
-  local apply="${1:-false}" confirmation=""
-  _maintenance_uninstall_preview
+  local apply="${1:-false}" reconfigure="${2:-false}" confirmation=""
+  _maintenance_uninstall_preview "$reconfigure"
 
   if [ "$apply" != true ]; then
     echo ""
@@ -392,5 +415,5 @@ _maintenance_uninstall() {
   if declare -F aap_demo_acquire_operation_lock >/dev/null; then
     aap_demo_acquire_operation_lock "maintenance-uninstall" || return 1
   fi
-  _maintenance_uninstall_apply
+  _maintenance_uninstall_apply "$reconfigure"
 }

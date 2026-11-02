@@ -19,6 +19,28 @@ Current comparison point:
 - The earlier cumulative file/line counts predate these Fleet changes and are
   omitted rather than presented as current totals.
 
+### 44. Preserve the credential Vault across uninstall/rebuild cycles
+
+`aap-demo maintenance uninstall` no longer removes the `aap_demo` section from
+the encrypted credential Vault (`~/.ansible/conf/env.yml`). The Vault and its
+password file (`~/.ansible/conf/.vaultpass.txt`) are shared with other products
+and projects, so uninstall now preserves them intact and a later
+`create --full-demo` reuses the stored pull secret and tokens without
+re-prompting. A new opt-in flag, `aap-demo maintenance uninstall --reconfigure`,
+strips only the aap-demo entries (`aap_demo` and `ah_offline_token` keys) so
+the next `create` starts fresh; the Vault files themselves are never deleted,
+even when no aap-demo data remains. `aap_demo_vault_remove_managed` in
+`includes/credential-vault.sh` no longer deletes an emptied Vault file, the
+uninstall preview reports exactly which Vault content each mode keeps or
+removes, and `--reconfigure` is rejected outside `maintenance uninstall`.
+
+**Validation:** `test/test-credential-vault-migration.sh` and
+`test/test-maintenance.sh` updated and passing — default uninstall leaves the
+Vault untouched, `--reconfigure` strips only the aap-demo keys, the shared
+password file is never modified, and `--reconfigure` is rejected outside
+`maintenance uninstall`. `bash -n`, `shellcheck --severity=warning`, and
+`test/test-cli-parsing.sh` all clean.
+
 ### 43. Modularize preset detection and dashboard/console handlers
 
 `includes/preset.sh` is now the single source of truth for CRC preset

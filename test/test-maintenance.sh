@@ -15,6 +15,50 @@ if output=$(QUIET=true "$AAP_DEMO_SH" status --apply 2>&1); then
 fi
 grep -Fq -- "--apply is supported only by maintenance" <<<"$output"
 
+if output=$(QUIET=true "$AAP_DEMO_SH" status --reconfigure 2>&1); then
+  echo "FAIL: --reconfigure was accepted outside maintenance"
+  exit 1
+fi
+grep -Fq -- "--reconfigure is supported only by maintenance uninstall" <<<"$output"
+
+if output=$(
+  QUIET=true bash -c '
+    set -euo pipefail
+    SCRIPT_DIR=$1
+    source "$SCRIPT_DIR/includes/maintenance.sh"
+    _infra_ensure_backend() { return 0; }
+    cmd_maintenance preview false true
+  ' _ "${SCRIPT_DIR}/.." 2>&1
+); then
+  echo "FAIL: --reconfigure was accepted without the uninstall action"
+  exit 1
+fi
+grep -Fq -- "--reconfigure is supported only by maintenance uninstall" <<<"$output"
+
+preview_default=$(
+  HOME=/nonexistent QUIET=true bash -c '
+    set -euo pipefail
+    SCRIPT_DIR=$1
+    source "$SCRIPT_DIR/includes/maintenance.sh"
+    _maintenance_uninstall_preview false
+  ' _ "${SCRIPT_DIR}/.."
+)
+grep -Fq "aap_demo credentials, so rebuilds do not re-prompt" <<<"$preview_default"
+if grep -Fq "entries are stripped" <<<"$preview_default"; then
+  echo "FAIL: default uninstall preview advertises Vault stripping"
+  exit 1
+fi
+
+preview_reconfigure=$(
+  HOME=/nonexistent QUIET=true bash -c '
+    set -euo pipefail
+    SCRIPT_DIR=$1
+    source "$SCRIPT_DIR/includes/maintenance.sh"
+    _maintenance_uninstall_preview true
+  ' _ "${SCRIPT_DIR}/.."
+)
+grep -Fq "only the aap_demo entries are stripped" <<<"$preview_reconfigure"
+
 grep -Fq 'crictl ps -a --state Exited -q' "$MAINTENANCE_SH"
 grep -Fq 'crictl rmi --prune' "$MAINTENANCE_SH"
 grep -Fq 'journalctl --vacuum-time=7d' "$MAINTENANCE_SH"
@@ -162,7 +206,8 @@ HOME="$uninstall_home" PATH="$mock_dir:$PATH" QUIET=true \
 [ ! -e "$uninstall_home/system/libexec/aap-demo-state" ]
 [ ! -e "$uninstall_home/system/libexec/aap-demo-operation-lock.sh" ]
 [ ! -e "$uninstall_home/system/var/aap-demo/$(id -un)" ]
-[ -e "$uninstall_home/managed-credentials-removed" ]
+# Default uninstall preserves the shared credential Vault for rebuilds.
+[ ! -e "$uninstall_home/managed-credentials-removed" ]
 [ ! -e "$uninstall_home/.local/bin/aap-demo" ]
 if grep -q '^# >>> aap-demo bash completion >>>$' "$uninstall_home/.bashrc"; then
   echo "FAIL: uninstall left the Bash completion loader behind"
@@ -181,6 +226,41 @@ grep -Fq 'crc cleanup' "$mock_dir/uninstall.log"
 grep -Fq 'claude mcp remove aap-demo --scope user' "$mock_dir/uninstall.log"
 grep -Fq 'systemctl disable --now aap-demo.service' "$mock_dir/uninstall.log"
 grep -Fq 'systemctl daemon-reload' "$mock_dir/uninstall.log"
+
+# --reconfigure strips the aap_demo Vault entries (files themselves are kept).
+mkdir -p \
+  "$uninstall_home/.crc/machines/crc" \
+  "$uninstall_home/system/etc/aap-demo" \
+  "$uninstall_home/system/libexec" \
+  "$uninstall_home/system/var/aap-demo/$(id -un)/states/state-1"
+printf '%s\n' "$(id -un)" >"$uninstall_home/system/etc/aap-demo/owner"
+touch \
+  "$uninstall_home/system/aap-demo.service" \
+  "$uninstall_home/system/libexec/aap-demo-state" \
+  "$uninstall_home/system/libexec/aap-demo-operation-lock.sh"
+
+# shellcheck disable=SC2031
+HOME="$uninstall_home" PATH="$mock_dir:$PATH" QUIET=true \
+  AAP_DEMO_UNINSTALL_CONFIRM=UNINSTALL \
+  AAP_DEMO_SYSTEMD_UNIT_FILE="$uninstall_home/system/aap-demo.service" \
+  AAP_DEMO_SYSTEM_CONFIG_DIR="$uninstall_home/system/etc/aap-demo" \
+  AAP_DEMO_SYSTEM_LIBEXEC_DIR="$uninstall_home/system/libexec" \
+  AAP_DEMO_STATE_BACKUP_DIR="$uninstall_home/system/var/aap-demo/$(id -un)" \
+  bash -c '
+    set -euo pipefail
+    SCRIPT_DIR=$1
+    source "$SCRIPT_DIR/includes/persistent-crio-store.sh"
+    source "$SCRIPT_DIR/includes/maintenance.sh"
+    _maintenance_stop_dashboard() { return 0; }
+    _maintenance_remove_managed_credentials() {
+      touch "$HOME/managed-credentials-removed"
+    }
+    _purge_ingress_ca_trust() { return 0; }
+    _remove_temp_swap() { return 0; }
+    cmd_maintenance uninstall true true
+  ' _ "$SCRIPT_DIR/.." >/dev/null
+
+[ -e "$uninstall_home/managed-credentials-removed" ]
 
 HOME="$uninstall_home" SHELL=/bin/bash bash "${SCRIPT_DIR}/../install.sh" >/dev/null
 [ -L "$uninstall_home/.local/bin/aap-demo" ]

@@ -137,6 +137,7 @@ REDACT=false
 SYSTEM_INFO_OUTPUT=""
 DASHBOARD_NO_OPEN=false
 MAINTENANCE_APPLY=false
+MAINTENANCE_RECONFIGURE=false
 FULL_DEMO=false
 SHOW_SECRETS=false
 
@@ -262,6 +263,9 @@ for arg in "$@"; do
     --apply)
       MAINTENANCE_APPLY=true
       ;;
+    --reconfigure)
+      MAINTENANCE_RECONFIGURE=true
+      ;;
     add | remove | list)
       # Subcommand args for fleet command
       EXTRA_ARGS+=("$arg")
@@ -350,6 +354,10 @@ if [ "$FULL_DEMO" = true ] && [ "$COMMAND" != create ]; then
 fi
 if [ "$MAINTENANCE_APPLY" = true ] && [ "$COMMAND" != maintenance ]; then
   echo "ERROR: --apply is supported only by maintenance" >&2
+  exit 1
+fi
+if [ "$MAINTENANCE_RECONFIGURE" = true ] && [ "$COMMAND" != maintenance ]; then
+  echo "ERROR: --reconfigure is supported only by maintenance uninstall" >&2
   exit 1
 fi
 
@@ -632,8 +640,10 @@ CORE COMMANDS:
     watch                           Watch AAP deployment progress
     clean                           Remove AAP while keeping the cluster
     maintenance [--apply]           Preview or remove safe-to-delete VM data
-    maintenance uninstall [--apply]
-                                    Remove all aap-demo state/settings; preserve source and shared tools
+    maintenance uninstall [--apply] [--reconfigure]
+                                    Remove all aap-demo state/settings; preserve source, shared tools,
+                                    and the credential Vault (--reconfigure also strips the
+                                    aap_demo Vault entries so the next create re-prompts)
     credentials keepalive [setup|enable|status|disable|run]
                                     Manage opt-in offline-token keepalive
     redeploy                        Clean and redeploy AAP
@@ -3916,7 +3926,7 @@ case "$COMMAND" in
     cmd_clean
     ;;
   maintenance)
-    cmd_maintenance "${EXTRA_ARGS[0]:-preview}" "$MAINTENANCE_APPLY"
+    cmd_maintenance "${EXTRA_ARGS[0]:-preview}" "$MAINTENANCE_APPLY" "$MAINTENANCE_RECONFIGURE"
     ;;
   credentials)
     _credentials_rc=0

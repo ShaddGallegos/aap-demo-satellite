@@ -255,6 +255,9 @@ aap-demo maintenance         # Preview reclaimable VM runtime data
 aap-demo maintenance --apply # Remove exited containers, unused images, and old caches/logs
 aap-demo maintenance uninstall         # Preview complete environment removal
 aap-demo maintenance uninstall --apply # Remove VMs, caches, trust, CLI, and residual state
+                                       # (keeps the credential Vault for rebuilds)
+aap-demo maintenance uninstall --apply --reconfigure
+                                       # Also strip the aap_demo entries from the shared Vault
 aap-demo clean               # Remove AAP deployment (keeps cluster)
 aap-demo update              # Pull latest code and reinstall
 aap-demo help                # Full command reference
@@ -388,12 +391,15 @@ journals older than seven days and reports the VM disk space reclaimed.
 cluster, Fleet VMs and images, CRC downloads, generated credentials and caches,
 temporary swap, ingress trust entries, MCP/shell integration, CLI symlink, and
 completions. It also stops the dashboard, removes recovery services and backups,
-deletes `~/.aap-demo`, and removes the `aap_demo` namespace from the encrypted
-credential Vault. If no unrelated Vault data remains, it removes the Vault
-file, but always preserves the shared Vault password file. The source
-repository, shared command-line tools/packages,
-unrelated Vault keys, and libvirt group membership are preserved. For noninteractive
-use, also set `AAP_DEMO_UNINSTALL_CONFIRM=UNINSTALL`.
+and deletes `~/.aap-demo`. The encrypted credential Vault is preserved intact —
+including the `aap_demo` entries — so a later `create` does not re-prompt for
+pull secrets or tokens. Add `--reconfigure` to strip the `aap_demo` entries from
+the Vault so the next `create` starts fresh; even then the shared Vault files
+(`~/.ansible/conf/env.yml` and `~/.ansible/conf/.vaultpass.txt`) are never
+deleted, because other products and projects use them — only the aap-demo
+entries are removed. The source repository, shared command-line tools/packages,
+unrelated Vault keys, and libvirt group membership are preserved. For
+noninteractive use, also set `AAP_DEMO_UNINSTALL_CONFIRM=UNINSTALL`.
 
 ## Credential storage
 

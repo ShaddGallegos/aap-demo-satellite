@@ -537,45 +537,18 @@ PY
   _aap_demo_private_mode "$AAP_DEMO_VAULT_FILE"
 }
 
+# Removes only the aap-demo-managed entries from the shared Vault. The Vault
+# file ($AAP_DEMO_VAULT_FILE) and its password file
+# ($AAP_DEMO_VAULT_PASSWORD_FILE) are shared with other products and projects,
+# so they are never deleted -- even when no aap-demo data remains. Only the
+# aap-demo-lineage legacy Vault files are removed entirely.
 aap_demo_vault_remove_managed() {
-  local vault_dir plain rc
+  local vault_dir
   vault_dir=$(dirname "$AAP_DEMO_VAULT_FILE")
 
   if [ -s "$AAP_DEMO_VAULT_FILE" ]; then
     aap_demo_vault_delete "ah_offline_token" || return 1
     aap_demo_vault_delete "aap_demo" || return 1
-    _aap_demo_vault_require_tools || return 1
-    plain=$(mktemp "${vault_dir}/.env-aap-demo.inspect.XXXXXX") || return 1
-    chmod 600 "$plain"
-    if ! "$AAP_DEMO_ANSIBLE_VAULT" view \
-      --vault-password-file "$AAP_DEMO_VAULT_PASSWORD_FILE" \
-      "$AAP_DEMO_VAULT_FILE" >"$plain"; then
-      rm -f "$plain"
-      _err "Unable to verify managed credential removal"
-      return 1
-    fi
-    "$AAP_DEMO_VAULT_PYTHON" - "$plain" <<'PY' || rc=$?
-import sys
-import yaml
-
-with open(sys.argv[1], encoding="utf-8") as stream:
-    data = yaml.safe_load(stream)
-raise SystemExit(0 if not data else 1)
-PY
-    rm -f "$plain"
-    rc=${rc:-0}
-    case "$rc" in
-      0)
-        rm -f "$AAP_DEMO_VAULT_FILE"
-        ;;
-      1) ;;
-      *)
-        _err "Unable to inspect remaining encrypted credentials"
-        return 1
-        ;;
-    esac
-  else
-    rm -f "$AAP_DEMO_VAULT_FILE"
   fi
 
   rm -f -- \
