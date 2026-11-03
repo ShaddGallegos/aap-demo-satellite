@@ -348,6 +348,36 @@ p {
   color: #ff8b8b;
 }
 
+.fleet-power {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: 12px;
+  vertical-align: middle;
+}
+
+.power-btn {
+  min-height: 26px;
+  min-width: 30px;
+  padding: 2px 7px;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  border: 1px solid #3a4454;
+  border-radius: 4px;
+  background: transparent;
+  color: #c7cfdb;
+}
+
+.power-btn:hover:not(:disabled) {
+  border-color: #4c586b;
+  background: rgb(255 255 255 / 6%);
+}
+
+.power-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .button:disabled {
   cursor: not-allowed;
   opacity: 0.45;

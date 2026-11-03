@@ -424,9 +424,13 @@ Create nodes first if none exist.
 ```bash
 aap-demo fleet register                 # Reconcile existing nodes and verify AAP ping
 aap-demo fleet ssh 1                    # SSH as admin using the managed key
+aap-demo fleet node 1 stop              # Power off node 1 (start / restart also work)
 aap-demo status --show-secrets          # Interactive only: per-node admin passwords and IPs
 ssh -p 2201 admin@127.0.0.1              # Password login to node 1
 ```
+
+Each fleet node card on the dashboard also has power buttons (start / stop /
+restart) that call the same per-node power control.
 
 Each node has its own generated admin password, retained in the shared encrypted
 Vault under `aap_demo.fleet.node_<index>.password`. Registration reuses the

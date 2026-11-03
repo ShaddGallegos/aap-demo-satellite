@@ -247,6 +247,10 @@ for arg in "$@"; do
     deploy | deploy-all | repair | clean | maintenance | credentials | stop | restart | service | setup | create | watch | update | config | redeploy | redeploy-all | redhat-status | rh-status | kubeconfig | idle | preflight | diagnose | must-gather | enable | disable | wire | system-info | dashboard | console | version | help | --help | -h | --version | -V)
       if [ "$COMMAND" = "credentials" ]; then
         EXTRA_ARGS+=("$arg")
+      elif [ "$COMMAND" = "fleet" ]; then
+        # start/stop/restart are also fleet node power actions; keep them as
+        # fleet args when the fleet command is already selected.
+        EXTRA_ARGS+=("$arg")
       else
         case "$arg" in
           --version | -V) COMMAND="version" ;;

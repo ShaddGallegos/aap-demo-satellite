@@ -294,6 +294,21 @@ class DashboardApp:
             check=False,
         )
 
+    def fleet_power(self, index: int, action: str) -> dict[str, Any]:
+        if action not in ("start", "stop", "restart"):
+            raise ValueError("Invalid fleet power action")
+        nodes = self.inventory().get("fleet", [])
+        node = next((node for node in nodes if node.get("index") == index), None)
+        if node is None:
+            raise RuntimeError(f"Fleet node {index} does not exist")
+        # A node start waits for SSH readiness, which can take a while.
+        timeout = 180 if action in ("start", "restart") else 60
+        result = self.run_cli("fleet", "node", str(index), action, timeout=timeout)
+        if result.returncode != 0:
+            detail = redact_output(result.stderr or result.stdout).strip()
+            raise RuntimeError(detail or f"fleet node {index} {action} failed")
+        return {"index": index, "action": action, "status": "ok"}
+
     def cli_command(self, *arguments: str) -> list[str]:
         if sys.platform == "win32":
             return [
@@ -598,6 +613,20 @@ def create_handler(app: DashboardApp) -> type[BaseHTTPRequestHandler]:
                 return
             if not isinstance(body, dict):
                 self.json_response(HTTPStatus.BAD_REQUEST, {"error": "Expected a JSON object"})
+                return
+
+            fleet_power = re.fullmatch(r"/api/fleet/([1-9][0-9]*)/power", urlparse(self.path).path)
+            if fleet_power:
+                action = body.get("action", "")
+                try:
+                    result = app.fleet_power(int(fleet_power[1]), action)
+                except ValueError as error:
+                    self.json_response(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                    return
+                except (RuntimeError, OSError) as error:
+                    self.json_response(HTTPStatus.CONFLICT, {"error": str(error)})
+                    return
+                self.json_response(HTTPStatus.OK, result)
                 return
 
             terminal_start = re.fullmatch(r"/api/fleet/([1-9][0-9]*)/terminal", urlparse(self.path).path)

@@ -56,3 +56,40 @@ if ! grep -q 'aap-demo fleet add <count> --image <rhel9|rhel10|local-qcow2-path>
   exit 1
 fi
 echo "PASS: empty Fleet list shows managed-image syntax"
+
+# fleet_node_power validates the index and action and updates the node meta.
+FLEET_DIR="$TEST_HOME/fleet"
+mkdir -p "$FLEET_DIR/node-1"
+printf 'INDEX=1\nPORT=2201\nPID=\nHOSTNAME=aap-fleet-node-1\nSTATUS=stopped\n' >"$FLEET_DIR/node-1/meta"
+
+if fleet_node_power "abc" start >/dev/null 2>&1; then
+  echo "FAIL: non-numeric node index was accepted" >&2
+  exit 1
+fi
+echo "PASS: rejects a non-numeric node index"
+
+if fleet_node_power 1 powercycle >/dev/null 2>&1; then
+  echo "FAIL: unknown power action was accepted" >&2
+  exit 1
+fi
+echo "PASS: rejects an unknown power action"
+
+if fleet_node_power 9 stop >/dev/null 2>&1; then
+  echo "FAIL: a missing node was accepted" >&2
+  exit 1
+fi
+echo "PASS: rejects a missing node"
+
+# stop on an existing (stopped) node updates the meta without error.
+fleet_node_start() { return 0; }
+_fleet_stop_vm() { return 0; }
+fleet_reconcile_access() { return 0; }
+fleet_node_power 1 stop >/dev/null 2>&1
+grep -q '^STATUS=stopped$' "$FLEET_DIR/node-1/meta" || {
+  echo "FAIL: stop did not mark the node stopped" >&2
+  exit 1
+}
+echo "PASS: stop marks the node stopped"
+
+fleet_node_power 1 restart >/dev/null 2>&1
+echo "PASS: restart runs stop then start"

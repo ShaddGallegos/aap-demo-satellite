@@ -63,6 +63,12 @@ cmd_fleet() {
     start)
       fleet_start_all
       ;;
+    node)
+      local node_index="${1:-}" node_action="${2:-}"
+      [[ "$node_index" =~ ^[1-9][0-9]*$ ]] || { _err "Usage: aap-demo fleet node <index> <start|stop|restart>"; return 1; }
+      [[ "$node_action" =~ ^(start|stop|restart)$ ]] || { _err "Usage: aap-demo fleet node <index> <start|stop|restart>"; return 1; }
+      fleet_node_power "$node_index" "$node_action"
+      ;;
     register)
       _verify_cluster || return 1
       if [ -z "$(_fleet_running_indices)" ]; then
@@ -126,6 +132,8 @@ cmd_fleet() {
       echo "  register                     Register existing Fleet VMs in AAP"
       echo "  rhc-connect                  Enroll running Fleet VMs with Red Hat"
       echo "  start                        Start preserved Fleet VMs"
+      echo "  node <index> <start|stop|restart>"
+      echo "                               Power-control a single Fleet node"
       echo "  ssh [index]                  Open an admin SSH shell on a Fleet node"
       echo "  remove [count|name]          Remove fleet node VMs"
       echo "  list                         List fleet node VMs"

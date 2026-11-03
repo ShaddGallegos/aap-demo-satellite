@@ -239,9 +239,20 @@ function renderRoutes(routes, fleet = []) {
           </a>
           <span class="route-name">admin@${escapeHtml(node.ssh_host)}:${escapeHtml(node.ssh_port)}
             / guest IP ${escapeHtml(node.guest_ip || "not discovered")}</span>
+          <span class="fleet-power" role="group" aria-label="Power controls for ${escapeHtml(node.hostname)}">
+            <button class="power-btn" type="button" title="Start ${escapeHtml(node.hostname)}"
+              data-node="${node.index}" data-power="start" aria-label="Start">▶</button>
+            <button class="power-btn" type="button" title="Stop ${escapeHtml(node.hostname)}"
+              data-node="${node.index}" data-power="stop" aria-label="Stop">⏹</button>
+            <button class="power-btn" type="button" title="Restart ${escapeHtml(node.hostname)}"
+              data-node="${node.index}" data-power="restart" aria-label="Restart">⟳</button>
+          </span>
         </div>
         <span class="pill ${node.state === "running" ? "running" : "disabled"}">${escapeHtml(node.state)}</span>
       </div>`).join("");
+  elements.routesList.querySelectorAll("button[data-power]").forEach((button) => {
+    button.addEventListener("click", () => fleetPower(button.dataset.node, button.dataset.power, button));
+  });
 }
 
 function renderNamespaces(namespaces) {
@@ -355,6 +366,32 @@ async function toggleAddon(addonId, action) {
     startOperationPolling();
   } catch (error) {
     showAlert(error.message);
+  }
+}
+
+async function fleetPower(nodeIndex, action, button) {
+  if (state.restarting) {
+    return;
+  }
+  const label = {start: "Start", stop: "Stop", restart: "Restart"}[action] || action;
+  if (action !== "start") {
+    const confirmed = window.confirm(`${label} fleet node ${nodeIndex}?`);
+    if (!confirmed) {
+      return;
+    }
+  }
+  clearAlert();
+  const buttons = elements.routesList.querySelectorAll(`button[data-node="${nodeIndex}"]`);
+  buttons.forEach((btn) => { btn.disabled = true; });
+  try {
+    await api(`/api/fleet/${encodeURIComponent(nodeIndex)}/power`, {
+      method: "POST",
+      body: JSON.stringify({action}),
+    });
+    await refresh();
+  } catch (error) {
+    showAlert(error.message);
+    buttons.forEach((btn) => { btn.disabled = false; });
   }
 }
 

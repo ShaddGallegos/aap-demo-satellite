@@ -19,6 +19,27 @@ Current comparison point:
 - The earlier cumulative file/line counts predate these Fleet changes and are
   omitted rather than presented as current totals.
 
+### 50. Add per-node fleet power control (CLI + dashboard)
+
+Fleet nodes can now be power-controlled individually. The new
+`fleet_node_power <index> <start|stop|restart>` in `addons/fleet/fleet.sh`
+drives a single node; `aap-demo fleet node <index> <start|stop|restart>`
+exposes it in the CLI (the arg parser now keeps `start`/`stop`/`restart` as
+fleet args when the fleet command is selected, instead of treating them as
+top-level commands). The dashboard fleet node cards gained start/stop/restart
+buttons backed by a new `POST /api/fleet/<index>/power` endpoint (with the same
+origin + session-token validation as the other mutating endpoints). Stop now
+also clears the node PID and marks the meta `STATUS=stopped`, and
+`fleet_stop_all` keeps node metas in sync, so the dashboard reflects the real
+power state.
+
+**Validation:** `test/test-fleet-cli.sh` extended with power-control cases
+(index/action validation, missing node, stop marks stopped, restart runs
+stop+start); stop/start/restart verified live against the fleet nodes both via
+the CLI and the dashboard API; test-fleet-access, test-fleet-auth,
+test-cli-parsing, and test-dashboard.py pass; `bash -n` and
+`shellcheck --severity=warning` clean.
+
 ### 49. Add a self-healing CRC vsock forward watchdog
 
 The recurring "VM running but MicroShift/SSH unreachable" fault — the CRC

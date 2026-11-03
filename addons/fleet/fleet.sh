@@ -721,11 +721,45 @@ fleet_stop_all() {
     local idx
     idx=$(grep '^INDEX=' "$meta" | cut -d= -f2)
     _fleet_stop_vm "$idx"
+    # Keep the node meta in sync so the dashboard/CLI reflect the real state.
+    sed -i.bak -e 's/^STATUS=.*/STATUS=stopped/' -e 's/^PID=.*/PID=/' "$meta" 2>/dev/null
+    rm -f "${meta}.bak"
     stopped=$((stopped + 1))
   done
   if [ "$stopped" -gt 0 ]; then
     echo "  ✓ Stopped ${stopped} fleet node(s)"
   fi
+}
+
+# Per-node power control for the dashboard and CLI.
+# fleet_node_power <index> <start|stop|restart>
+fleet_node_power() {
+  local index="$1" action="$2"
+  [[ "$index" =~ ^[1-9][0-9]*$ ]] || { _err "Invalid fleet node index: $index"; return 1; }
+  local node_dir="${FLEET_DIR}/node-${index}"
+  [ -d "$node_dir" ] || { _err "Fleet node ${index} does not exist"; return 1; }
+
+  case "$action" in
+    start)
+      fleet_node_start "$index"
+      ;;
+    stop)
+      _fleet_stop_vm "$index"
+      if [ -f "${node_dir}/meta" ]; then
+        sed -i.bak -e 's/^STATUS=.*/STATUS=stopped/' -e 's/^PID=.*/PID=/' "${node_dir}/meta"
+        rm -f "${node_dir}/meta.bak"
+      fi
+      echo "  ✓ Stopped fleet node ${index}"
+      ;;
+    restart)
+      _fleet_stop_vm "$index"
+      fleet_node_start "$index"
+      ;;
+    *)
+      _err "Unknown fleet power action: $action (use start, stop, or restart)"
+      return 1
+      ;;
+  esac
 }
 
 fleet_destroy_all() {
