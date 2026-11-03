@@ -129,6 +129,22 @@ FLEET COMMANDS:
     fleet remove [count|name]       Deregister and remove newest or named VMs
     fleet destroy                   Remove all Fleet VMs and AAP Fleet resources
 
+SATELLITE LAB:
+    The satellite-lab builds a Satellite 6 demo VM on this host and wires it
+    into AAP. Prerequisites: the RHEL 9.x DVD ISO at
+    /var/lib/libvirt/images/rhel-9.5-x86_64-dvd.iso and Red Hat credentials in
+    the Vault (aap-demo fleet auth). The subscription manifest is generated
+    automatically by the satellite-manifest addon.
+
+    create --full-demo --satellite  Build AAP + the full Satellite lab and demo
+    enable satellite-manifest       Generate/download the Satellite manifest only
+    enable product-demo-satellite   Install the Satellite demo content in AAP
+
+    Manual stage-by-stage control (see satellite-lab/README.md):
+      sudo satellite-lab/00-network-setup.sh        # satlab network
+      sudo satellite-lab/01-provision-satellite-vm.sh  # provision the VM
+      satellite-lab/build-and-configure.sh          # orchestrate the full build
+
 CREDENTIALS:
     status --show-secrets           Show login passwords only in an interactive terminal
     fleet auth                      Configure Customer Portal token and CDN credentials
@@ -185,6 +201,9 @@ EXAMPLES:
     aap-demo maintenance
     aap-demo maintenance uninstall
     aap-demo create --full-demo
+    aap-demo create --full-demo --satellite
+    aap-demo enable satellite-manifest
+    aap-demo enable product-demo-satellite
     aap-demo enable fleet
     aap-demo fleet auth
     aap-demo fleet add 3 --image rhel9
