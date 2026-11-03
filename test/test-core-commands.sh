@@ -76,8 +76,10 @@ fi
 
 # Test 2b: persistent storage is shown under the VM section
 echo "Test 2b: status places persistent storage under VM"
-vm_section_line=$(grep -n '^  echo "VM:"' "$AAP_DEMO_SH" | cut -d: -f1)
-persistent_status_line=$(grep -n '^  persistent_crio_store_status$' "$AAP_DEMO_SH" | cut -d: -f1)
+# cmd_status lives in includes/cmd-status.sh after the includes/ refactor.
+STATUS_SH="${SCRIPT_DIR}/../includes/cmd-status.sh"
+vm_section_line=$(grep -n '^  echo "VM:"' "$STATUS_SH" | cut -d: -f1)
+persistent_status_line=$(grep -n '^  persistent_crio_store_status$' "$STATUS_SH" | cut -d: -f1)
 if [ -n "$vm_section_line" ] && [ -n "$persistent_status_line" ] \
   && [ "$persistent_status_line" -gt "$vm_section_line" ] \
   && grep -q '_persistent_crio_store_disk_size' "${SCRIPT_DIR}/../includes/persistent-crio-store.sh"; then

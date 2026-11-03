@@ -71,6 +71,11 @@
       "vm_gib": 15,
       "host_gib": 0,
       "description": "Ollama image, local model, and runtime data."
+    },
+    "satellite-manifest": {
+      "vm_gib": 0,
+      "host_gib": 1,
+      "description": "Satellite subscription manifest and lab metadata on the host; the Satellite VM itself is provisioned separately by satellite-lab."
     }
   }
 }

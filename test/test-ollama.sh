@@ -70,7 +70,8 @@ fail() {
 # CLI registration
 # ---------------------------------------------------------------------------
 
-if grep -q ' | opa | ollama)' "$AAP_DEMO"; then
+# Match ollama as a parser case token regardless of its position in the list.
+if grep -qE '(^|\| )ollama( |\))' "$AAP_DEMO"; then
   pass "cli_accepts_ollama_addon"
 else
   fail "cli_accepts_ollama_addon"
