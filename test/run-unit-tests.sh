@@ -11,8 +11,11 @@ run_test() {
 
   TOTAL=$((TOTAL + 1))
   printf '\n==> %s\n' "$(basename "$test_file")"
-  if ! "$runner" "$test_file"; then
+  # Per-test timeout so a single hanging test cannot stall the whole suite.
+  # AAP_DEMO_TEST_TIMEOUT overrides the default (seconds).
+  if ! timeout "${AAP_DEMO_TEST_TIMEOUT:-120}" "$runner" "$test_file"; then
     FAILED=$((FAILED + 1))
+    echo "  FAILED or timed out: $(basename "$test_file")" >&2
   fi
 }
 
