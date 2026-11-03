@@ -33,6 +33,7 @@ DEFAULT_PORT = 8765
 MAX_BODY_BYTES = 4096
 OPERATION_TIMEOUT_SECONDS = 3600
 TERMINAL_IDLE_SECONDS = 300
+INVENTORY_CACHE_TTL_SECONDS = 5
 
 
 class FleetTerminal:
@@ -235,6 +236,14 @@ class DashboardApp:
         self.static_dir = repo_root / "dashboard" / "static"
         self.terminals: dict[str, FleetTerminal] = {}
         self.terminal_lock = threading.Lock()
+        # Short-TTL cache for the status inventory. `aap-demo status --json`
+        # shells out to system-inventory.sh (many kubectl calls, ~5s), and the
+        # dashboard calls inventory() several times per page load and poll, so
+        # caching for a few seconds avoids redundant cluster round-trips while
+        # keeping the data effectively live.
+        self._inventory_cache: dict[str, Any] | None = None
+        self._inventory_cache_at = 0.0
+        self._inventory_lock = threading.Lock()
 
     def reap_terminals(self, *, all_sessions: bool = False) -> None:
         with self.terminal_lock:
@@ -307,6 +316,7 @@ class DashboardApp:
         if result.returncode != 0:
             detail = redact_output(result.stderr or result.stdout).strip()
             raise RuntimeError(detail or f"fleet node {index} {action} failed")
+        self.invalidate_inventory()
         return {"index": index, "action": action, "status": "ok"}
 
     def cli_command(self, *arguments: str) -> list[str]:
@@ -332,11 +342,25 @@ class DashboardApp:
         return environment
 
     def inventory(self) -> dict[str, Any]:
-        result = self.run_cli("status", "--json")
-        if result.returncode != 0:
-            detail = redact_output(result.stderr or result.stdout).strip()
-            raise RuntimeError(detail or "Unable to collect aap-demo status")
-        return json.loads(result.stdout)
+        with self._inventory_lock:
+            now = time.monotonic()
+            if (
+                self._inventory_cache is not None
+                and now - self._inventory_cache_at < INVENTORY_CACHE_TTL_SECONDS
+            ):
+                return self._inventory_cache
+            result = self.run_cli("status", "--json")
+            if result.returncode != 0:
+                detail = redact_output(result.stderr or result.stdout).strip()
+                raise RuntimeError(detail or "Unable to collect aap-demo status")
+            self._inventory_cache = json.loads(result.stdout)
+            self._inventory_cache_at = now
+            return self._inventory_cache
+
+    def invalidate_inventory(self) -> None:
+        with self._inventory_lock:
+            self._inventory_cache = None
+            self._inventory_cache_at = 0.0
 
     def status_payload(self) -> dict[str, Any]:
         inventory = self.inventory()
@@ -492,6 +516,9 @@ class DashboardApp:
             self.operation.message = message
             self.operation.output = redact_output(combined)
             self.operation.completed_at = time.time()
+        # An addon enable/disable changes the inventory; drop the cache so the
+        # next status poll reflects it.
+        self.invalidate_inventory()
 
 
 def create_handler(app: DashboardApp) -> type[BaseHTTPRequestHandler]:
