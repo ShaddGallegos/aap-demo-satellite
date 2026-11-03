@@ -324,6 +324,15 @@ API returns 401 and the addon stops with guidance. See
 (network setup → VM provision → installer → content → provisioning → bootc →
 integrations → AAP inventory).
 
+**Full demo integration:** `aap-demo create --full-demo --satellite` builds and
+configures the Satellite lab automatically when the Satellite VM does not yet
+exist (via `satellite-lab/build-and-configure.sh`), then installs the Satellite
+Demo content (`product-demo-satellite`) against it. The Satellite VM uses a
+minimal 40 GB OS disk with `/var/lib/pulp` mounted from the host over NFS
+(`satellite-lab/00b-host-nfs-storage.sh` sets up the export, firewalld, and
+SELinux booleans). Once the Satellite VM is serving HTTPS, its URL appears in
+the dashboard Routes list.
+
 ### Common Commands
 
 ```bash

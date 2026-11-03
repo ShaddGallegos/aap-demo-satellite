@@ -19,6 +19,27 @@ Current comparison point:
 - The earlier cumulative file/line counts predate these Fleet changes and are
   omitted rather than presented as current totals.
 
+### 47. Add `--satellite` full-demo flag and NFS-backed Satellite storage
+
+`aap-demo create --full-demo --satellite` builds and configures the Satellite
+lab when the Satellite VM does not yet exist, then installs the Satellite Demo
+content. The new `satellite-lab/build-and-configure.sh` orchestrates the lab
+non-interactively from the host (network → manifest via the satellite-manifest
+addon → VM provision → installer → content → provisioning → integrations),
+idempotently skipping completed stages. The Satellite VM now uses a minimal
+40 GB OS disk with `/var/lib/pulp` mounted from the host over NFS; the new
+`satellite-lab/00b-host-nfs-storage.sh` configures the export, firewalld rules
+(when active), and the SELinux `virt_use_nfs`/`nfs_export_all_rw` booleans (when
+Enforcing), and the kickstart mounts the export with `_netdev` in `%post`. The
+full-demo Satellite logic uses overridable helpers
+(`_full_demo_satellite_vm_exists` / `_full_demo_satellite_build`) so tests can
+drive both the build and skip paths.
+
+**Validation:** `test/test-full-demo.sh` extended with `--satellite` ordering
+and skip cases; `test-cli-parsing.sh`, `test-maintenance.sh`, `bash -n`, and
+`shellcheck --severity=warning` all pass; the host NFS export verified live
+(`exportfs`/`showmount` answer, nfs-server + rpc.mountd active).
+
 ### 46. Add the satellite-manifest addon and adapt satellite-lab for CRC user-mode networking
 
 The new `satellite-manifest` addon (`aap-demo enable satellite-manifest`, also

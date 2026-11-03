@@ -79,7 +79,19 @@ _aap_demo_auto_console() {
   printf 'console\n' >>"$LOG_FILE"
 }
 
+# Overridable satellite helpers (mirror the defaults in aap-demo.sh).
+_full_demo_satellite_vm_exists() {
+  [ "${SATELLITE_VM_EXISTS:-false}" = true ]
+}
+
+_full_demo_satellite_build() {
+  printf 'satellite build-and-configure\n' >>"$LOG_FILE"
+}
+
 full_demo_function=$(sed -n '/^cmd_full_demo()/,/^}$/p' "$AAP_DEMO_SH")
+# cmd_full_demo references FULL_DEMO_SATELLITE (set by aap-demo.sh arg parsing);
+# default it here so the extracted function runs under `set -u`.
+FULL_DEMO_SATELLITE="${FULL_DEMO_SATELLITE:-false}"
 eval "$full_demo_function"
 managed_guard=$(sed -n '/^if aap_demo_service_managed; then$/,/^fi$/p' "$AAP_DEMO_SH")
 _err() { printf 'ERROR: %s\n' "$*" >&2; }
@@ -127,6 +139,52 @@ if ! cmp -s "$LOG_FILE" "$LOG_FILE.expected"; then
   exit 1
 fi
 rm -f "$LOG_FILE.expected"
+
+# With --satellite and no existing Satellite VM, the build runs before the
+# Satellite Demo content install.
+: >"$LOG_FILE"
+FULL_DEMO_SATELLITE=true SATELLITE_VM_EXISTS=false cmd_full_demo >/dev/null
+cat >"$LOG_FILE.expected" <<'EOF'
+fleet auth status
+create quiet=true addons=mcp-server,setup-pah,product-demos,ollama,ao,fleet
+deploy skip_ao=true
+enable setup-pah provider=unset
+credentials keepalive enable
+enable ollama provider=unset
+enable ao provider=ollama
+enable fleet provider=unset
+fleet add 3 --image rhel9
+fleet start
+fleet register
+enable product-demos provider=unset
+satellite build-and-configure
+enable product-demo-satellite provider=unset
+wire
+system-info
+release-lock
+service install
+dashboard
+console
+EOF
+if ! cmp -s "$LOG_FILE" "$LOG_FILE.expected"; then
+  echo "FAIL: full demo --satellite order is incorrect"
+  diff -u "$LOG_FILE.expected" "$LOG_FILE" || true
+  rm -f "$LOG_FILE.expected"
+  exit 1
+fi
+rm -f "$LOG_FILE.expected"
+
+# With --satellite and an existing Satellite VM, the build is skipped.
+: >"$LOG_FILE"
+FULL_DEMO_SATELLITE=true SATELLITE_VM_EXISTS=true cmd_full_demo >/dev/null
+if grep -Fq 'satellite build-and-configure' "$LOG_FILE"; then
+  echo "FAIL: satellite build ran even though the VM already exists"
+  exit 1
+fi
+grep -Fq 'enable product-demo-satellite' "$LOG_FILE" || {
+  echo "FAIL: satellite demo content was not installed with an existing VM"
+  exit 1
+}
 
 : >"$LOG_FILE"
 if FAIL_SERVICE_INSTALL=true cmd_full_demo >"$LOG_FILE.output" 2>&1; then
@@ -210,6 +268,23 @@ if QUIET=true "$AAP_DEMO_SH" status --full-demo >/tmp/aap-demo-full-demo-error 2
 fi
 grep -Fq -- "--full-demo is supported only by create" /tmp/aap-demo-full-demo-error
 rm -f /tmp/aap-demo-full-demo-error
+
+# --satellite is only valid alongside create --full-demo.
+if QUIET=true "$AAP_DEMO_SH" status --satellite >/tmp/aap-demo-sat-error 2>&1; then
+  echo "FAIL: --satellite was accepted outside create"
+  rm -f /tmp/aap-demo-sat-error
+  exit 1
+fi
+grep -Fq -- "--satellite is supported only by create --full-demo" /tmp/aap-demo-sat-error
+rm -f /tmp/aap-demo-sat-error
+
+if QUIET=true "$AAP_DEMO_SH" create --satellite >/tmp/aap-demo-sat-error 2>&1; then
+  echo "FAIL: --satellite was accepted without --full-demo"
+  rm -f /tmp/aap-demo-sat-error
+  exit 1
+fi
+grep -Fq -- "--satellite is supported only by create --full-demo" /tmp/aap-demo-sat-error
+rm -f /tmp/aap-demo-sat-error
 
 unconfigured_home=$(mktemp -d)
 if HOME="$unconfigured_home" QUIET=true AAP_DEMO_DISABLE_LOCK=true \

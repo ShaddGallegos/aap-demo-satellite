@@ -139,6 +139,7 @@ DASHBOARD_NO_OPEN=false
 MAINTENANCE_APPLY=false
 MAINTENANCE_RECONFIGURE=false
 FULL_DEMO=false
+FULL_DEMO_SATELLITE=false
 SHOW_SECRETS=false
 
 for arg in "$@"; do
@@ -203,6 +204,9 @@ for arg in "$@"; do
       ;;
     --full-demo)
       FULL_DEMO=true
+      ;;
+    --satellite)
+      FULL_DEMO_SATELLITE=true
       ;;
     --show-secrets)
       SHOW_SECRETS=true
@@ -350,6 +354,10 @@ if [ "$DASHBOARD_NO_OPEN" = true ] \
 fi
 if [ "$FULL_DEMO" = true ] && [ "$COMMAND" != create ]; then
   echo "ERROR: --full-demo is supported only by create" >&2
+  exit 1
+fi
+if [ "$FULL_DEMO_SATELLITE" = true ] && ! { [ "$COMMAND" = create ] && [ "$FULL_DEMO" = true ]; }; then
+  echo "ERROR: --satellite is supported only by create --full-demo" >&2
   exit 1
 fi
 if [ "$MAINTENANCE_APPLY" = true ] && [ "$COMMAND" != maintenance ]; then
@@ -616,6 +624,9 @@ OPTIONS:
     --output FILE, --output=FILE          Write system-info to a custom path
     --no-open                             Do not open a browser for dashboard
     --full-demo                           Build the complete local demo with create
+    --satellite                           With create --full-demo: also build and configure the
+                                          Satellite lab (Satellite Build and Configure), then
+                                          install the Satellite Demo content
     --show-secrets                        Reveal credentials with interactive status only
     --ai                                  Enable AI diagnosis for diagnose
     --reset                               Clear config after destroy
@@ -662,6 +673,7 @@ CORE COMMANDS:
 CLUSTER COMMANDS:
     create                          Create the OpenShift Local cluster
     create --full-demo              Create AAP, PAH/Product Demos, AO/Ollama, Fleet, and dashboard
+    create --full-demo --satellite  Also build/configure the Satellite lab and Satellite Demo
     destroy [--reset] [--skip-cache]
                                     Delete the cluster and optionally config/cache
     stop                            Stop Fleet VMs and the cluster
@@ -2601,6 +2613,15 @@ cmd_create() {
   setup_kubeconfig
 }
 
+# Default Satellite-lab helpers for the full demo. Tests override these.
+_full_demo_satellite_vm_exists() {
+  sudo virsh -c qemu:///system dominfo satellite >/dev/null 2>&1
+}
+
+_full_demo_satellite_build() {
+  bash "${SCRIPT_DIR}/satellite-lab/build-and-configure.sh"
+}
+
 cmd_full_demo() {
   local caller_quiet="${QUIET:-false}"
   local ADDONS="mcp-server,setup-pah,product-demos,ollama,ao,fleet"
@@ -2617,6 +2638,9 @@ cmd_full_demo() {
   echo "  5. Enable Ollama and Automation Orchestrator"
   echo "  6. Enable Fleet, attach the AAP subscription, and register three RHEL 9 nodes"
   echo "  7. Enable Product Demos"
+  if [ "$FULL_DEMO_SATELLITE" = true ]; then
+    echo "  7a. Build and configure the Satellite lab (if not present), then Satellite Demo"
+  fi
   echo "  8. Reapply all integrations"
   echo "  9. Install boot recovery (restores CRC settings/state on reboot) and launch dashboard"
   echo ""
@@ -2681,6 +2705,25 @@ cmd_full_demo() {
   # override with PRODUCT_DEMOS_DOMAINS to include it.
   PRODUCT_DEMOS_DOMAINS="${PRODUCT_DEMOS_DOMAINS:-linux windows network cloud}" \
     cmd_enable product-demos || return 1
+
+  # Optional Satellite lab: build/configure the Satellite VM when it does not
+  # yet exist, then install the Satellite Demo content against it.
+  if [ "$FULL_DEMO_SATELLITE" = true ]; then
+    if ! _full_demo_satellite_vm_exists; then
+      echo ""
+      echo "▸ Satellite not found — running Satellite Build and Configure..."
+      _full_demo_satellite_build || {
+        echo "ERROR: Satellite Build and Configure failed" >&2
+        return 1
+      }
+    else
+      echo "✓ Satellite VM already exists; skipping build"
+    fi
+    echo ""
+    echo "▸ Installing Satellite Demo content..."
+    cmd_enable product-demo-satellite || return 1
+  fi
+
   cmd_wire || return 1
   aap_demo_generate_system_info || return 1
 

@@ -15,7 +15,7 @@ VM_NAME=satellite
 VM_VCPUS=4
 VM_RAM=32768                                   # MiB
 VM_DISK=/var/lib/libvirt/images/${VM_NAME}.qcow2
-VM_DISK_SIZE=150                               # GiB
+VM_DISK_SIZE=40                                # GiB (minimal OS; Pulp content on host NFS)
 RHEL_ISO=/var/lib/libvirt/images/rhel-9.5-x86_64-dvd.iso
 HOST_NET=default                               # libvirt network for NIC1 (NAT to host)
 LAB_NET=satlab                                 # from 00-network-setup.sh
@@ -46,6 +46,13 @@ sed -e "s|__ROOTPW__|$(esc "$ROOTPW")|g" \
     -e "s|__RHSM_PASS__|$(esc "$RHSM_PASS")|g" \
     satellite-vm.ks > "$RENDERED_KS"
 chmod 600 "$RENDERED_KS"
+
+# Set up the host NFS export for /var/lib/pulp before the VM boots, so the
+# kickstart %post can mount it. Skip with SATLAB_SKIP_NFS=1 (Pulp stays local).
+if [ "${SATLAB_SKIP_NFS:-0}" != "1" ]; then
+  echo "▸ Setting up host NFS storage for /var/lib/pulp..."
+  bash "$(dirname "$0")/00b-host-nfs-storage.sh"
+fi
 
 [[ -f $VM_DISK ]] || qemu-img create -f qcow2 "$VM_DISK" "${VM_DISK_SIZE}G"
 

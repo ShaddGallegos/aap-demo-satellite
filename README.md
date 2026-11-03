@@ -234,6 +234,8 @@ aap-demo enable local-cache        # restore auto-load on future deploys
 # Deployment
 aap-demo deploy              # Deploy AAP 2.7
 aap-demo create --full-demo  # Create AAP + Ollama/AO + three RHEL 9 Fleet nodes + boot recovery + dashboard
+aap-demo create --full-demo --satellite
+                             # Also build/configure the Satellite lab and Satellite Demo
 
 # Cluster management
 aap-demo status              # Show cluster status and routes; secrets stay hidden

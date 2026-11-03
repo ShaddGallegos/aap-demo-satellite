@@ -77,10 +77,17 @@ the `default` gateway (`192.168.122.1`). No extra DNS wiring is needed.
 
 ## Run order
 
+**Fully automated (recommended):** `aap-demo create --full-demo --satellite`
+runs the whole build via `build-and-configure.sh` (network → manifest →
+provision → installer → content → provisioning → integrations), then installs
+the Satellite Demo content in AAP. Use the manual steps below to run stages
+individually or to understand what the orchestrator does.
+
 | Step | Where | Script |
 |------|-------|--------|
 | 0 | KVM host (root) | `00-network-setup.sh` |
-| 1 | KVM host (root) | `01-provision-satellite-vm.sh` (renders `satellite-vm.ks`) |
+| 0b | KVM host (root) | `00b-host-nfs-storage.sh` (host NFS export for `/var/lib/pulp`) |
+| 1 | KVM host (root) | `01-provision-satellite-vm.sh` (renders `satellite-vm.ks`; runs 0b automatically) |
 | 2 | Satellite VM (root) | `02-satellite-installer.sh` |
 | 3 | Satellite VM (root) | `03-content-hammer.sh /root/manifest.zip` **or** `03-content-ansible.yml` |
 | 4 | Satellite VM (root) | `04-provisioning-kickstart.sh` |
@@ -88,8 +95,17 @@ the `default` gateway (`192.168.122.1`). No extra DNS wiring is needed.
 | 6 | Satellite VM (root) | `06-integrations.sh` (libvirt compute resource, rhc/Insights) |
 | 7 | AAP controller | `aap/` (dynamic inventory + Lightspeed notes) |
 
+`build-and-configure.sh` orchestrates steps 0–6 from the host and is
+idempotent — each stage is skipped when already complete.
+
 ## Notes & caveats
 
+- **Minimal VM disk + host NFS for Pulp.** The Satellite VM uses a small 40 GB
+  OS disk; the bulky Pulp content (`/var/lib/pulp`) is mounted from the host
+  over NFS (`00b-host-nfs-storage.sh` configures the export, firewalld when
+  active, and the SELinux `virt_use_nfs`/`nfs_export_all_rw` booleans when
+  Enforcing). Skip the NFS mount with `SATLAB_SKIP_NFS=1` to keep Pulp local
+  (then give the VM a larger disk).
 - **`on_demand` policy** is set globally *before* any repo is enabled
   (`default_redhat_download_policy`), so no multi-hour full syncs. First client
   fetch of a package is proxied and cached by Pulp (small first-hit latency).

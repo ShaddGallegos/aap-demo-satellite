@@ -15,24 +15,23 @@ network --device=52:54:00:5a:7e:01 --bootproto=static --ip=192.168.122.20 --netm
 # NIC2: satlab provisioning segment (Satellite serves DHCP/DNS/TFTP here; no default route)
 network --device=52:54:00:5a:7e:02 --bootproto=static --ip=192.168.150.10 --netmask=255.255.255.0 --nodefroute --activate
 
-# --- Disk layout: 150 GB virtio disk, LVM with dedicated Pulp/log/pgsql volumes ---
-# /boot 1G | / 40G | /var/lib/pulp 70G | /var/log 15G | /var/lib/pgsql 12G | swap 4G | ~7G slack
+# --- Disk layout: minimal 40 GB OS disk; Pulp content lives on the host via NFS ---
+# /boot 1G | / 32G | swap 4G | ~3G slack. /var/lib/pulp is mounted from the host
+# NFS export (see 00b-host-nfs-storage.sh) in %post so the VM disk stays small.
 bootloader --location=mbr --boot-drive=vda
 zerombr
 clearpart --all --initlabel --drives=vda
 part /boot --fstype=xfs --size=1024 --asprimary
 part pv.01 --fstype=lvmpv --size=1 --grow
 volgroup vg_sat pv.01
-logvol /              --vgname=vg_sat --name=lv_root  --size=40960 --fstype=xfs
-logvol /var/lib/pulp  --vgname=vg_sat --name=lv_pulp  --size=71680 --fstype=xfs
-logvol /var/log       --vgname=vg_sat --name=lv_log   --size=15360 --fstype=xfs
-logvol /var/lib/pgsql --vgname=vg_sat --name=lv_pgsql --size=12288 --fstype=xfs
+logvol /              --vgname=vg_sat --name=lv_root  --size=32768 --fstype=xfs
 logvol swap           --vgname=vg_sat --name=lv_swap  --size=4096
 
 %packages
 @core
 chrony
 firewalld
+nfs-utils
 vim-enhanced
 tmux
 bash-completion
@@ -61,4 +60,26 @@ subscription-manager repos \
 
 # FQDN must resolve locally for the installer
 echo "192.168.150.10 satellite.demo.lab satellite" >> /etc/hosts
+
+# Mount /var/lib/pulp from the host NFS export (keeps the VM OS disk small).
+# The host is reachable at the default-net gateway. NFSv4 does not need
+# rpc.mountd, so attempt the mount directly rather than relying on showmount.
+# The mount is added to fstab with _netdev so it mounts after networking.
+HOST_GW=192.168.122.1
+NFS_EXPORT=/var/lib/satlab/pulp
+mkdir -p /var/lib/pulp
+mounted=0
+for i in $(seq 1 30); do
+  if mount -t nfs4 -o rw,sync,hard,intr "$HOST_GW:$NFS_EXPORT" /var/lib/pulp 2>/dev/null; then
+    mounted=1
+    break
+  fi
+  sleep 2
+done
+if [ "$mounted" = 1 ]; then
+  grep -q "$NFS_EXPORT" /etc/fstab || \
+    echo "$HOST_GW:$NFS_EXPORT /var/lib/pulp nfs4 rw,sync,hard,intr,_netdev 0 0" >> /etc/fstab
+else
+  echo "WARN: host NFS export $NFS_EXPORT not reachable; /var/lib/pulp is local" >> /root/ks-post.log
+fi
 %end
