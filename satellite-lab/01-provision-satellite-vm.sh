@@ -16,7 +16,13 @@ VM_VCPUS=4
 VM_RAM=32768                                   # MiB
 VM_DISK=/var/lib/libvirt/images/${VM_NAME}.qcow2
 VM_DISK_SIZE=40                                # GiB (minimal OS; Pulp content on host NFS)
-RHEL_ISO=/var/lib/libvirt/images/rhel-9.5-x86_64-dvd.iso
+# Install source. Two options:
+#   DVD (default): rhel-9.5-x86_64-dvd.iso  (~10 GB, fully offline install)
+#   Boot ISO:      rhel-9.5-x86_64-boot.iso (~1 GB) + RHEL_INSTALL_SOURCE=cdn
+#                  pulls packages from the Red Hat CDN during install (needs
+#                  RHSM creds, which the kickstart already uses to register).
+RHEL_ISO="${RHEL_ISO:-/var/lib/libvirt/images/rhel-9.5-x86_64-dvd.iso}"
+RHEL_INSTALL_SOURCE="${RHEL_INSTALL_SOURCE:-dvd}"   # dvd | cdn
 HOST_NET=default                               # libvirt network for NIC1 (NAT to host)
 LAB_NET=satlab                                 # from 00-network-setup.sh
 MAC_HOST="52:54:00:5a:7e:01"                   # must match satellite-vm.ks
@@ -32,9 +38,35 @@ RHSM_PASS="${RHSM_PASS:-}"
 
 VIRSH="virsh -c qemu:///system"
 
-[[ -f $RHEL_ISO ]] || { echo "ERROR: $RHEL_ISO not found"; exit 1; }
+case "$RHEL_INSTALL_SOURCE" in
+  dvd | cdn) ;;
+  *) echo "ERROR: RHEL_INSTALL_SOURCE must be 'dvd' or 'cdn' (got '$RHEL_INSTALL_SOURCE')"; exit 1 ;;
+esac
+[[ -f $RHEL_ISO ]] || {
+  echo "ERROR: $RHEL_ISO not found"
+  if [ "$RHEL_INSTALL_SOURCE" = "cdn" ]; then
+    echo "  CDN mode needs the smaller boot ISO: rhel-9.5-x86_64-boot.iso (~1 GB)"
+    echo "  Set RHEL_ISO=/var/lib/libvirt/images/rhel-9.5-x86_64-boot.iso"
+  else
+    echo "  DVD mode needs: rhel-9.5-x86_64-dvd.iso (~10 GB)"
+    echo "  Tip: RHEL_INSTALL_SOURCE=cdn uses the ~1 GB boot ISO instead."
+  fi
+  exit 1
+}
 $VIRSH net-info "$LAB_NET" >/dev/null 2>&1 || { echo "ERROR: run 00-network-setup.sh first"; exit 1; }
 $VIRSH net-info "$HOST_NET" >/dev/null 2>&1 || { echo "ERROR: libvirt network '$HOST_NET' not found"; exit 1; }
+
+# Resolve the install source line rendered into the kickstart.
+#   dvd: no extra line — Anaconda installs from the DVD media.
+#   cdn: register with RHSM during install and pull packages from the CDN.
+INSTALL_SOURCE_LINE=""
+if [ "$RHEL_INSTALL_SOURCE" = "cdn" ]; then
+  if [ -n "$RHSM_AK" ] && [ -n "$RHSM_ORG" ]; then
+    INSTALL_SOURCE_LINE="rhsm --organization=\"$RHSM_ORG\" --activation-key=\"$RHSM_AK\""
+  else
+    INSTALL_SOURCE_LINE="rhsm --username=\"$RHSM_USER\" --password=\"$RHSM_PASS\""
+  fi
+fi
 
 # Render kickstart with secrets (escape & for sed)
 esc() { printf '%s' "${1//&/\\&}"; }
@@ -44,6 +76,7 @@ sed -e "s|__ROOTPW__|$(esc "$ROOTPW")|g" \
     -e "s|__RHSM_AK__|$(esc "$RHSM_AK")|g" \
     -e "s|__RHSM_USER__|$(esc "$RHSM_USER")|g" \
     -e "s|__RHSM_PASS__|$(esc "$RHSM_PASS")|g" \
+    -e "s|__INSTALL_SOURCE__|$(esc "$INSTALL_SOURCE_LINE")|g" \
     satellite-vm.ks > "$RENDERED_KS"
 chmod 600 "$RENDERED_KS"
 

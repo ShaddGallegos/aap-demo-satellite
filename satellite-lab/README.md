@@ -57,8 +57,14 @@ the `default` gateway (`192.168.122.1`). No extra DNS wiring is needed.
   free in `/var/lib/libvirt/images`; the libvirt `default` network active
   (`sudo virsh -c qemu:///system net-list`). CRC may be running, but is not
   required for the Satellite lab itself.
-- RHEL 9.x DVD ISO at `/var/lib/libvirt/images/rhel-9.5-x86_64-dvd.iso`
-  (edit path in `01-provision-satellite-vm.sh`).
+- RHEL 9.x install media. Two options:
+  - **DVD ISO** (default, fully offline): `rhel-9.5-x86_64-dvd.iso` (~10 GB) at
+    `/var/lib/libvirt/images/rhel-9.5-x86_64-dvd.iso`.
+  - **Boot ISO + CDN** (much smaller download): `rhel-9.5-x86_64-boot.iso`
+    (~1 GB), then install pulls packages from the Red Hat CDN. Use:
+    `RHEL_ISO=/var/lib/libvirt/images/rhel-9.5-x86_64-boot.iso RHEL_INSTALL_SOURCE=cdn`.
+    The kickstart registers with RHSM (your Vault credentials) before pulling
+    packages, so no local package tree is needed.
 - Red Hat account credentials (or an activation key) for the Satellite VM itself.
   This host's aap-demo Vault already holds `RHSM_ORG_ID` + `RHSM_ACTIVATION_KEY`;
   export them before step 1:

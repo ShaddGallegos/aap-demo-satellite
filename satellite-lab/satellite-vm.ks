@@ -1,10 +1,15 @@
 #version=RHEL9
 # satellite-vm.ks — unattended RHEL 9 base for the Satellite server.
-# Tokens __ROOTPW__ / __RHSM_*__ are rendered by 01-provision-satellite-vm.sh.
+# Tokens __ROOTPW__ / __RHSM_*__ / __INSTALL_SOURCE__ are rendered by
+# 01-provision-satellite-vm.sh.
 text
 eula --agreed
 firstboot --disable
 reboot
+# Install source: __INSTALL_SOURCE__ is rendered to either nothing (DVD media
+# install, the default) or a CDN line (boot.iso + network install from the Red
+# Hat CDN, which registers via RHSM below before packages are pulled).
+__INSTALL_SOURCE__
 lang en_US.UTF-8
 keyboard --vckeymap=us
 timezone America/Denver --utc
