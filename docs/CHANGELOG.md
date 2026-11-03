@@ -19,6 +19,25 @@ Current comparison point:
 - The earlier cumulative file/line counts predate these Fleet changes and are
   omitted rather than presented as current totals.
 
+### 49. Add a self-healing CRC vsock forward watchdog
+
+The recurring "VM running but MicroShift/SSH unreachable" fault — the CRC
+daemon's vsock forward (port 2222) dropping under load or after a daemon
+restart — is now self-healing. `scripts/aap-demo-crc-watchdog.sh` detects the
+dropped forward (VM running + SSH refused) and recovers with the least
+disruptive action that works: restart `crc-daemon.service` first, then a full
+`crc stop`/`start` only as a last resort. A systemd user timer runs the check
+every minute, installed automatically by `aap-demo service install` and removed
+by `aap-demo service disable`. Concurrent runs are serialized with a lock;
+state is written to `~/.aap-demo/crc-watchdog.state`; retry counts and sleep
+are tunable via `AAP_DEMO_WATCHDOG_*`. Documented in `docs/state-service.md`.
+
+**Validation:** `test/test-crc-watchdog.sh` covers healthy (no-op), dropped
+forward (daemon-restart recovery), and VM-stopped (no-op) scenarios with stubbed
+crc/ssh/systemctl; the timer verified live (installed, enabled, ran on schedule,
+reported healthy). test-state-service, test-dashboard-autostart, and
+test-maintenance pass; `bash -n` and `shellcheck --severity=warning` clean.
+
 ### 48. Extract status/diagnose, help, and fleet handlers from aap-demo.sh
 
 Continued the `includes/` modularization: moved `cmd_status`, `cmd_diagnose`,

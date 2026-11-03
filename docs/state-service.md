@@ -151,6 +151,26 @@ VM disks, custom libvirt connections, and host configuration outside the listed
 paths are not recoverable through this service. Unsupported attached disk paths
 or formats cause backup failure rather than an incomplete success.
 
+## CRC vsock forward watchdog
+
+The CRC daemon forwards the VM's SSH (port 2222) and API over vsock. Under load
+or after a daemon restart the forward can drop while the VM keeps running,
+leaving the cluster unreachable (`crc status` shows the VM running but
+MicroShift "Unreachable", and `aap-demo ssh` is refused). A systemd **user**
+timer self-heals this:
+
+- `scripts/aap-demo-crc-watchdog.sh check` runs every minute. When the VM is
+  running but the SSH forward is refused, it restarts `crc-daemon.service` to
+  re-establish the forward; only if that fails does it fall back to a full
+  `crc stop`/`start` (VM reboot) as a last resort.
+- Installed automatically by `aap-demo service install` and removed by
+  `aap-demo service disable`. Manage it directly with
+  `scripts/aap-demo-crc-watchdog.sh {check|install|uninstall|status}`.
+- State is written to `~/.aap-demo/crc-watchdog.state`; concurrent runs are
+  serialized with a lock. Retry counts/sleep are tunable via
+  `AAP_DEMO_WATCHDOG_DAEMON_RETRIES`, `AAP_DEMO_WATCHDOG_REBOOT_RETRIES`, and
+  `AAP_DEMO_WATCHDOG_RETRY_SLEEP`.
+
 ## Failure and recovery
 
 - Fleet guests must respond to SSH and power off cleanly before backup. CRC must

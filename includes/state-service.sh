@@ -104,6 +104,11 @@ cmd_service() {
         _err "Boot recovery is installed, but dashboard desktop autostart could not be installed"
         return 1
       }
+      # Self-healing watchdog for the CRC vsock SSH forward (user timer).
+      bash "${SCRIPT_DIR}/scripts/aap-demo-crc-watchdog.sh" install || {
+        _err "Boot recovery is installed, but the CRC watchdog timer could not be installed"
+        return 1
+      }
       ;;
     retention)
       [ "$#" -eq 1 ] || { _err "Usage: aap-demo service retention N"; return 1; }
@@ -127,6 +132,7 @@ cmd_service() {
     disable)
       sudo systemctl disable --now aap-demo.service || return 1
       aap_demo_dashboard_autostart_remove
+      bash "${SCRIPT_DIR}/scripts/aap-demo-crc-watchdog.sh" uninstall || true
       ;;
     *)
       _err "Usage: aap-demo service {install [--keep N]|retention N|status|backups|backup|disable}"
