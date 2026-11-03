@@ -56,7 +56,7 @@ test "$(fleet_access_inventory include | jq -r '.[0].password')" = "$password"
 test "$(fleet_access_inventory redact | jq -r '.[0].password')" = '******'
 SCRIPT_DIR="$REPO_ROOT"
 SHOW_SECRETS=false
-eval "$(sed -n '/^_show_fleet_status()/,/^}$/p' "$REPO_ROOT/aap-demo.sh")"
+eval "$(sed -n '/^_show_fleet_status()/,/^}$/p' "$REPO_ROOT/includes/cmd-status.sh")"
 _show_fleet_status >"$TEST_DIR/status"
 if grep -Fq "$password" "$TEST_DIR/status"; then
   echo "FAIL: default Fleet status exposed a password" >&2; exit 1

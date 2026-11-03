@@ -19,6 +19,27 @@ Current comparison point:
 - The earlier cumulative file/line counts predate these Fleet changes and are
   omitted rather than presented as current totals.
 
+### 48. Extract status/diagnose, help, and fleet handlers from aap-demo.sh
+
+Continued the `includes/` modularization: moved `cmd_status`, `cmd_diagnose`,
+and `_show_fleet_status` into `includes/cmd-status.sh`; `show_help` into
+`includes/help.sh`; and `cmd_fleet` into `includes/cmd-fleet.sh` (all
+double-source-guarded, following the cmd-dashboard.sh/maintenance.sh pattern).
+`aap-demo.sh` drops from 4,121 to 3,125 lines and is closer to
+parse-and-dispatch only. `test/test-fleet-access.sh` now sources
+`_show_fleet_status` from its new home. Note: `addons/ao-eap` is a tracked
+symlink to `addons/ao` (the CLI also normalizes the `ao-eap` alias), so there
+is no duplicated AO addon to remove.
+
+**Validation:** `bash -n` and `shellcheck --severity=warning` clean on all
+touched files; test-cli-parsing, test-full-demo, test-fleet-access,
+test-fleet-auth, test-maintenance, test-state-service,
+test-system-info-document, and test-dashboard.py all pass; `aap-demo help`,
+`status`, `status --json`, `diagnose`, and `fleet list` verified live against
+the running cluster. (test-core-commands, test-live-idempotency, test-ollama,
+test-storage-capacity, and test-ao-live-smoke fail identically before and after
+this change — they are cluster/live-dependent and unrelated.)
+
 ### 47. Add `--satellite` full-demo flag and NFS-backed Satellite storage
 
 `aap-demo create --full-demo --satellite` builds and configures the Satellite
