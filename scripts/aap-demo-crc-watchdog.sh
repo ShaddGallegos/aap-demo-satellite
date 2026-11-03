@@ -30,7 +30,18 @@ _log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 # --- detection --------------------------------------------------------------
 # Healthy = VM running AND the SSH forward answers. We treat "VM running but
 # SSH refused" as the dropped-forward fault.
-_vm_running() { [ "$(crc status 2>/dev/null | awk -F': *' '/^CRC VM:/ {print $2}')" = "Running" ]; }
+#
+# Detect the VM state from libvirt directly, not `crc status`: when the daemon
+# loses its route to the VM, `crc status` errors out ("not setup correctly"),
+# which would otherwise look like "VM stopped" and skip recovery exactly when
+# it is needed.
+_vm_running() {
+  if command -v virsh >/dev/null 2>&1; then
+    [ "$(virsh -c qemu:///system domstate crc 2>/dev/null)" = "running" ] && return 0
+  fi
+  # Fall back to crc status when virsh is unavailable.
+  [ "$(crc status 2>/dev/null | awk -F': *' '/^CRC VM:/ {print $2}')" = "Running" ]
+}
 
 _ssh_forward_up() {
   refresh_crc_ssh_config 2>/dev/null || return 1

@@ -29,6 +29,15 @@ cat >"$stub_bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
+# The watchdog detects VM state via virsh (libvirt), independent of the daemon.
+cat >"$stub_bin/virsh" <<'EOF'
+#!/usr/bin/env bash
+# Report the stubbed VM state for `virsh -c qemu:///system domstate crc`.
+if [ "${1:-}" = "-c" ]; then
+  # args: -c qemu:///system domstate crc
+  printf '%s\n' "${VM_STATE:-Running}" | tr '[:upper:]' '[:lower:]'
+fi
+EOF
 chmod +x "$stub_bin"/*
 
 # The watchdog's _ssh_forward_up needs a CRC SSH key present to attempt the
