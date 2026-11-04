@@ -84,11 +84,19 @@ _stage_provision() {
 _stage_wait_install() {
   _log "▸ Stage: wait for the kickstart install to finish (VM reboots when done)"
   # The installer reboots the VM; SSH becomes available once RHEL is up.
+  # With virt-install --noautoconsole + the kickstart `reboot`, the VM can be
+  # left shut off after the install completes — detect that and start it.
   local attempt
   for attempt in $(seq 1 120); do
     if _sat_ssh_ready; then
       _log "✓ Satellite VM is up and reachable over SSH"
       return 0
+    fi
+    # If the VM is shut off, the install finished and it needs starting.
+    if [ "$($VIRSH domstate satellite 2>/dev/null)" = "shut off" ]; then
+      _log "  VM is off after install; starting it..."
+      $VIRSH start satellite >/dev/null 2>&1 || true
+      $VIRSH autostart satellite >/dev/null 2>&1 || true
     fi
     sleep 15
   done
