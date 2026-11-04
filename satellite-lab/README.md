@@ -60,13 +60,13 @@ the `default` gateway (`192.168.122.1`). No extra DNS wiring is needed.
 - RHEL 9.x install media — **downloaded automatically** from the Red Hat CDN
   using the host's RHSM entitlement cert (`00a-fetch-rhel-iso.sh`), so no portal
   login or manual download is needed when the host is registered
-  (`subscription-manager identity`). Two install modes:
-  - **Boot ISO + CDN** (default when registered, ~1 GB download):
-    `RHEL_INSTALL_SOURCE=cdn` — boots the small ISO and pulls packages from the
-    CDN during install.
-  - **DVD ISO** (fully offline, ~10 GB): `RHEL_INSTALL_SOURCE=dvd`.
-  If the host is not registered, place the ISO at the path shown by
-  `01-provision-satellite-vm.sh` and it will be used directly.
+  (`subscription-manager identity`). The default is the **DVD ISO**
+  (`rhel-9.5-x86_64-dvd.iso`, ~10 GB), which carries the full BaseOS + AppStream
+  package tree for a fully offline install. A CDN/network install is not used:
+  the boot ISO carries no packages and the CDN does not publish a
+  `.treeinfo`-bearing install tree, so Anaconda cannot set up a network software
+  source. If the host is not registered, place the DVD ISO at
+  `/var/lib/libvirt/images/rhel-9.5-x86_64-dvd.iso` and it will be used directly.
 - Red Hat account credentials (or an activation key) for the Satellite VM itself.
   This host's aap-demo Vault already holds `RHSM_ORG_ID` + `RHSM_ACTIVATION_KEY`;
   export them before step 1:

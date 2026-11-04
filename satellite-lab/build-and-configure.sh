@@ -63,16 +63,11 @@ _stage_provision() {
     return 0
   fi
   # The ISO is downloaded automatically from the CDN (using the host's RHSM
-  # entitlement cert) when missing. Default to the small boot ISO + CDN install
-  # when the host is registered; otherwise require the full DVD.
-  local install_source="${RHEL_INSTALL_SOURCE:-}"
-  if [ -z "$install_source" ]; then
-    if sudo subscription-manager identity >/dev/null 2>&1; then
-      install_source="cdn"
-    else
-      install_source="dvd"
-    fi
-  fi
+  # entitlement cert) when missing. Default to the DVD (full offline package
+  # tree). A CDN/network install is not used: the boot ISO carries no packages
+  # and the CDN does not publish a .treeinfo-bearing install tree, so Anaconda
+  # cannot set up a network software source. The DVD is the reliable path.
+  local install_source="${RHEL_INSTALL_SOURCE:-dvd}"
   _log "▸ Stage: provision Satellite VM (unattended kickstart, source=$install_source)"
   local rhsm_user rhsm_pass rhsm_org rhsm_ak
   rhsm_user=$(_vault_val RHSM_USERNAME)

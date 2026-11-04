@@ -132,7 +132,7 @@ FLEET COMMANDS:
 SATELLITE LAB:
     The satellite-lab builds a Satellite 6 demo VM on this host and wires it
     into AAP. Prerequisites: Red Hat credentials in the Vault (aap-demo fleet
-    auth). When the host is registered with RHSM, the RHEL install ISO is
+    auth). When the host is registered with RHSM, the RHEL 9.x DVD ISO is
     downloaded automatically from the CDN (no portal login); otherwise place
     rhel-9.5-x86_64-dvd.iso in /var/lib/libvirt/images. The subscription
     manifest is generated automatically by the satellite-manifest addon.

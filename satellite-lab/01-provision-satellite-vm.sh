@@ -57,15 +57,12 @@ $VIRSH net-info "$HOST_NET" >/dev/null 2>&1 || { echo "ERROR: libvirt network '$
 #   dvd: no extra line — Anaconda installs from the DVD media.
 #   cdn: register with RHSM during install and pull packages from the CDN.
 INSTALL_SOURCE_LINE=""
-case "$RHEL_INSTALL_SOURCE" in
-  cdn)
-    if [ -n "$RHSM_AK" ] && [ -n "$RHSM_ORG" ]; then
-      INSTALL_SOURCE_LINE="rhsm --organization=\"$RHSM_ORG\" --activation-key=\"$RHSM_AK\""
-    else
-      INSTALL_SOURCE_LINE="rhsm --username=\"$RHSM_USER\" --password=\"$RHSM_PASS\""
-    fi
-    ;;
-esac
+# The rhsm kickstart command requires --organization + --activation-key (it
+# has no username/password form). Use it only when an activation key is set;
+# otherwise install from the ISO's own tree and register in %post (below).
+if [ "$RHEL_INSTALL_SOURCE" = "cdn" ] && [ -n "$RHSM_AK" ] && [ -n "$RHSM_ORG" ]; then
+  INSTALL_SOURCE_LINE="rhsm --organization=\"$RHSM_ORG\" --activation-key=\"$RHSM_AK\""
+fi
 
 # Render kickstart with secrets (escape & for sed)
 esc() { printf '%s' "${1//&/\\&}"; }
