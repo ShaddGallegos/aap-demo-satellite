@@ -48,6 +48,42 @@ tar
 %end
 
 %post --log=/root/ks-post.log
+# Write persistent NetworkManager keyfiles so the static IPs survive reboot.
+# The kickstart `network --device=<MAC>` lines only configure the install
+# environment (nm-initrd-generator); they do not persist reliably.
+mkdir -p /etc/NetworkManager/system-connections
+cat > /etc/NetworkManager/system-connections/satlab-uplink.nmconnection <<'NMEOF'
+[connection]
+id=satlab-uplink
+type=ethernet
+autoconnect=true
+[ethernet]
+mac-address=52:54:00:5A:7E:01
+[ipv4]
+method=manual
+address1=192.168.122.20/24,192.168.122.1
+dns=192.168.122.1;
+[ipv6]
+method=disabled
+NMEOF
+cat > /etc/NetworkManager/system-connections/satlab-prov.nmconnection <<'NMEOF'
+[connection]
+id=satlab-prov
+type=ethernet
+autoconnect=true
+[ethernet]
+mac-address=52:54:00:5A:7E:02
+[ipv4]
+method=manual
+address1=192.168.150.10/24
+never-default=true
+[ipv6]
+method=disabled
+NMEOF
+chmod 600 /etc/NetworkManager/system-connections/*.nmconnection
+# Remove the transient initrd-generated connections so they do not conflict.
+rm -f /etc/NetworkManager/system-connections/ksdev0.nmconnection \
+      /etc/NetworkManager/system-connections/enp*.nmconnection 2>/dev/null || true
 # Install the host's SSH public key for root so the orchestrator can SSH in
 # (RHEL 9 sshd defaults to PermitRootLogin prohibit-password, i.e. key-only).
 # __HOST_SSH_PUBKEY__ is rendered by 01-provision-satellite-vm.sh.
