@@ -69,14 +69,20 @@ _stage_provision() {
   # cannot set up a network software source. The DVD is the reliable path.
   local install_source="${RHEL_INSTALL_SOURCE:-dvd}"
   _log "▸ Stage: provision Satellite VM (unattended kickstart, source=$install_source)"
-  local rhsm_user rhsm_pass rhsm_org rhsm_ak
+  local rhsm_user rhsm_pass rhsm_org rhsm_ak ssh_pubkey
   rhsm_user=$(_vault_val RHSM_USERNAME)
   rhsm_pass=$(_vault_val RHSM_PASSWORD)
   rhsm_org=$(_vault_val RHSM_ORG_ID)
   rhsm_ak=$(_vault_val RHSM_ACTIVATION_KEY)
+  # Pass the invoking user's SSH public key (sudo changes $HOME to /root).
+  ssh_pubkey=""
+  for k in "$HOME/.ssh/id_ed25519.pub" "$HOME/.ssh/id_rsa.pub"; do
+    [ -f "$k" ] && { ssh_pubkey=$(cat "$k"); break; }
+  done
   sudo \
     RHSM_USER="$rhsm_user" RHSM_PASS="$rhsm_pass" \
     RHSM_ORG="$rhsm_org" RHSM_AK="$rhsm_ak" \
+    SATELLITE_SSH_PUBKEY="$ssh_pubkey" \
     RHEL_ISO="$RHEL_ISO" RHEL_INSTALL_SOURCE="$install_source" \
     bash "${SCRIPT_DIR}/01-provision-satellite-vm.sh"
 }

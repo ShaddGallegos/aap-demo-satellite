@@ -76,10 +76,14 @@ _ks_password_hash() {
 ROOTPW_HASH=$(_ks_password_hash "$ROOTPW")
 
 # The host's SSH public key is injected for root so the orchestrator can SSH in.
-HOST_SSH_PUBKEY=""
-for k in "$HOME/.ssh/id_ed25519.pub" "$HOME/.ssh/id_rsa.pub" /root/.ssh/id_ed25519.pub; do
-  [ -f "$k" ] && { HOST_SSH_PUBKEY=$(cat "$k"); break; }
-done
+# The orchestrator passes the invoking user's key via SATELLITE_SSH_PUBKEY
+# (sudo changes $HOME to /root, so the user's ~/.ssh is not reachable here).
+HOST_SSH_PUBKEY="${SATELLITE_SSH_PUBKEY:-}"
+if [ -z "$HOST_SSH_PUBKEY" ]; then
+  for k in "$HOME/.ssh/id_ed25519.pub" "$HOME/.ssh/id_rsa.pub" /root/.ssh/id_ed25519.pub; do
+    [ -f "$k" ] && { HOST_SSH_PUBKEY=$(cat "$k"); break; }
+  done
+fi
 
 # Render kickstart with secrets (escape & for sed)
 esc() { printf '%s' "${1//&/\\&}"; }
