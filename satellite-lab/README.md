@@ -57,17 +57,16 @@ the `default` gateway (`192.168.122.1`). No extra DNS wiring is needed.
   free in `/var/lib/libvirt/images`; the libvirt `default` network active
   (`sudo virsh -c qemu:///system net-list`). CRC may be running, but is not
   required for the Satellite lab itself.
-- RHEL 9.x install media. Three options:
-  - **Netboot (recommended, fully automatic, no ISO):** `RHEL_INSTALL_SOURCE=netboot`
-    downloads just the kernel + initrd from the CDN (a few MB) using the host's
-    RHSM entitlement cert and installs from the CDN tree. No portal download, no
-    ISO. Requires the host to be registered with RHSM (`subscription-manager
-    identity`).
-  - **DVD ISO** (default, fully offline): `rhel-9.5-x86_64-dvd.iso` (~10 GB) at
-    `/var/lib/libvirt/images/rhel-9.5-x86_64-dvd.iso`.
-  - **Boot ISO + CDN** (smaller download): `rhel-9.5-x86_64-boot.iso` (~1 GB),
-    then install pulls packages from the CDN. Use:
-    `RHEL_ISO=/var/lib/libvirt/images/rhel-9.5-x86_64-boot.iso RHEL_INSTALL_SOURCE=cdn`.
+- RHEL 9.x install media — **downloaded automatically** from the Red Hat CDN
+  using the host's RHSM entitlement cert (`00a-fetch-rhel-iso.sh`), so no portal
+  login or manual download is needed when the host is registered
+  (`subscription-manager identity`). Two install modes:
+  - **Boot ISO + CDN** (default when registered, ~1 GB download):
+    `RHEL_INSTALL_SOURCE=cdn` — boots the small ISO and pulls packages from the
+    CDN during install.
+  - **DVD ISO** (fully offline, ~10 GB): `RHEL_INSTALL_SOURCE=dvd`.
+  If the host is not registered, place the ISO at the path shown by
+  `01-provision-satellite-vm.sh` and it will be used directly.
 - Red Hat account credentials (or an activation key) for the Satellite VM itself.
   This host's aap-demo Vault already holds `RHSM_ORG_ID` + `RHSM_ACTIVATION_KEY`;
   export them before step 1:

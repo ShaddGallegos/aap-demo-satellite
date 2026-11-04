@@ -23,7 +23,9 @@ SAT_IP="${SATELLITE_LAB_IP:-192.168.122.20}"
 SAT_HOST="${SATELLITE_LAB_HOST:-satellite.demo.lab}"
 SAT_SSH="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=10 root@${SAT_IP}"
 SAT_SCP="scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes"
-RHEL_ISO="${RHEL_ISO:-/var/lib/libvirt/images/rhel-9.5-x86_64-dvd.iso}"
+# Let 01-provision-satellite-vm.sh resolve the ISO path from RHEL_INSTALL_SOURCE
+# (boot vs dvd) unless the caller pinned an explicit path.
+RHEL_ISO="${RHEL_ISO:-}"
 MANIFEST="${MANIFEST:-${AAP_DEMO_DIR:-$HOME/.aap-demo}/satellite/manifest.zip}"
 VIRSH="virsh -c qemu:///system"
 
@@ -60,23 +62,16 @@ _stage_provision() {
     _log "✓ Satellite VM already exists"
     return 0
   fi
-  # Default to the fully automatic netboot path (no ISO) when the host is
-  # registered with RHSM; otherwise require the DVD/boot ISO.
+  # The ISO is downloaded automatically from the CDN (using the host's RHSM
+  # entitlement cert) when missing. Default to the small boot ISO + CDN install
+  # when the host is registered; otherwise require the full DVD.
   local install_source="${RHEL_INSTALL_SOURCE:-}"
   if [ -z "$install_source" ]; then
     if sudo subscription-manager identity >/dev/null 2>&1; then
-      install_source="netboot"
+      install_source="cdn"
     else
       install_source="dvd"
     fi
-  fi
-  if [ "$install_source" != "netboot" ]; then
-    [ -f "$RHEL_ISO" ] || {
-      _err "RHEL ISO not found: $RHEL_ISO"
-      _err "Either register the host with RHSM (subscription-manager register) for the"
-      _err "automatic netboot path, or place the RHEL 9.x ISO at $RHEL_ISO."
-      return 1
-    }
   fi
   _log "▸ Stage: provision Satellite VM (unattended kickstart, source=$install_source)"
   local rhsm_user rhsm_pass rhsm_org rhsm_ak
