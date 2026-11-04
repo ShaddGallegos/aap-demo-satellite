@@ -64,6 +64,17 @@ if [ "$RHEL_INSTALL_SOURCE" = "cdn" ] && [ -n "$RHSM_AK" ] && [ -n "$RHSM_ORG" ]
   INSTALL_SOURCE_LINE="rhsm --organization=\"$RHSM_ORG\" --activation-key=\"$RHSM_AK\""
 fi
 
+# Hash the root password for the kickstart (never render it plaintext).
+# Pattern adapted from the MRHIS installer (openssl SHA-512, python fallback).
+_ks_password_hash() {
+  local plain="$1"
+  if command -v openssl >/dev/null 2>&1; then
+    printf '%s' "$plain" | openssl passwd -6 -stdin 2>/dev/null && return 0
+  fi
+  python3 -c 'import crypt,sys; print(crypt.crypt(sys.argv[1], crypt.mksalt(crypt.METHOD_SHA512)))' "$plain"
+}
+ROOTPW_HASH=$(_ks_password_hash "$ROOTPW")
+
 # The host's SSH public key is injected for root so the orchestrator can SSH in.
 HOST_SSH_PUBKEY=""
 for k in "$HOME/.ssh/id_ed25519.pub" "$HOME/.ssh/id_rsa.pub" /root/.ssh/id_ed25519.pub; do
@@ -73,7 +84,7 @@ done
 # Render kickstart with secrets (escape & for sed)
 esc() { printf '%s' "${1//&/\\&}"; }
 RENDERED_KS=$(mktemp /tmp/satellite-vm.XXXXXX.ks)
-sed -e "s|__ROOTPW__|$(esc "$ROOTPW")|g" \
+sed -e "s|__ROOTPW_HASH__|$(esc "$ROOTPW_HASH")|g" \
     -e "s|__RHSM_ORG__|$(esc "$RHSM_ORG")|g" \
     -e "s|__RHSM_AK__|$(esc "$RHSM_AK")|g" \
     -e "s|__RHSM_USER__|$(esc "$RHSM_USER")|g" \

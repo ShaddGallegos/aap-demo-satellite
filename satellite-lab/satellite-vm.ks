@@ -13,7 +13,7 @@ __INSTALL_SOURCE__
 lang en_US.UTF-8
 keyboard --vckeymap=us
 timezone America/Denver --utc
-rootpw __ROOTPW__ --plaintext
+rootpw __ROOTPW_HASH__ --iscrypted
 
 # NIC1: libvirt 'default' network (NAT to host + upstream; DNS via host dnsmasq at .122.1)
 network --device=52:54:00:5a:7e:01 --bootproto=static --ip=192.168.122.20 --netmask=255.255.255.0 --gateway=192.168.122.1 --nameserver=192.168.122.1 --hostname=satellite.demo.lab --activate
