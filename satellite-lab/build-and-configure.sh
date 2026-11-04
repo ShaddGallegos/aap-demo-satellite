@@ -60,12 +60,25 @@ _stage_provision() {
     _log "✓ Satellite VM already exists"
     return 0
   fi
-  [ -f "$RHEL_ISO" ] || {
-    _err "RHEL ISO not found: $RHEL_ISO"
-    _err "Download the RHEL 9.x DVD ISO from access.redhat.com and place it there."
-    return 1
-  }
-  _log "▸ Stage: provision Satellite VM (unattended kickstart)"
+  # Default to the fully automatic netboot path (no ISO) when the host is
+  # registered with RHSM; otherwise require the DVD/boot ISO.
+  local install_source="${RHEL_INSTALL_SOURCE:-}"
+  if [ -z "$install_source" ]; then
+    if sudo subscription-manager identity >/dev/null 2>&1; then
+      install_source="netboot"
+    else
+      install_source="dvd"
+    fi
+  fi
+  if [ "$install_source" != "netboot" ]; then
+    [ -f "$RHEL_ISO" ] || {
+      _err "RHEL ISO not found: $RHEL_ISO"
+      _err "Either register the host with RHSM (subscription-manager register) for the"
+      _err "automatic netboot path, or place the RHEL 9.x ISO at $RHEL_ISO."
+      return 1
+    }
+  fi
+  _log "▸ Stage: provision Satellite VM (unattended kickstart, source=$install_source)"
   local rhsm_user rhsm_pass rhsm_org rhsm_ak
   rhsm_user=$(_vault_val RHSM_USERNAME)
   rhsm_pass=$(_vault_val RHSM_PASSWORD)
@@ -74,7 +87,7 @@ _stage_provision() {
   sudo \
     RHSM_USER="$rhsm_user" RHSM_PASS="$rhsm_pass" \
     RHSM_ORG="$rhsm_org" RHSM_AK="$rhsm_ak" \
-    RHEL_ISO="$RHEL_ISO" \
+    RHEL_ISO="$RHEL_ISO" RHEL_INSTALL_SOURCE="$install_source" \
     bash "${SCRIPT_DIR}/01-provision-satellite-vm.sh"
 }
 

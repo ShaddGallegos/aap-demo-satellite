@@ -131,12 +131,13 @@ FLEET COMMANDS:
 
 SATELLITE LAB:
     The satellite-lab builds a Satellite 6 demo VM on this host and wires it
-    into AAP. Prerequisites: RHEL 9.x install media and Red Hat credentials in
-    the Vault (aap-demo fleet auth). Media options: the DVD ISO
-    (rhel-9.5-x86_64-dvd.iso, ~10 GB, offline) or the smaller boot ISO with a
-    CDN install (rhel-9.5-x86_64-boot.iso, ~1 GB; set RHEL_ISO to its path and
-    RHEL_INSTALL_SOURCE=cdn). The subscription manifest is generated
-    automatically by the satellite-manifest addon.
+    into AAP. Prerequisites: Red Hat credentials in the Vault (aap-demo fleet
+    auth) and, for the fully automatic path, the host registered with RHSM.
+    Install media: RHEL_INSTALL_SOURCE=netboot (default recommended; no ISO —
+    boots the kernel/initrd straight from the CDN using the host entitlement),
+    dvd (rhel-9.5-x86_64-dvd.iso, offline), or cdn (rhel-9.5-x86_64-boot.iso).
+    The subscription manifest is generated automatically by the
+    satellite-manifest addon.
 
     create --full-demo --satellite  Build AAP + the full Satellite lab and demo
     enable satellite-manifest       Generate/download the Satellite manifest only
