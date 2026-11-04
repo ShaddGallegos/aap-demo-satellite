@@ -48,6 +48,14 @@ tar
 %end
 
 %post --log=/root/ks-post.log
+# Install the host's SSH public key for root so the orchestrator can SSH in
+# (RHEL 9 sshd defaults to PermitRootLogin prohibit-password, i.e. key-only).
+# __HOST_SSH_PUBKEY__ is rendered by 01-provision-satellite-vm.sh.
+mkdir -p /root/.ssh
+chmod 700 /root/.ssh
+echo "__HOST_SSH_PUBKEY__" >> /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys
+restorecon -R /root/.ssh 2>/dev/null || true
 # Register (activation key preferred, username/password fallback)
 if [ -n "__RHSM_AK__" ]; then
   subscription-manager register --org="__RHSM_ORG__" --activationkey="__RHSM_AK__"

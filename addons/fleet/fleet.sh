@@ -378,7 +378,7 @@ fleet_node_create() {
     -drive "file=${node_dir}/cloud-init.iso,format=raw,if=virtio"
     -netdev "user,id=net0,hostfwd=tcp:0.0.0.0:${port}-:22"
     -device "virtio-net,netdev=net0"
-    -display none
+    -display "vnc=127.0.0.1:$((port - 2200 + 10))"
     -pidfile "${node_dir}/qemu.pid"
     -daemonize
     -serial "file:${node_dir}/console.log"
@@ -389,7 +389,7 @@ fleet_node_create() {
     qemu_cmd+=($bios_args)
   fi
 
-  echo "  Starting VM ${hostname} (port ${port})..."
+  echo "  Starting VM ${hostname} (port ${port}, VNC 127.0.0.1:$((port - 2200 + 10)))..."
   if ! "${qemu_cmd[@]}" 2>"${node_dir}/qemu-error.log"; then
     _err "Failed to start QEMU VM"
     cat "${node_dir}/qemu-error.log" >&2
@@ -526,7 +526,7 @@ fleet_node_start() {
     -drive "file=${node_dir}/cloud-init.iso,format=raw,if=virtio"
     -netdev "user,id=net0,hostfwd=tcp:0.0.0.0:${port}-:22"
     -device "virtio-net,netdev=net0"
-    -display none
+    -display "vnc=127.0.0.1:$((port - 2200 + 10))"
     -pidfile "${node_dir}/qemu.pid"
     -daemonize
     -serial "file:${node_dir}/console.log"
@@ -536,7 +536,7 @@ fleet_node_start() {
     qemu_cmd+=($bios_args)
   fi
 
-  echo "  Starting VM ${hostname} (port ${port})..."
+  echo "  Starting VM ${hostname} (port ${port}, VNC 127.0.0.1:$((port - 2200 + 10)))..."
   if ! "${qemu_cmd[@]}" 2>"${node_dir}/qemu-error.log"; then
     _err "Failed to restart ${hostname}"
     cat "${node_dir}/qemu-error.log" >&2

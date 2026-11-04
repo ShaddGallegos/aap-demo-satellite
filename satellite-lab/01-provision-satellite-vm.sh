@@ -64,6 +64,12 @@ if [ "$RHEL_INSTALL_SOURCE" = "cdn" ] && [ -n "$RHSM_AK" ] && [ -n "$RHSM_ORG" ]
   INSTALL_SOURCE_LINE="rhsm --organization=\"$RHSM_ORG\" --activation-key=\"$RHSM_AK\""
 fi
 
+# The host's SSH public key is injected for root so the orchestrator can SSH in.
+HOST_SSH_PUBKEY=""
+for k in "$HOME/.ssh/id_ed25519.pub" "$HOME/.ssh/id_rsa.pub" /root/.ssh/id_ed25519.pub; do
+  [ -f "$k" ] && { HOST_SSH_PUBKEY=$(cat "$k"); break; }
+done
+
 # Render kickstart with secrets (escape & for sed)
 esc() { printf '%s' "${1//&/\\&}"; }
 RENDERED_KS=$(mktemp /tmp/satellite-vm.XXXXXX.ks)
@@ -73,6 +79,7 @@ sed -e "s|__ROOTPW__|$(esc "$ROOTPW")|g" \
     -e "s|__RHSM_USER__|$(esc "$RHSM_USER")|g" \
     -e "s|__RHSM_PASS__|$(esc "$RHSM_PASS")|g" \
     -e "s|__INSTALL_SOURCE__|$(esc "$INSTALL_SOURCE_LINE")|g" \
+    -e "s|__HOST_SSH_PUBKEY__|$(esc "$HOST_SSH_PUBKEY")|g" \
     satellite-vm.ks > "$RENDERED_KS"
 chmod 600 "$RENDERED_KS"
 
@@ -97,9 +104,9 @@ virt-install \
   --network network="$LAB_NET",model=virtio,mac="$MAC_LAB" \
   --location "$RHEL_ISO",kernel=images/pxeboot/vmlinuz,initrd=images/pxeboot/initrd.img \
   --initrd-inject "$RENDERED_KS" \
-  --extra-args "inst.ks=file:/$(basename "$RENDERED_KS") console=ttyS0,115200n8" \
+  --extra-args "inst.ks=file:/$(basename "$RENDERED_KS") console=tty0 console=ttyS0,115200n8" \
   --os-variant rhel9.0 \
-  --graphics none --console pty,target_type=serial \
+  --graphics vnc,listen=127.0.0.1 --video vga --console pty,target_type=serial \
   --noautoconsole
 rm -f "$RENDERED_KS"
 cat <<EOF
