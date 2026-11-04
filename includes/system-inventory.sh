@@ -48,7 +48,30 @@ _aap_demo_inventory_routes() {
 
 # External routes: services that are not Kubernetes routes but should appear in
 # the dashboard Routes list. Currently the Satellite lab VM, surfaced once the
-# satellite-manifest addon is enabled and the VM answers on its lab address.
+# External namespaces: non-cluster workloads that should appear in the
+# dashboard Namespaces list. Currently the Satellite lab VM, surfaced once the
+# satellite-manifest addon is enabled and the VM exists.
+_aap_demo_inventory_external_namespaces() {
+  local addons_text="$1"
+  grep -qw 'satellite-manifest' <<<"$addons_text" || return 0
+  command -v virsh >/dev/null 2>&1 || return 0
+
+  local state ready=false
+  state=$(virsh -c qemu:///system domstate satellite 2>/dev/null) || return 0
+  [ -n "$state" ] || return 0
+  [ "$state" = "running" ] && ready=true
+
+  jq -cn --argjson ready "$ready" '
+    {
+      name: "satellite-lab",
+      running_pods: (if $ready then 1 else 0 end),
+      total_pods: 1,
+      ready: $ready,
+      external: true
+    }'
+}
+
+# satellite-manifest addon is enabled and the Satellite VM exists.
 _aap_demo_inventory_external_routes() {
   local addons_text="$1"
   # Only when the satellite-manifest addon is enabled.
@@ -61,13 +84,21 @@ _aap_demo_inventory_external_routes() {
   if [ -z "$sat_ip" ]; then
     sat_ip="${SATELLITE_LAB_IP:-192.168.122.20}"
   fi
-  # Only surface the route when the Satellite VM answers HTTPS on its address.
-  curl -sk --connect-timeout 3 --max-time 5 -o /dev/null \
-    "https://${sat_ip}/" 2>/dev/null || return 0
+
+  # Surface the route once the Satellite VM exists and is running (so it shows
+  # during the build), marking it admitted only once it answers HTTPS.
+  command -v virsh >/dev/null 2>&1 || return 0
+  [ "$(virsh -c qemu:///system domstate satellite 2>/dev/null)" = "running" ] || return 0
+
+  local admitted=false
+  if curl -sk --connect-timeout 3 --max-time 5 -o /dev/null "https://${sat_ip}/" 2>/dev/null; then
+    admitted=true
+  fi
 
   jq -cn \
     --arg host "$sat_host" \
     --arg ip "$sat_ip" \
+    --argjson admitted "$admitted" \
     '{
       namespace: "satellite-lab",
       name: "satellite",
@@ -76,7 +107,7 @@ _aap_demo_inventory_external_routes() {
       service: "satellite",
       target_port: "https",
       tls: "edge",
-      admitted: true,
+      admitted: $admitted,
       resolved_ipv4: $ip,
       external: true
     }'
@@ -511,6 +542,12 @@ aap_demo_collect_system_inventory() {
     services=$(_aap_demo_inventory_services "$namespaces")
     pods=$(_aap_demo_inventory_pods "$namespaces")
     namespace_status=$(_aap_demo_inventory_namespaces "$namespaces" "$pods")
+    # Append external (non-cluster) namespace entries such as the Satellite lab VM.
+    local ext_ns
+    while IFS= read -r ext_ns; do
+      [ -n "$ext_ns" ] || continue
+      namespace_status=$(jq -c --argjson row "$ext_ns" '. + [$row]' <<<"$namespace_status")
+    done < <(_aap_demo_inventory_external_namespaces "$addons_text")
     routes=$(_aap_demo_inventory_routes "$addons_text")
     credentials=$(_aap_demo_inventory_credentials "$secret_mode")
     ingress=$(_aap_demo_inventory_ingress)
