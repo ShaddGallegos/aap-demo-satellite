@@ -327,11 +327,16 @@ integrations → AAP inventory).
 **Full demo integration:** `aap-demo create --full-demo --satellite` builds and
 configures the Satellite lab automatically when the Satellite VM does not yet
 exist (via `satellite-lab/build-and-configure.sh`), then installs the Satellite
-Demo content (`product-demo-satellite`) against it. The Satellite VM uses a
-minimal 40 GB OS disk with `/var/lib/pulp` mounted from the host over NFS
+Demo content (`product-demo-satellite`) against it. The RHEL 9.x DVD ISO is
+downloaded automatically from the Red Hat CDN using the host's RHSM entitlement
+cert (`satellite-lab/00a-fetch-rhel-iso.sh`) — no portal login. The Satellite VM
+uses a minimal 40 GB OS disk with `/var/lib/pulp` mounted from the host over NFS
 (`satellite-lab/00b-host-nfs-storage.sh` sets up the export, firewalld, and
-SELinux booleans). Once the Satellite VM is serving HTTPS, its URL appears in
-the dashboard Routes list.
+SELinux booleans), a VNC graphical console viewable in virt-manager, and a
+hashed root password with the invoking user's SSH key injected for access. The
+Satellite appears in the dashboard Routes list (pending during the build,
+admitted once it serves HTTPS) and as an external `satellite-lab` entry in
+Namespaces.
 
 ### Common Commands
 

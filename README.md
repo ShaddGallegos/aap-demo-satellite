@@ -430,7 +430,10 @@ ssh -p 2201 admin@127.0.0.1              # Password login to node 1
 ```
 
 Each fleet node card on the dashboard also has power buttons (start / stop /
-restart) that call the same per-node power control.
+restart) that call the same per-node power control. Each node also gets a VNC
+console (node 1 → `vnc://127.0.0.1:5911`, node 2 → `:5912`, node 3 → `:5913`)
+viewable with a VNC viewer; fleet nodes are raw QEMU user-mode processes, so
+they do not appear in virt-manager's VM list (which shows libvirt domains).
 
 Each node has its own generated admin password, retained in the shared encrypted
 Vault under `aap_demo.fleet.node_<index>.password`. Registration reuses the

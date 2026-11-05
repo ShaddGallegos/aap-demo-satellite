@@ -19,6 +19,35 @@ Current comparison point:
 - The earlier cumulative file/line counts predate these Fleet changes and are
   omitted rather than presented as current totals.
 
+### 51. Fully automatic Satellite lab: ISO download, reliable install, dashboard visibility
+
+The satellite-lab is now fully automatic end-to-end. `00a-fetch-rhel-iso.sh`
+downloads the RHEL 9.x DVD ISO from the Red Hat CDN using the host's RHSM
+entitlement certificate — no portal login or manual download. The kickstart
+writes persistent NetworkManager keyfiles in `%post` so the static IPs survive
+the post-install reboot (the `network --device=<MAC>` lines only configure the
+install environment), injects the invoking user's SSH public key for root
+(passed through sudo via `SATELLITE_SSH_PUBKEY`, since sudo changes `$HOME` to
+/root), and hashes the root password (`rootpw --iscrypted`, SHA-512) instead of
+rendering it plaintext. The Satellite VM gets a VNC graphical console
+(`--graphics vnc --video vga`, dual `console=tty0 console=ttyS0`) so
+virt-manager shows a live console, and `build-and-configure.sh` starts the VM
+when the install leaves it shut off. The dashboard now surfaces the Satellite
+lab in Routes (pending during the build, admitted once it serves HTTPS) and as
+an external `satellite-lab` entry in Namespaces. Fleet nodes get VNC displays
+(5911+, offset to avoid colliding with the Satellite VM).
+
+Note: a CDN/network install source is not used — the boot ISO carries no
+packages and the CDN does not publish a `.treeinfo`-bearing install tree, so
+Anaconda cannot set up a network software source. The DVD ISO (full BaseOS +
+AppStream tree) is the reliable automated path.
+
+**Validation:** kickstart validated with pykickstart; the DVD downloads via the
+entitlement cert (11 GB, valid bootable tree); the VM installs, registers with
+RHSM, mounts the host NFS `/var/lib/pulp`, and is reachable over key-based SSH;
+test-cli-parsing, test-full-demo, test-system-info-document, and
+test-dashboard.py pass; `bash -n` and `shellcheck --severity=warning` clean.
+
 ### 50. Add per-node fleet power control (CLI + dashboard)
 
 Fleet nodes can now be power-controlled individually. The new

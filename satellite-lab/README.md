@@ -1,7 +1,12 @@
 # Satellite 6 Fast Demo Lab on a Single KVM/libvirt Host
 
-Everything in this folder is ready to run. Adjust the variables at the top of each
-script (passwords, RHSM credentials, manifest path, versions) before executing.
+Everything in this folder is ready to run. The fully automatic path is
+`aap-demo create --full-demo --satellite` (or `sudo satellite-lab/build-and-configure.sh`
+for just the lab), which downloads the RHEL ISO, provisions the VM, installs
+Satellite, and configures content with no manual steps when the host is
+registered with RHSM. Adjust the variables at the top of each script
+(passwords, RHSM credentials, manifest path, versions) only if you run the
+stages individually.
 
 ## Architecture
 
