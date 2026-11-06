@@ -9,7 +9,8 @@ virtual environment.
 
 ## Overview
 
-This addon uses the **official APME EAP welcome pack playbooks** executed locally via `ansible-playbook`. This implementation:
+This addon uses the **official APME EAP welcome pack playbooks** executed
+locally via `ansible-playbook`. This implementation:
 
 - **Local execution**: Playbooks run in isolated Python venv (no AAP API dependency)
 - **KUBECONFIG authentication**: Uses standard kubeconfig for cluster access
@@ -29,12 +30,13 @@ authentication.
 
 - `kubectl` or `oc`
 - `python3` (3.8+)
-- `helm` 3.10+ (portal Helm chart — auto-installed via brew/dnf when missing)
+- AAP execution environment with network access to `get.helm.sh` (the playbook bootstraps a pinned Helm client)
 - AAP deployed (`aap-demo deploy`)
 
 The addon uses the portal Helm chart's standard RHDH image and delivers the APME plugins
 through the chart's runtime OCI plugin installer. The deploy bootstraps the local registry,
-pushes the bundled plugin archive with `skopeo`, and runs `install-dynamic-plugins` in the
+publishes the bundled plugin archive with the AAP execution environment's standard-library
+OCI publisher, and runs `install-dynamic-plugins` in the
 chart-provided init container.
 
 **Ansible installation** (auto-installed in venv):
@@ -211,7 +213,8 @@ Then re-run:
 aap-demo enable apme-eap
 ```
 
-For detailed GitHub setup instructions, see the [APME EAP welcome pack documentation](https://drive.google.com/drive/folders/146Yc3TDKgX0l7k1etdJVXZ2NqhBvPuqr).
+For detailed GitHub setup instructions, see the
+[APME EAP welcome pack documentation](https://drive.google.com/drive/folders/146Yc3TDKgX0l7k1etdJVXZ2NqhBvPuqr).
 
 ### Advanced Configuration
 
@@ -225,6 +228,40 @@ Edit `~/.aap-demo/apme-eap-vars.yml` to customize:
 - **portal_helm_chart_version** - Override RHDH chart version
 - **apme_helm_chart_version** - Override APME gateway chart version
 - **devspaces_base_url** - Enable "Open in DevSpaces" actions
+
+### Local Registry and Plugin Archives
+
+The addon publishes the bundled APME dynamic-plugin archive to the in-cluster registry before
+installing the portal Helm release. On OpenShift Local, that registry is exposed through an
+OpenShift Route, so the registry API can return redirects during blob and manifest operations.
+The publisher follows those redirects automatically.
+
+The archive is stored under the repository path expected by the portal's runtime installer:
+
+```text
+registry.apps.127.0.0.1.nip.io/apme/apme-prototype-plugins:<version>
+```
+
+This path is part of the deployment contract. If the archive is pushed to only `apme:<version>`,
+the portal can start successfully but its dynamic-plugin init container will fail with a
+`manifest unknown` error because it requests `apme/apme-prototype-plugins:<version>`.
+
+When troubleshooting a failed enablement, check the APME deployment report for the first
+registry or portal error, then verify the archive and portal rollout:
+
+```bash
+kubectl get pods -n apme
+kubectl rollout status deployment/redhat-rhaap-portal -n apme
+```
+
+The addon also uses explicit boolean comparisons for standalone Ansible `when` expressions and
+`kubectl exec` for gateway seeding. These choices keep the playbooks compatible with the strict
+conditional handling in newer Ansible releases and avoid the unavailable `kubernetes.core.k8s_exec`
+client path in the APME execution environment.
+
+For detailed registry troubleshooting, set `APME_OCI_PUSH_DEBUG=1` before enabling the addon. The
+publisher then writes redirect chains, contacted endpoints, and progress for large blob uploads to
+stderr without changing the normal output or registry behavior.
 
 ## Differences from Bash Addon
 
@@ -355,6 +392,25 @@ kubectl get secret -n aap-operator <aap-cr-name> -o jsonpath='{.data.admin_passw
 # Verify password works by logging into AAP web UI
 ```
 
+### OAuth login fails on CRC or MicroShift
+
+The portal uses the external HTTPS AAP route for browser access. On CRC, its
+backend uses `http://<aap-route>` for the in-cluster token exchange and
+receives a `hostAliases` entry for the AAP Service. On MicroShift, `nip.io`
+routes continue to use HTTPS through the router and receive router aliases for
+the AAP and registry routes. This applies to the default `apps.crc.testing`
+domain and `nip.io` routes respectively.
+
+If login still fails, check the generated values and portal environment:
+
+```bash
+grep -E '^aap_(host|host_url):' ~/.aap-demo/apme-eap-vars.yml
+kubectl exec deploy/redhat-rhaap-portal -n apme -- \
+  printenv AAP_HOST_URL
+kubectl get deploy redhat-rhaap-portal -n apme \
+  -o jsonpath='{.spec.template.spec.hostAliases}'
+```
+
 ### Portal image or plugin pull fails
 
 **Symptom**: Portal pod stays in `ImagePullBackOff`
@@ -365,27 +421,19 @@ kubectl get secret -n aap-operator <aap-cr-name> -o jsonpath='{.data.admin_passw
 2. Re-push the bundled OCI archive by setting `apme_oci_push_force: true`
 3. Re-deploy: `aap-demo enable apme-eap`
 
-### Helm not installed
+### Helm bootstrap
 
 **Symptom**: Playbook fails with `Failed to find required executable 'helm'` or `helm: command not found`
 
-**Solution**: Re-run enable — helm is auto-installed when Homebrew (`brew`) or `dnf` is available:
+**Solution**: Re-run enable. The AAP job downloads the pinned Helm client
+into its writable `/tmp` area; no Windows or host Helm installation is
+required.
 
 ```bash
 aap-demo enable apme-eap
 ```
 
-Or install manually:
-
-```bash
-# macOS
-brew install helm
-
-# RHEL/Fedora
-sudo dnf install helm
-```
-
-Verify: `helm version --short` (requires 3.10+).
+The selected AAP execution environment must be able to reach `https://get.helm.sh`.
 
 ### Helm timeout
 
@@ -491,3 +539,4 @@ ansible-playbook playbooks/deploy_apme_portal.yml \
 - [aap-demo Documentation](../../docs/FULL-README.md) - Main aap-demo documentation
 - [APME GitHub Repository](https://github.com/ansible/apme) - APME source code
 - [APME Plugins Repository](https://github.com/ansible/ansible-rhdh-plugins) - RHDH plugins for APME
+<!-- markdownlint-disable MD013 -->

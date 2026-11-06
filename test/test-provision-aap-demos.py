@@ -57,7 +57,7 @@ def test_control_job_extra_vars_include_agent_binding():
         ao_integration_id="aap-integration",
         ao_agent_credential_id="llm-credential",
         ao_agent_integration_id="llm-integration",
-        ao_agent_model_id="gpt-5.6-luna-model-id",
+        ao_agent_model_id="gpt-6-luna-model-id",
         ao_mcp_credential_id="mcp-credential",
         ao_mcp_integration_id="mcp-integration",
     )
@@ -66,7 +66,7 @@ def test_control_job_extra_vars_include_agent_binding():
 
     assert extra_vars["ao_agent_credential_id"] == "llm-credential"
     assert extra_vars["ao_agent_integration_id"] == "llm-integration"
-    assert extra_vars["ao_agent_model_id"] == "gpt-5.6-luna-model-id"
+    assert extra_vars["ao_agent_model_id"] == "gpt-6-luna-model-id"
     assert extra_vars["ao_mcp_credential_id"] == "mcp-credential"
     assert extra_vars["ao_mcp_integration_id"] == "mcp-integration"
 

@@ -752,7 +752,7 @@ wire_ao_ensure_integration() {
   local base_url="$3"
   local credential_id="$4"
   local discover_tools="${5:-false}"
-  local integration_id payload result discovered_tools_json
+  local integration_id payload result discovery_payload
 
   integration_id=$(wire_ao_find_integration_by_name "$name")
   local config_json
@@ -795,15 +795,15 @@ wire_ao_ensure_integration() {
         scope: "global"
       }')
     if [ "$discover_tools" = true ]; then
-      discovered_tools_json=$(wire_ao_api POST "/integrations/discover" \
-        "$(jq -n \
-          --arg type "$integration_type" \
-          --arg cred "$credential_id" \
-          --argjson config "$config_json" \
-          '{integration_type: $type, configuration: $config, credential_id: $cred}')" 2>/dev/null \
-        | jq '[.discovered_tools[]? | {name: .name, description: (.description // ""), enabled: true}]' 2>/dev/null)
-      if [ -n "$discovered_tools_json" ] && [ "$discovered_tools_json" != "[]" ] && [ "$discovered_tools_json" != "null" ]; then
-        payload=$(echo "$payload" | jq --argjson tools "$discovered_tools_json" '. + {discovered_tools: $tools}')
+      # Discovery can return hundreds of tools.  Keep the create request small;
+      # the refresh below populates and enables the tools after creation.
+      discovery_payload=$(jq -n \
+        --arg type "$integration_type" \
+        --arg cred "$credential_id" \
+        --argjson config "$config_json" \
+        '{integration_type: $type, configuration: $config, credential_id: $cred}')
+      if ! wire_ao_api POST "/integrations/discover" "$discovery_payload" >/dev/null 2>&1; then
+        wire_warn "MCP discovery probe failed; AO will retry during refresh"
       fi
     fi
     result=$(wire_ao_api POST "/integrations" "$payload" 2>/dev/null)
@@ -942,9 +942,9 @@ wire_ao_llm_model_name() {
   case "${AO_LLM_PROVIDER:-ollama}" in
     external)
       if [ "${AO_LLM_MODEL:-}" = luna ]; then
-        printf '%s\n' gpt-5.6-luna
+        printf '%s\n' gpt-6-luna
       else
-        printf '%s\n' "${AO_LLM_MODEL:-gpt-5.6-luna}"
+        printf '%s\n' "${AO_LLM_MODEL:-gpt-6-luna}"
       fi
       ;;
     ollama) printf '%s\n' "$WIRE_OLLAMA_MODEL" ;;
@@ -1245,6 +1245,31 @@ wire_ao_ollama() {
   wire_log "  ✓ Ollama wired as LLM provider"
 }
 
+wire_subscription_attach() {
+  local subscription_attach_dir
+
+  if ! wire_aap_deployed; then
+    return 0
+  fi
+
+  wire_log "Checking AAP subscription status..."
+
+  subscription_attach_dir="${REPO_ROOT}/addons/subscription-attach"
+  if [ ! -f "${subscription_attach_dir}/deploy.sh" ]; then
+    wire_warn "subscription-attach addon not found - skipping"
+    return 0
+  fi
+
+  # Run subscription-attach addon (non-blocking - warns on failure)
+  # shellcheck source=../addons/subscription-attach/deploy.sh
+  if ! bash "${subscription_attach_dir}/deploy.sh" deploy 2>&1; then
+    wire_warn "Subscription attachment failed - you can attach manually in AAP UI (Settings → Subscription)"
+    return 0
+  fi
+
+  wire_log "✓ Subscription check complete"
+}
+
 aap_demo_wire() {
   wire_require_tools || return 1
   if ! wire_cluster_ready; then
@@ -1256,6 +1281,7 @@ aap_demo_wire() {
   wire_log "Addon wiring (cluster-local endpoints)..."
   wire_log ""
 
+  wire_subscription_attach || true
   wire_apd_aap_credential
   wire_apd_galaxy_if_present
   wire_apd_openshift

@@ -86,8 +86,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq qemu-utils rsync libxml2-utils
 
+      - name: Install kubectl
+        run: |
+          if ! command -v kubectl >/dev/null 2>&1; then
+            curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/v1.31.4/bin/linux/amd64/kubectl"
+            sudo install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+          fi
+
       - name: Run all non-live unit tests
         run: ./test/run-unit-tests.sh
+
+      - name: Run plaibook EE CI configuration test
+        run: bash ./test/test-plaibook-ee-ci.sh
+
+      - name: Run plaibook publication verdict test
+        run: bash ./test/test-plaibook-publication.sh
+
+      - name: Run AO PR testing model configuration test
+        run: bash ./test/test-ao-pr-testing-model.sh
 
   dry-run:
     name: Dry Run Test
@@ -126,3 +142,18 @@ jobs:
             fi
           done < <(find . -name "*.sh" -type f)
           exit $EXIT_CODE
+
+  powershell-tests:
+    name: PowerShell Deploy Tests
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Windows PowerShell 5.1 deploy tests
+        shell: powershell
+        run: .\test\test-powershell-deploy-prerequisites.ps1
+
+      - name: Run PowerShell 7 deploy tests
+        shell: pwsh
+        run: ./test/test-powershell-deploy-prerequisites.ps1

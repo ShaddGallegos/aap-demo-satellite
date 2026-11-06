@@ -42,10 +42,20 @@
       "host_gib": 0,
       "description": "Automation Orchestrator, catalog/operator images, PostgreSQL, and demo data."
     },
+    "ao-pr-testing": {
+      "vm_gib": 4,
+      "host_gib": 0,
+      "description": "OpenShift MCP server and PR validation execution environment for AO."
+    },
     "apme-eap": {
       "vm_gib": 12,
       "host_gib": 0,
       "description": "Early-access portal workloads, plugins, and deployment artifacts."
+    },
+    "keycloak": {
+      "vm_gib": 2,
+      "host_gib": 0,
+      "description": "Keycloak OIDC provider and its PostgreSQL database."
     },
     "local-cache": {
       "vm_gib": 0,

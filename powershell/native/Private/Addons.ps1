@@ -1,5 +1,6 @@
 $Script:AapAvailableAddons = @(
-  'mcp-server', 'portal', 'setup-pah', 'ao', 'apme-eap', 'local-cache'
+  'mcp-server', 'portal', 'portal-operator', 'setup-pah', 'ao',
+  'product-demos', 'opa', 'ollama'
 )
 
 function Test-AapWslBashPath {
@@ -70,23 +71,32 @@ function Get-AapGitBashPath {
 function Invoke-AapAddonDeployScript {
   param(
     [Parameter(Mandatory)][string]$Addon,
-    [string[]]$ScriptArgs = @()
+    [string[]]$ScriptArgs = @(),
+    [string]$Namespace = $Script:AapDemoDefaultNamespace,
+    [hashtable]$Environment = @{}
   )
 
-  $deploySh = Join-Path $Script:AapDemoRepoRoot "addons/$Addon/deploy.sh"
-  if (-not (Test-Path -LiteralPath $deploySh)) {
-    throw "Addon '$Addon' has no deploy.sh"
+  $isDelete = @($ScriptArgs) -contains '--delete'
+  $forwardedArgs = @($ScriptArgs | Where-Object { $_ -ne '--delete' })
+  $arguments = if ($isDelete) {
+    @('disable', $Addon) + $forwardedArgs
+  } else {
+    @('enable', $Addon) + $forwardedArgs
   }
 
-  $bash = Get-AapGitBashPath
-  if (-not $bash) {
-    throw "Addon '$Addon' requires Git for Windows Bash (WSL bash.exe is not supported). Install Git for Windows (winget install --id Git.Git -e), set AAP_DEMO_BASH to its bin\bash.exe, or use Linux/macOS."
+  $bashEnvironment = @{}
+  foreach ($key in $Environment.Keys) { $bashEnvironment[$key] = $Environment[$key] }
+  if (-not $bashEnvironment.ContainsKey('NAMESPACE') -and $Namespace) {
+    $bashEnvironment.NAMESPACE = $Namespace
   }
 
-  & $bash $deploySh @ScriptArgs
-  if ($LASTEXITCODE -ne 0) {
-    throw "Addon '$Addon' deploy failed (exit code: $LASTEXITCODE)"
+  $result = Invoke-AapGitBash -Command './aap-demo.sh "$@"' -Arguments $arguments -Environment $bashEnvironment -Interactive
+  if ($result.Stdout) { Write-Host $result.Stdout.TrimEnd() }
+  if (-not $result.Success) {
+    $detail = if ($result.Stderr) { $result.Stderr.Trim() } else { $result.Stdout.Trim() }
+    throw "Git Bash addon '$Addon' failed (exit $($result.ExitCode)): $detail"
   }
+  $Script:AapAddonDelegatedToBash = $true
 }
 function Invoke-AapEnsureClusterReady {
   Invoke-AapEnsureCluster
@@ -160,14 +170,12 @@ function Invoke-AapRemoveMcpServerAddon {
 function Invoke-AapAddonEnable {
   param(
     [Parameter(Mandatory)][string]$Addon,
-    [string]$Namespace = $Script:AapDemoDefaultNamespace
+    [string]$Namespace = $Script:AapDemoDefaultNamespace,
+    [string[]]$ScriptArgs = @()
   )
 
-  switch ($Addon) {
-    'mcp-server' { Invoke-AapDeployMcpServerAddon -Namespace $Namespace }
-    'portal' { Invoke-AapDeployPortalAddon -Namespace $Namespace }
-    default { Invoke-AapAddonDeployScript -Addon $Addon }
-  }
+  $Script:AapAddonDelegatedToBash = $false
+  Invoke-AapAddonDeployScript -Addon $Addon -Namespace $Namespace -ScriptArgs $ScriptArgs
 }
 
 function Get-AapMcpServerRouteHost {
@@ -210,61 +218,47 @@ function Get-AapAddonStatusLabel {
       if ($portalHost) { return "https://$portalHost" }
       return 'not-deployed'
     }
-    default { return $null }  }
+    'portal-operator' {
+      $portalOperatorHost = Get-AapAddonRouteHost -Namespace 'automation-portal'
+      if ($portalOperatorHost) { return "https://$portalOperatorHost" }
+      return 'not-deployed'
+    }
+    'ao' {
+      $aoHost = Get-AapAddonRouteHost -Namespace 'automation-orchestrator'
+      if ($aoHost) { return "https://$aoHost" }
+      return 'enabled'
+    }
+    'ollama' {
+      $ollamaHost = Get-AapAddonRouteHost -Namespace 'aap-demo-ollama'
+      if ($ollamaHost) { return "https://$ollamaHost" }
+      return 'enabled'
+    }
+    default { return 'enabled' }
+  }
 }
 
-function Get-AapMcpServerRouteHost {
-  param([string]$Namespace = $Script:AapDemoDefaultNamespace)
+function Get-AapAddonRouteHost {
+  param([Parameter(Mandatory)][string]$Namespace)
 
-  $result = Invoke-AapOcCapture @(
-    'get', 'ansiblemcpserver', 'aap-mcp-server', '-n', $Namespace,
-    '-o', 'jsonpath={.spec.route_host}'
-  )
+  $result = Invoke-AapOcCapture @('get', 'route', '-n', $Namespace, '--no-headers')
   if ($result.ExitCode -ne 0) { return $null }
-  $routeHost = $result.Output.Trim()
-  if ($routeHost -and $routeHost -notmatch '\s' -and $routeHost -notmatch ':') {
-    return $routeHost
+  foreach ($line in @($result.Lines)) {
+    if ([string]::IsNullOrWhiteSpace($line) -or $line -match '^No resources found') { continue }
+    $cols = $line -split '\s+'
+    if ($cols.Count -ge 2 -and $cols[1] -and $cols[1] -notmatch '^HOST') {
+      return $cols[1]
+    }
   }
   return $null
-}
-
-function Get-AapAddonEnableCommand {
-  param([Parameter(Mandatory)][string]$Addon)
-  return "aap-demo enable $Addon"
-}
-
-function Get-AapAddonStatusLabel {
-  param(
-    [Parameter(Mandatory)][string]$Addon,
-    [string]$Namespace = $Script:AapDemoDefaultNamespace,
-    [Parameter(Mandatory)][bool]$Enabled
-  )
-
-  if (-not $Enabled) { return 'disabled' }
-
-  switch ($Addon) {
-    'mcp-server' {
-      $mcpHost = Get-AapMcpServerRouteHost -Namespace $Namespace
-      if ($mcpHost) { return "https://$mcpHost/mcp" }
-      return 'not-deployed'
-    }
-    'portal' {
-      $portalHost = Get-AapPortalRouteHost -AapNamespace $Namespace
-      if ($portalHost) { return "https://$portalHost" }
-      return 'not-deployed'
-    }
-    default { return $null }
-  }
 }
 
 function Invoke-AapAddonDisable {
   param(
     [Parameter(Mandatory)][string]$Addon,
-    [string]$Namespace = $Script:AapDemoDefaultNamespace
+    [string]$Namespace = $Script:AapDemoDefaultNamespace,
+    [string[]]$ScriptArgs = @()
   )
 
-  switch ($Addon) {
-    'mcp-server' { Invoke-AapRemoveMcpServerAddon -Namespace $Namespace }
-    'portal' { Invoke-AapRemovePortalAddon -Namespace $Namespace }
-    default { Invoke-AapAddonDeployScript -Addon $Addon -ScriptArgs @('--delete') }  }
+  $Script:AapAddonDelegatedToBash = $false
+  Invoke-AapAddonDeployScript -Addon $Addon -Namespace $Namespace -ScriptArgs (@('--delete') + @($ScriptArgs))
 }

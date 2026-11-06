@@ -23,13 +23,13 @@ function Invoke-AapDemoStatus {
     'Stopped' {
       Write-Host 'Cluster:     stopped' -ForegroundColor Yellow
       Write-Host ''
-      Write-Host 'Start with: aap-demo deploy'
+      Write-Host 'Start with: aap-demo start'
       return
     }
     default {
       Write-Host 'Cluster:     not running' -ForegroundColor Red
       Write-Host ''
-      Write-Host 'Run: aap-demo deploy'
+      Write-Host 'Run: aap-demo create, then aap-demo start'
       return
     }
   }
@@ -137,11 +137,10 @@ function Invoke-AapDemoStatus {
     if (-not $enabled -and $a -eq 'ao') {
       $enabled = (Invoke-AapOcQuiet @('get', 'namespace', 'automation-orchestrator')) -eq 0
     }
-    if (-not $enabled -and $a -eq 'apme-eap') {
-      $enabled = (Invoke-AapOcQuiet @('get', 'namespace', 'apme')) -eq 0
-    }
     $state = if ($enabled) { 'enabled' } else { 'disabled' }
-    Write-Host ("  {0,-15} {1}" -f $a, $state)
+    $detail = if ($enabled) { Get-AapAddonStatusLabel -Addon $a -Namespace $Namespace -Enabled:$true } else { $state }
+    if (-not $detail) { $detail = $state }
+    Write-Host ("  {0,-24} {1}" -f $a, $detail)
   }
   Write-Host ''
 }
@@ -164,6 +163,7 @@ CLUSTER:
     restart         Stop then start (managed: checkpoint, restore, start)
     destroy         Deletes cluster (--reset clears saved preset)
     repair          Show repair instructions
+    trust-ca        Repair ingress certificate trust only
     ssh             SSH into VM
 
 DEPLOY:
@@ -202,10 +202,13 @@ STATE SERVICE (Hyper-V cold checkpoints, restored at Windows logon):
     service backups / verify [NAME] / retention N / disable
 
 ADDONS:
-    enable portal   Enable Self-Service Portal (Helm; auto-detects arm64 vs amd64)
-                    Requires: AAP 2.6+, Helm 3.10+, Red Hat pull secret
-    enable mcp-server  Enable MCP server for AI assistants
-    disable <name>  Disable an addon (portal, mcp-server)
+    enable <name>   Enable a supported addon (pass addon-specific arguments through)
+    disable <name>  Disable an addon
+    wire            Apply addon integrations after deployment
+    Available: mcp-server, portal, portal-operator, setup-pah, ao,
+               product-demos, opa, ollama
+    Legacy alias: ao-eap maps to ao
+    Host VM and image caching features are deferred from the Windows build.
 
 NOTES:
     Requires oc and crc on PATH. OpenShift Local needs Hyper-V.

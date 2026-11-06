@@ -12,7 +12,6 @@ aap-demo deploy          # Deploy AAP 2.7
 aap-demo status          # Show cluster status and routes; credentials hidden
 aap-demo status --show-secrets # Reveal credentials interactively
 aap-demo diagnose        # Quick health check (cluster, storage, SCCs, pods)
-aap-demo diagnose --ai   # Health check + AI-powered root cause analysis (requires claude CLI)
 aap-demo must-gather     # Collect full diagnostics for troubleshooting
 aap-demo idle true       # Scale down AAP to save resources (operator deploys only)
 aap-demo idle false      # Scale back up
@@ -64,6 +63,16 @@ oc adm policy add-scc-to-group privileged system:serviceaccounts:aap-operator
 **Symptom**: Pods evicted or images fail to pull
 **Fix**: `aap-demo ssh` then `sudo crictl rmi --prune` to clean unused images
 
+### `crc start` hangs at "Waiting until ssh is available"
+**Symptom**: `aap-demo create` sits on "Starting CRC" after "CRC VM is up"; `diagnose` reports CRC not answering
+**Cause**: The `crc daemon`, which carries the VM's network, is not running or runs a different `crc` (`~/.crc/bin/crc` links to an old install)
+**Fix**: `crc stop; pkill -f 'crc daemon'; crc cleanup && crc setup`, then `aap-demo start`. `aap-demo diagnose` shows the daemon and the 127.0.0.1:2222 SSH forward under "OpenShift Local host"
+
+### Commands target a remote cluster
+**Symptom**: `Kubeconfig points at a remote cluster`, or `AAP not found in namespace aap-operator` while the CRC VM is running
+**Cause**: `oc login` changed the current context of `~/.aap-demo/kubeconfig.microshift`
+**Fix**: `kubectl config use-context microshift`, or `aap-demo kubeconfig` to refresh the local file. Cluster commands refuse the remote API before they change it.
+
 ## File Structure
 
 ```
@@ -93,7 +102,48 @@ ansible/                       # Ansible playbook alternative
 
 1. Run `aap-demo diagnose` first to identify obvious issues
 2. If diagnose shows failures, suggest the specific fix listed
-3. For complex issues, suggest `aap-demo diagnose --ai` for AI-powered root cause analysis
+3. For complex issues with the bash CLI, suggest `aap-demo diagnose --ai` for AI-powered root cause analysis (removed from the Python CLI — see ADR-035)
 4. If still unclear, run `aap-demo must-gather` to collect full diagnostics
 5. Check `aap-demo status` for routes; use `status --show-secrets` interactively for credentials
 6. For deployment issues, check operator logs: `kubectl logs -l app.kubernetes.io/managed-by=aap-gateway-operator -n aap-operator --tail=50`
+
+## Contributing to aap-demo
+
+Three Claude Code skills are available to guide common development workflows:
+
+### Architecture Decision Records (ADRs)
+
+**IMPORTANT**: When making architectural decisions (new addons, platform support, deployment model changes, CLI modifications, storage/networking changes, security model updates), **always create an ADR first** using the `/aap-adr` skill.
+
+ADRs document:
+- Why the decision was made (context and constraints)
+- What approach was chosen (decision)
+- Trade-offs and impacts (consequences)
+- Alternatives considered and rejected
+- References to related ADRs, issues, or PRs
+
+**Use the `/aap-adr` skill** to:
+- Determine the next ADR number
+- Follow the template from `docs/adr/000-template.md`
+- Ensure proper formatting and required sections
+- Update the ADR index in `docs/adr/README.md`
+
+### GitHub Issue Creation
+
+**Use the `/aap-issue-creation` skill** to:
+- Search for duplicate issues before creating new ones
+- Select appropriate issue template (bug report, documentation, feature)
+- Gather context automatically (environment, diagnostics, git state)
+- Guide template field completion with validation
+- Apply appropriate labels
+
+### Addon Development
+
+**Use the `/aap-addon-development` skill** to:
+- Create new addons with proper structure
+- Generate `deploy.sh` with deploy and delete modes
+- Register addon in `AVAILABLE_ADDONS` in `aap-demo.sh`
+- Document dependencies and prerequisites
+- Test enable/disable lifecycle
+
+**Before creating a new addon**: Consider whether an ADR is needed for the addon's architecture. Use `/aap-adr` to document significant design decisions.

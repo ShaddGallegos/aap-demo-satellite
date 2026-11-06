@@ -134,6 +134,17 @@ ensure_galaxy_credentials() {
   done
 }
 
+protect_galaxy_credential_file() {
+  local path="$1"
+  if [ ! -f "$path" ]; then
+    return 0
+  fi
+  if ! chmod 600 "$path" 2>/dev/null; then
+    _err "Cannot restrict permissions on credential file: $path"
+    return 1
+  fi
+}
+
 detect_galaxy_credentials() {
   local token_status=0
   GALAXY_TOKEN_FILE="${GALAXY_TOKEN_FILE:-${AAP_DEMO_DIR:-$HOME/.aap-demo}/galaxy-token}"
@@ -141,7 +152,9 @@ detect_galaxy_credentials() {
 
   GALAXY_TOKEN=$(aap_demo_vault_get "ah_offline_token") || token_status=$?
   [ "$token_status" -ne 2 ] || return 2
+  # Detect console.redhat.com offline token
   if [ -z "$GALAXY_TOKEN" ] && [ -s "$GALAXY_TOKEN_FILE" ]; then
+    protect_galaxy_credential_file "$GALAXY_TOKEN_FILE" || return 1
     GALAXY_TOKEN=$(cat "$GALAXY_TOKEN_FILE")
     if galaxy_offline_token_status "$GALAXY_TOKEN"; then
       if aap_demo_vault_set "ah_offline_token" "$GALAXY_TOKEN"; then
@@ -161,6 +174,7 @@ detect_galaxy_credentials() {
 
   # Detect PAH configuration
   if [ -f "$PAH_CONFIG_FILE" ]; then
+    protect_galaxy_credential_file "$PAH_CONFIG_FILE" || return 1
     # Parse YAML for URL and authentication
     if command -v yq >/dev/null 2>&1; then
       PAH_URL=$(yq eval '.url' "$PAH_CONFIG_FILE" 2>/dev/null)
@@ -230,7 +244,7 @@ configure_pah_remotes() {
   fi
 
   # Detect credentials
-  detect_galaxy_credentials
+  detect_galaxy_credentials || return 1
 
   # Get AAP route and admin password
   local aap_route

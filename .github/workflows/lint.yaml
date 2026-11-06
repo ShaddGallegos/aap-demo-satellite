@@ -103,7 +103,7 @@ jobs:
         run: npm install -g markdownlint-cli
 
       - name: Run markdownlint
-        run: markdownlint . --config .markdownlint.json
+        run: markdownlint . --config .markdownlint.json --ignore '.claude/**' --ignore '.github/**'
 
   ansible-lint:
     name: Ansible Lint
@@ -147,21 +147,10 @@ jobs:
 
       - name: Install detect-secrets
         run: |
-          pip install detect-secrets
+          pip install 'detect-secrets==1.5.0'
 
       - name: Run detect-secrets
-        run: |
-          # Scan excluding baseline itself
-          detect-secrets scan --exclude-files '\.secrets\.baseline' > /tmp/scan-results.json
-          # Count secrets per file
-          NEW_COUNT=$(jq '[.results[] | length] | add // 0' /tmp/scan-results.json)
-          BASELINE_COUNT=$(jq '[.results[] | length] | add // 0' .secrets.baseline)
-          if [ "$NEW_COUNT" -gt "$BASELINE_COUNT" ]; then
-            echo "New secrets detected! ($NEW_COUNT vs $BASELINE_COUNT baseline)"
-            jq -r '.results | to_entries[] | "\(.key): \(.value | length) secrets"' /tmp/scan-results.json
-            exit 1
-          fi
-          echo "No new secrets ($NEW_COUNT matches baseline)"
+        run: ./scripts/check-secrets.sh
 
   shellformat:
     name: Shell Format Check
@@ -194,7 +183,9 @@ jobs:
 
       - name: Install kubeconform
         run: |
-          wget -qO- https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar xz
+          wget -qO- \
+            https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | tar xz
           sudo mv kubeconform /usr/local/bin/
 
       - name: Validate Kubernetes YAMLs

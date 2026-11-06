@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # =============================================================================
-# cmd-fleet.sh — fleet command handler
+# cmd-fleet.sh — fleet QEMU backend (legacy Bash v1)
 # =============================================================================
 #
 # Extracted from aap-demo.sh. Sources the fleet addon modules itself; expects
-# the caller to define SCRIPT_DIR and _err.
+# the caller to define SCRIPT_DIR and _err. aap-demo.sh keeps the cmd_fleet
+# dispatcher, which routes --backend qemu (the default) to cmd_fleet_qemu here
+# and --backend kube-native to the Python v2 CLI.
 
 # Guard against double-sourcing
 if [ -n "${_AAP_DEMO_CMD_FLEET_LOADED:-}" ]; then return 0; fi
 _AAP_DEMO_CMD_FLEET_LOADED=1
 
-cmd_fleet() {
+cmd_fleet_qemu() {
   local fleet_dir="${SCRIPT_DIR}/addons/fleet"
   if [ ! -f "${fleet_dir}/fleet.sh" ]; then
     _err "Fleet addon not found"

@@ -8,8 +8,11 @@ AAP_DEMO_SH="${SCRIPT_DIR}/../aap-demo.sh"
 test_home=$(mktemp -d)
 trap 'rm -rf "$test_home"' EXIT
 
+config_test_dir=$(mktemp -d)
+trap 'rm -rf "$config_test_dir"' EXIT
+
 output=""
-if output=$(QUIET=true "$AAP_DEMO_SH" version destroy 2>&1); then
+if output=$(AAP_DEMO_CONFIG="$config_test_dir/missing" QUIET=true "$AAP_DEMO_SH" version destroy 2>&1); then
   echo "FAIL: version accepted an extra top-level command"
   exit 1
 fi
@@ -137,3 +140,12 @@ for text in \
 done
 
 echo "PASS: --help documents public commands, addons, options, and examples"
+
+printf '%s\n' 'NAMESPACE=config-test' >"$config_test_dir/config"
+
+if ! AAP_DEMO_CONFIG="$config_test_dir/config" QUIET=true "$AAP_DEMO_SH" version >/dev/null 2>&1; then
+  echo "FAIL: config loading must work with the platform Bash version"
+  exit 1
+fi
+
+echo "PASS: config loading works with the platform Bash version"

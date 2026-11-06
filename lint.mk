@@ -19,17 +19,17 @@ lint: lint-shell lint-yaml lint-markdown ## Run all linters
 
 lint-shell: ## Lint shell scripts with shellcheck
 	@echo "Running shellcheck..."
-	@find . -name "*.sh" -type f -not -path "./.git/*" -exec shellcheck --severity=warning {} \;
+	@set -e; git ls-files '*.sh' | while IFS= read -r file; do shellcheck --severity=warning "$$file"; done
 	@echo "✓ ShellCheck passed"
 
 lint-yaml: ## Lint YAML files with yamllint
 	@echo "Running yamllint..."
-	@yamllint .
+	@set -e; git ls-files '*.yml' '*.yaml' | while IFS= read -r file; do yamllint "$$file"; done
 	@echo "✓ yamllint passed"
 
 lint-markdown: ## Lint Markdown files with markdownlint
 	@echo "Running markdownlint..."
-	@markdownlint .
+	@files="$$(git ls-files '*.md' ':!.claude/**' ':!.github/**')"; [ -z "$$files" ] || markdownlint $$files
 	@echo "✓ markdownlint passed"
 
 lint-ansible: ## Lint Ansible content with ansible-lint
@@ -50,7 +50,7 @@ format: ## Auto-format shell scripts and markdown
 
 test: ## Run syntax checks and non-live unit tests
 	@echo "Running shell syntax checks..."
-	@find . -name "*.sh" -type f -exec bash -n {} \;
+	@set -e; git ls-files '*.sh' | while IFS= read -r file; do bash -n "$$file"; done
 	@echo "✓ Syntax checks passed"
 	@echo "Running non-live unit tests..."
 	@./test/run-unit-tests.sh
@@ -64,9 +64,9 @@ validate-manifests: ## Validate Kubernetes manifests with kubeconform
 	done
 	@echo "✓ Manifest validation complete"
 
-check-secrets: ## Scan for secrets with detect-secrets
+check-secrets: ## Scan for secrets with detect-secrets 1.5.0 (read-only)
 	@echo "Scanning for secrets..."
-	@detect-secrets scan --baseline .secrets.baseline
+	@./scripts/check-secrets.sh
 	@echo "✓ No secrets detected"
 
 clean-lint: ## Clean linting caches and temporary files

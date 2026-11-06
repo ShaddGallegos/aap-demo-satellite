@@ -34,6 +34,19 @@
       }
     },
     {
+      "id": "ao-pr-testing",
+      "name": "AO PR Testing",
+      "category": "AI and orchestration",
+      "description": "Add the local OpenShift MCP server and a PR-driven AO validation workflow.",
+      "dependencies": [
+        {"id": "ao"}
+      ],
+      "health": {
+        "type": "namespace",
+        "namespace": "openshift-mcp-server"
+      }
+    },
+    {
       "id": "ollama",
       "name": "Ollama",
       "category": "AI and orchestration",
@@ -129,6 +142,17 @@
       "dependencies": [],
       "health": {
         "type": "configured"
+      }
+    },
+    {
+      "id": "keycloak",
+      "name": "Keycloak OIDC",
+      "category": "Infrastructure",
+      "description": "Deploy a Keycloak OIDC provider for local AAP/AO authentication tests.",
+      "dependencies": [],
+      "health": {
+        "type": "namespace",
+        "namespace": "aap-demo-keycloak"
       }
     },
     {

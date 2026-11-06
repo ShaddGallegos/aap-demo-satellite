@@ -72,14 +72,24 @@ See the [manual Python setup](../README.md#python-dependencies-manual-virtual-en
 
 - Windows 11 Pro, Enterprise, or Server (Hyper-V is not available on Windows 11 Home)
 - [OpenShift Local](https://console.redhat.com/openshift/create/local) — includes `crc`; Hyper-V must be enabled
-- [Git for Windows](https://git-scm.com/download/win) — optional for `create`/`deploy`/`status`;
-  required for `diagnose`, `test`, `watch`, and other advanced commands
+- [Git for Windows](https://git-scm.com/download/win) — required by the PowerShell wrapper
+  for deploys and addon commands
 
   ```powershell
   winget install --id Git.Git -e --source winget
   ```
 
 - PowerShell 5.1 or later (included with Windows 10/11)
+- `jq` — used by the Bash deployment and addon wiring paths
+- Python 3.12 — used to provision AAP demos and import AO demo workflows
+
+The Windows deploy and AO/Product Demo preflight installs `jq` and Python with
+winget when they are missing:
+
+```powershell
+winget install --id jqlang.jq -e --source winget
+winget install --id Python.Python.3.12 -e --source winget
+```
 
 #### OpenShift Local
 
@@ -133,16 +143,70 @@ Swap files are not added to `/etc/fstab`. Remove after deploy with
 `./scripts/enable-temp-swap.sh disable` or `aap-demo destroy`.
 See [scripts/README.md](../scripts/README.md) for Linux-only details.
 
-### macOS / Linux
+### Install
 
-#### Download your pull secret from [console.redhat.com](https://console.redhat.com/openshift/install/pull-secret)
+Python 3.9 or newer. [pipx](https://pipx.pypa.io/) keeps the command isolated from the rest of your Python packages:
 
 ```bash
-mkdir -p ~/.aap-demo
-cp ~/Downloads/pull-secret.txt ~/.aap-demo/pull-secret.txt
+pipx install aap-demo
 ```
 
-The next create/deploy imports this file into encrypted
+Update the installed command with:
+
+```bash
+aap-demo update
+```
+
+That checks how this command was installed, then runs `pipx upgrade aap-demo`.
+
+pip and uv install the same release:
+
+```bash
+pip install aap-demo
+uv tool install aap-demo
+```
+
+This installs the published release candidate from v2. Check out `v2` only if you are changing the code.
+If you already installed from the git URL, switch with `pipx install --force aap-demo`.
+
+`./install.sh` links `~/.local/bin/aap-demo` to the bash script. pipx installs v2 at that same path,
+so move or remove the old command before installing v2.
+
+```bash
+mv ~/.local/bin/aap-demo ~/.local/bin/aap-demo-v1
+```
+
+Or remove it without deleting cluster data:
+
+```bash
+rm -f ~/.local/bin/aap-demo \
+  ~/.zsh/completions/_aap-demo \
+  ~/.local/share/bash-completion/completions/aap-demo
+```
+
+If a bash `aap-demo` is still earlier on `PATH`, the first v2 command asks whether to uninstall it or rename it to `aap-demo-v1`.
+
+#### Save your pull secret
+
+Download from [console.redhat.com](https://console.redhat.com/openshift/install/pull-secret).
+The CLI reads `~/.local/state/aap-demo/pull-secret.txt`. Cluster credentials
+live at `~/.local/state/aap-demo/kubeconfig.microshift` and are not merged
+into `~/.kube/config`.
+
+```bash
+mkdir -p ~/.local/state/aap-demo
+cp ~/Downloads/pull-secret.txt ~/.local/state/aap-demo/pull-secret.txt
+export KUBECONFIG=~/.local/state/aap-demo/kubeconfig.microshift
+```
+
+On Windows the same paths are under your user profile:
+
+```powershell
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.local\state\aap-demo"
+Copy-Item "$env:USERPROFILE\Downloads\pull-secret.txt" "$env:USERPROFILE\.local\state\aap-demo\pull-secret.txt"
+```
+
+With the older bash command, the next create/deploy imports this file into encrypted
 `~/.ansible/conf/env.yml` and removes the managed plaintext copy. Delete the
 original download after successful import. When the pull secret is missing but
 the encrypted Vault contains a valid Customer Portal offline token,
@@ -152,13 +216,6 @@ This implements the REST automation documented in Red Hat Solution
 [4844461](https://access.redhat.com/solutions/4844461); direct username/password
 grants are intentionally not used.
 
-#### Install
-
-```bash
-git clone https://github.com/ShaddGallegos/aap-demo.git
-cd aap-demo && ./install.sh
-```
-
 #### Deploy
 
 ```bash
@@ -166,60 +223,9 @@ aap-demo deploy        # Deploy AAP 2.7
 aap-demo status        # Check deployment status
 ```
 
-### Windows
-
-See the **[Windows installer guide](powershell/README.md)** for full install and usage
-instructions. Summary:
-
-#### Save your pull secret
-
-Download from [console.redhat.com](https://console.redhat.com/openshift/install/pull-secret) and save as:
-
-```powershell
-New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.aap-demo"
-Copy-Item "$env:USERPROFILE\Downloads\pull-secret.txt" "$env:USERPROFILE\.aap-demo\pull-secret.txt"
-```
-
-#### Install
-
-```powershell
-git clone https://github.com/ShaddGallegos/aap-demo.git
-cd aap-demo
-.\powershell\install.ps1
-```
-
-This registers the repo path, installs the `aap-demo` launcher to
-`%USERPROFILE%\.local\bin`, adds that directory to your user PATH, and downloads
-`operator-sdk` if needed.
-
-Open a **new** PowerShell window after install so PATH changes take effect.
-
-#### Deploy
-
-```powershell
-aap-demo create        # Create the cluster
-aap-demo deploy        # Deploy AAP 2.7
-aap-demo status        # Check deployment status
-```
-
-#### Uninstall
-
-```powershell
-.\powershell\install.ps1 -Uninstall
-```
-
-This removes the wrapper and PATH entry. It does not delete `%USERPROFILE%\.crc\` or
-other cluster data.
-
-#### Windows notes
-
-- Kubeconfig default: `%USERPROFILE%\.crc\machines\crc\kubeconfig`
-- Config file: `%USERPROFILE%\.aap-demo\config`
-- If `aap-demo` is not recognized, confirm `%USERPROFILE%\.local\bin` is on PATH and
-  restart PowerShell
-- `create`, `deploy`, and `status` are PowerShell-native; install Git for Windows for
-  other commands (`diagnose`, `test`, `watch`, …)
-- See [powershell/README.md](powershell/README.md) for full Windows install and usage
+Config lives at `~/.config/aap-demo/config.yaml`. Credentials such as the
+Galaxy token go in the OS keyring (`aap-demo config secrets set galaxy-token`),
+not in a file under your home directory.
 
 Once deployed, `aap-demo status` shows routes and cluster health without
 printing credentials. Use `aap-demo status --show-secrets` in an interactive
@@ -288,8 +294,8 @@ aap-demo deploys Ansible Automation Platform 2.7 to OpenShift Local (MicroShift)
 
 aap-demo automatically configures Ansible Galaxy authentication for downloading certified and private collections:
 
-- **Red Hat Certified Collections**: Offline token stored as `ah_offline_token` in `~/.ansible/conf/env.yml`
-- **Private Automation Hub**: URL in `~/.aap-demo/pah-config.yml`; credentials in the encrypted Vault
+- **Red Hat Certified Collections**: offline token from console.redhat.com, stored with `aap-demo config secrets set galaxy-token`
+- **Private Automation Hub**: `aap-demo config secrets set pah-token`
 - **Priority-based fallback**: PAH → console.redhat.com → galaxy.ansible.com (community)
 
 Collections are installed automatically during deployment from `config/requirements.yml`. Skip with `SKIP_COLLECTIONS=true`.
@@ -373,7 +379,7 @@ aap-demo maintenance uninstall --apply # Remove VMs, caches, trust, CLI, and res
 aap-demo maintenance uninstall --apply --reconfigure
                                        # Also strip the aap_demo entries from the shared Vault
 aap-demo clean               # Remove AAP deployment (keeps cluster)
-aap-demo update              # Pull latest code and reinstall
+aap-demo update              # Update the pipx install to the latest release
 aap-demo help                # Full command reference
 ```
 
@@ -539,7 +545,6 @@ QUIET=true                   # Suppress disclaimer
 
 ```bash
 aap-demo diagnose              # Quick health check — identifies common issues
-aap-demo diagnose --ai         # Health check + AI-powered analysis (requires claude CLI)
 aap-demo must-gather           # Collect full diagnostics for support
 aap-demo status                # Check cluster and AAP status
 aap-demo ssh                   # SSH into cluster node for debugging
@@ -551,10 +556,10 @@ aap-demo destroy && aap-demo create && aap-demo deploy   # Full rebuild
 labels, AAP CR status, pod health, PVC binding, and DNS. It provides actionable fix
 suggestions for any issues found.
 
-`aap-demo diagnose --ai` runs the same checks, then sends the results plus pod logs
-and events to [Claude](https://claude.ai) for AI-powered root cause analysis and fix
-suggestions. Requires the `claude` CLI
-([Claude Code](https://docs.anthropic.com/en/docs/claude-code)).
+If `oc login` has switched `~/.aap-demo/kubeconfig.microshift` to a remote API,
+cluster commands stop with `Kubeconfig points at a remote cluster` instead of
+deploying there. Switch back with `kubectl config use-context microshift`, or
+refresh the local file with `aap-demo kubeconfig`.
 
 `aap-demo must-gather` collects aap-demo config, CRC status, storage/PVC/pod/event
 data, and runs the official [AAP must-gather](https://github.com/ansible/aap-must-gather)

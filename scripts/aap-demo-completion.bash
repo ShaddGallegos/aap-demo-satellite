@@ -21,9 +21,9 @@ _aap_demo() {
   command="${COMP_WORDS[1]:-}"
   subcommand="${COMP_WORDS[2]:-}"
 
-  commands="create deploy deploy-all status system-info dashboard watch clean maintenance credentials destroy start restart stop service repair setup ssh kubeconfig enable disable fleet wire idle preflight diagnose must-gather config redeploy redeploy-all redhat-status rh-status update version help"
-  addons="fleet mcp-server ao ollama setup-pah portal portal-operator apme-eap product-demos product-demo-satellite opa local-cache"
-  global_options="--kubeconfig --context --branch --json --redact --output --no-open --full-demo --show-secrets --ai --reset --skip-cache --force --refresh-catalog --purge-data --purge-creds --help --version"
+  commands="create deploy deploy-all status system-info dashboard watch clean maintenance credentials destroy start restart stop service repair trust-ca setup ssh kubeconfig enable disable fleet keycloak wire idle preflight diagnose must-gather config redeploy redeploy-all redhat-status rh-status update v2 version help"
+  addons="fleet mcp-server ao ao-pr-testing ollama setup-pah portal portal-operator apme-eap keycloak product-demos product-demo-satellite opa local-cache satellite-manifest"
+  global_options="--kubeconfig --context --branch --backend --no-import --json --redact --output --no-open --full-demo --satellite --show-secrets --ai --reset --skip-cache --force --refresh-catalog --purge-data --purge-creds --help --version"
 
   case "$prev" in
     --kubeconfig | --output)

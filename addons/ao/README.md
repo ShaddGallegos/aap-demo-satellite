@@ -27,7 +27,7 @@ During an interactive `deploy` or `enable ao`, choose one of these LLM provider 
    other non-interactive runs.
 2. **External provider** — skips Ollama and prompts for an API key for an
    OpenAI-compatible endpoint, then prompts for the model. The default model
-   is `gpt-5.6-luna`; press Enter to accept it. If `OPENAI_API_KEY` is already
+   is `gpt-6-luna`; press Enter to accept it. If `OPENAI_API_KEY` is already
    exported in the environment, it is imported without another prompt. The
    default endpoint is `https://api.openai.com/v1`.
 3. **None** — skips Ollama and LLM credential wiring. AO still installs, but
@@ -64,6 +64,29 @@ Force a clean reinstall (resets Postgres if secret names or passwords drifted):
 
 ```bash
 FORCE=1 aap-demo enable ao
+```
+
+### Operator updates
+
+The AO subscription uses `installPlanApproval: Automatic` by default. OLM can
+therefore apply new operator versions discovered in the selected channel while
+the demo cluster is running. This is intentional for local development, where
+keeping the operator current is more useful than requiring a separate approval
+step.
+
+The default applies to both the `stable` channel and an explicitly selected
+`early-access` channel. The addon still waits for the operator CSV and AO
+instance to become healthy before completing an install or reinstall.
+
+For a review point before applying an operator update, use the supported escape
+hatch below. With manual approval, inspect and approve the pending InstallPlan
+yourself; the enable command will continue waiting until the CSV is available:
+
+```bash
+AO_INSTALL_PLAN_APPROVAL=Manual aap-demo enable ao
+kubectl get installplan -n automation-orchestrator
+kubectl patch installplan <name> -n automation-orchestrator \
+  --type merge -p '{"spec":{"approved":true}}'
 ```
 
 Disabling AO preserves its bootstrap admin password under `~/.aap-demo/ao/` so
@@ -120,7 +143,7 @@ templates when the product-demos addon is enabled.
 
 Wiring also runs automatically when AAP deploy finishes (`aap-demo deploy` / `watch`).
 All agentic nodes in synchronized workflows receive the selected provider
-integration, credential, and model; external mode uses `gpt-5.6-luna` by default. Re-running
+integration, credential, and model; external mode uses `gpt-6-luna` by default. Re-running
 `aap-demo wire` reapplies that binding to existing `aap-demo` workflows.
 Use `aap-demo wire` to re-run wiring after manual cluster changes; it also restores
 the CoreDNS route rewrite if MicroShift's DNS operator has dropped it, and reapplies
@@ -193,6 +216,7 @@ See [`manifests/README.md`](manifests/README.md) for file-level detail and apply
 | `AO_INDEX_IMAGE` | auto | Pin operator index image explicitly |
 | `AO_FALLBACK_INDEX_IMAGE` | `...v4.22-automation-orchestrator-operator-early-access-1787151066` | Used when default AAP catalog lacks AO |
 | `AO_OPERATOR_CHANNEL` | `stable` | OLM subscription channel (`early-access` also available in the index) |
+| `AO_INSTALL_PLAN_APPROVAL` | `Automatic` | OLM InstallPlan policy; use `Manual` for an explicit review point |
 | `AO_PULL_SECRET_NAME` | `automation-orchestrator-pull-secret` | Registry pull secret in AO namespace |
 | `AO_CATALOG_TIMEOUT` | `600` | Seconds to wait for AO CatalogSource READY (index pull can be slow) |
 | `AO_DISABLE_INDEX_FALLBACK` | unset | Set to `1` to disable automatic fallback index |
@@ -202,7 +226,7 @@ See [`manifests/README.md`](manifests/README.md) for file-level detail and apply
 | `AO_DEMOS_REF` | `abcc1a1482a` | Pinned upstream demo commit |
 | `AO_LLM_PROVIDER` | `ollama` | `ollama`, `external`, or `none`; external and none modes skip the Ollama dependency |
 | `AO_LLM_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible endpoint used by external mode |
-| `AO_LLM_MODEL` | `gpt-5.6-luna` | External model selected as AO's default after discovery |
+| `AO_LLM_MODEL` | `gpt-6-luna` | External model selected as AO's default after discovery |
 | `AO_SYNC_REPOSITORY` | `https://github.com/RedHatOfficial/aap-demo.git` | Git repository containing the AAP control-plane playbook |
 | `AO_SYNC_BRANCH` | `main` | Branch used by the AAP control-plane project |
 | `AO_SYNC_API_URL` | internal OpenShift router URL | AO API URL passed to the AAP sync job |

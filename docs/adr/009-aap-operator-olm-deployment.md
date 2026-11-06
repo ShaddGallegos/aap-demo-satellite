@@ -41,7 +41,7 @@ Deploy AAP via a **four-step OLM pipeline** triggered by `aap-demo deploy`:
 | `config/crs/aap-minimal-noingress.yaml` | Lab/k8s without Routes |
 | `config/crs/aap-controller.yaml` | Controller-only variant |
 
-Runtime substitution replaces namespace placeholders and adjusts Hub storage when `nfs-local-rwx` is missing.
+Runtime substitution replaces namespace placeholders.
 
 ### Namespace preparation
 
@@ -68,6 +68,12 @@ Before creating the `redhat-operators` CatalogSource, `aap-demo deploy` (MicroSh
 3. Reloads CRI-O when the policy file changes
 4. Waits up to 600s (override with `AAP_CATALOG_TIMEOUT`) for CatalogSource `READY`, with
    automatic recovery if a signature pull failure is detected
+
+On MicroShift 4.22+, the full Red Hat index can take longer to initialize than
+OLM's generated catalog pod startup probe allows. Deploy uses
+`redhat-operators-registry` (a Deployment with a 15-minute startup probe) and
+points the `redhat-operators` CatalogSource at its Service. This also repairs
+an existing image-backed CatalogSource during a retry.
 
 The same module is used by **`aap-demo enable ao`**, which copies a local `redhat-operators`
 CatalogSource into `automation-orchestrator` and calls `ensure_catalog_signature_policy()` before

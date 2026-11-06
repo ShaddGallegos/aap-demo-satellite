@@ -21,7 +21,8 @@ run_test() {
 
 for test_file in "$TEST_DIR"/test-*.sh; do
   case "$(basename "$test_file")" in
-    test-live-idempotency.sh) continue ;;
+    # Live tests require a running cluster with the addon deployed.
+    test-live-idempotency.sh | test-keycloak-live.sh) continue ;;
   esac
   run_test bash "$test_file"
 done

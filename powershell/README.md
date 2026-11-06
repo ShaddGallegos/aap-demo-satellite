@@ -1,10 +1,11 @@
 # aap-demo on Windows (PowerShell)
 
-Install and run [aap-demo](../README.md) on Windows using PowerShell. Core commands
-run natively in PowerShell. Addons without a native implementation (`setup-pah`,
-`ao`, `apme-eap`, `local-cache`) run their `addons/<name>/deploy.sh` through
-**Git for Windows Bash**. `diagnose --ai` and `create --full-demo` are not
-available natively (use the Bash/Linux CLI).
+Install and run [aap-demo](../README.md) on Windows using PowerShell. Core lifecycle
+commands enter through PowerShell, which delegates execution to the repository's
+Git Bash CLI. Bash remains the single implementation for cluster lifecycle,
+addons, wiring, and cleanup so Windows follows the current cross-platform behavior.
+`create --full-demo` (including Fleet and the Satellite lab) is not available
+through the Windows wrapper; use the Bash/Linux CLI for it.
 
 ## Requirements
 
@@ -14,13 +15,13 @@ available natively (use the Bash/Linux CLI).
 | **OpenShift Local (`crc`)** | [Download](https://console.redhat.com/openshift/create/local). Hyper-V enabled. |
 | **OpenShift CLI (`oc`)**    | Installed by `install.ps1` via winget when missing.                             |
 | **Red Hat pull secret**     | [Download](https://console.redhat.com/openshift/install/pull-secret)            |
-| **Git for Windows**         | Required for `git clone`/`update` and for `deploy.sh`-based addons (see below). |
+| **Git for Windows**         | Required; the wrapper runs `aap-demo.sh` through Git Bash.                    |
 | **OpenSSH client**          | Used during `create` to configure the cluster VM (`ssh` on PATH).               |
 
-`kubectl` is **not** required on Windows — all commands use `oc` exclusively.
-
-The dashboard requires **Python 3.10+** on PATH (`python`, `python3` or `py -3`).
-Optional for other commands: `jq`.
+`jq` and Python are required for Windows deploys because the Git Bash deployment
+and demo provisioning paths use them. Python provisions AAP demo content and
+imports AO demo workflows. The dashboard requires **Python 3.10+** on PATH
+(`python`, `python3` or `py -3`).
 
 ## Install
 
@@ -54,6 +55,28 @@ Open a **new** PowerShell window when install finishes, then:
 ```powershell
 aap-demo help
 ```
+
+The installer registers `aap-demo.cmd` in `%USERPROFILE%\.local\bin`. The
+command shim invokes the repository wrapper with `ExecutionPolicy Bypass`, so
+the command remains usable when the machine policy blocks `.ps1` scripts. If a
+previous install left a stale `aap-demo.ps1`, rerun the installer with:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\powershell\install.ps1
+```
+
+Before `deploy`, `redeploy`, or `enable ao`, the Windows preflight checks for
+`jq` and a working Python runtime. Missing tools are installed with winget. To
+install them manually:
+
+```powershell
+winget install --id jqlang.jq -e --source winget
+winget install --id Python.Python.3.12 -e --source winget
+```
+
+Python is used by the AAP demo provisioning and AO workflow import steps. If
+the install cannot complete, the command stops with the same commands so the
+demo content is not silently skipped.
 
 ## Quick start
 
@@ -95,25 +118,30 @@ All commands run in PowerShell. Run `aap-demo help` for the full list.
 | `aap-demo restart`             | Stop and start (managed: checkpoint, restore, start)               |
 | `aap-demo service ...`         | Cold checkpoint and logon restore service (see below)              |
 | `aap-demo dashboard [--no-open]` | Start/reuse the localhost dashboard; optionally skip the browser |
-| `aap-demo status --json`       | Machine-readable dashboard inventory without secret values       |
+| `aap-demo trust-ca`            | Repair ingress certificate trust without repairing cluster         |
+| `aap-demo status --json`       | Machine-readable dashboard inventory without secret values         |
 | `aap-demo status`              | Cluster health, namespaces, routes, and addons; secrets hidden     |
-| `aap-demo status --show-secrets` | Reveal login credentials in an interactive terminal             |
+| `aap-demo status --show-secrets` | Reveal login credentials in an interactive terminal              |
 | `aap-demo diagnose`            | Environment health checks                                          |
 | `aap-demo watch`               | Monitor AAP deployment until Successful                            |
 | `aap-demo idle true` / `false` | Scale AAP down/up                                                  |
 | `aap-demo kubeconfig`          | Sync kubeconfig (context: `aap-demo`)                              |
 | `aap-demo ssh`                 | SSH into CRC VM                                                    |
 | `aap-demo enable` / `disable`  | Enable or disable addons                                           |
+| `aap-demo wire`                | Apply addon integrations after deployment                          |
 | `aap-demo must-gather`         | Collect diagnostic bundle                                          |
 | `aap-demo redhat-status`       | Check Red Hat registry status                                      |
 | `aap-demo config`              | Show or set `~/.aap-demo/config` values                            |
 | `aap-demo update`              | `git pull` and reinstall launcher                                  |
 | `aap-demo help`                | Show command help                                                  |
 
-`mcp-server` and `portal` are enabled/disabled natively; `setup-pah`, `ao`,
-`apme-eap` and `local-cache` run `addons/<name>/deploy.sh` (or `--delete`)
-with Git for Windows Bash. `aap-demo diagnose --ai` is unsupported in native PowerShell
-(it fails with an error and does not delegate to Bash); use the Bash/Linux CLI for it.
+Available non-fleet addons are `mcp-server`, `portal`, `portal-operator`,
+`setup-pah`, `ao` (alias `ao-eap`), `product-demos`, `opa`, and `ollama`.
+Product Demos is exposed as one aggregate deployment on Windows. Fleet and
+`local-cache` are deferred from the Windows build. These commands are delegated
+to the same Bash addon scripts used on Linux and macOS. APME, Fleet, the
+Satellite demo/lab addons, and the legacy Product Demo domain aliases remain
+unavailable through the Windows wrapper.
 
 ### Startup storage growth
 
@@ -206,8 +234,10 @@ still require Git for Windows Bash.
 
 ## Environment variables
 
-Set in PowerShell before running commands, or add to
-`%USERPROFILE%\.aap-demo\config` as `KEY=value` lines.
+Set in PowerShell before running commands, or add non-secret settings to
+`%USERPROFILE%\.aap-demo\config` as `KEY=value` lines. Credential values must
+not be stored in this shared config file; use the dedicated files below or a
+one-shot process environment variable.
 
 | Variable            | Default                                      | Description                                        |
 | ------------------- | -------------------------------------------- | -------------------------------------------------- |
@@ -215,6 +245,7 @@ Set in PowerShell before running commands, or add to
 | `CRC_MEMORY`        | `16384`                                      | VM memory (MiB)                                    |
 | `CRC_DISK`          | `100`                                        | VM disk (GiB)                                      |
 | `CRC_PV_SIZE`       | `50`                                         | Storage for PVCs (GiB)                             |
+| `NFS_BACKING_STORAGE_SIZE` | `5Gi`                                  | LVMS-backed storage reserved for the NFS server      |
 | `NAMESPACE`         | `aap-operator`                               | Kubernetes namespace                               |
 | `QUIET`             | `false`                                      | Suppress interactive prompts                       |
 | `KUBECONFIG`        | `%USERPROFILE%\.crc\machines\crc\kubeconfig` | Cluster kubeconfig                                 |
@@ -222,6 +253,13 @@ Set in PowerShell before running commands, or add to
 | `AAP_START_TIMEOUT` | `600`                                        | Seconds `start` waits for AAP and addon readiness  |
 | `AAP_DEMO_DISABLE_LOCK` | `false`                                  | `true` disables the cross-command operation lock   |
 | `AAP_DEMO_BASH`     | auto (Git for Windows)                       | Explicit Git for Windows `bin\bash.exe` for addons |
+| `AO_LLM_PROVIDER`    | `ollama` when unset                          | AO provider: `ollama`, `external`, or `none`       |
+| `AO_LLM_BASE_URL`    | `https://api.openai.com/v1` for `external`   | External LLM API base URL                          |
+| `AO_LLM_MODEL`       | `gpt-5.6-luna` for `external`                | External LLM model; `luna` is an alias             |
+| `AO_LLM_API_KEY_FILE` | `%USERPROFILE%\.aap-demo\ao\llm-api-key`   | File used to save/reuse the external API key       |
+| `OPENAI_API_KEY`     | unset                                        | One-shot external provider key; never in config or a CLI arg |
+| `GALAXY_TOKEN_FILE`  | `%USERPROFILE%\.aap-demo\galaxy-token`       | Red Hat Galaxy/Automation Hub offline token file   |
+| `PAH_CONFIG_FILE`    | `%USERPROFILE%\.aap-demo\pah-config.yml`     | Private Automation Hub URL and credentials         |
 
 Example:
 
@@ -230,6 +268,38 @@ $env:CRC_MEMORY = 20480
 $env:NAMESPACE = 'aap-operator'
 aap-demo create
 ```
+
+### AO and credential ownership
+
+The Windows wrapper forwards the documented runtime settings and explicit addon
+values to the Git Bash CLI; unrelated caller environment variables are not
+inherited. Values are not appended to command arguments. AO provider settings
+are read with environment precedence, then from the saved
+`%USERPROFILE%\.aap-demo\config` file. `includes/ao-llm.sh` owns the external
+provider key file and defaults it to `%USERPROFILE%\.aap-demo\ao\llm-api-key`;
+`OPENAI_API_KEY` can seed that file but is never printed or added to a command
+line. The Bash writer uses a temporary file and restrictive permissions before
+replacement.
+
+The public Windows launcher delegates `setup-pah` to Git Bash; Git Bash prints
+help showing the supported `aap-demo enable setup-pah` command. That workflow
+reads an existing `GALAXY_TOKEN_FILE` and `PAH_CONFIG_FILE`; it does not write
+a PAH config file but applies restrictive file permissions before reading either
+credential file. The module-level native PowerShell collection helper protects
+token and PAH files with a user-only Windows DACL and fails closed if that
+protection cannot be applied. Set
+`GALAXY_TOKEN_FILE` or `PAH_CONFIG_FILE` to use an existing supported location;
+the path must support Windows ACLs.
+
+`aap-demo start` restores the CRC kubeconfig, refreshes the MicroShift DNS
+configuration, and restores the saved ingress CA environment. `aap-demo trust-ca`
+runs the targeted ingress trust repair without invoking cluster repair; after the
+Git Bash command succeeds, the Windows wrapper imports the CA into the browser
+trust store and reports a warning if that import cannot be completed.
+
+For `aap-demo enable portal`, `REGISTRY_USERNAME` and `REGISTRY_PASSWORD` may
+be supplied as process environment variables; the wrapper forwards them only to
+that portal deployment.
 
 ## File locations
 
@@ -273,21 +343,22 @@ Re-run from the repo directory:
 
 Do not move or delete the cloned repo after install — the launcher points at it.
 
-### Git for Windows Bash required for an addon
+### Git Bash addon delegation
 
-`setup-pah`, `ao`, `apme-eap` and `local-cache` run their `deploy.sh` with Git
-for Windows Bash. The CLI looks for `bash.exe` in `AAP_DEMO_BASH`, next to
-`git.exe` on `PATH`, then in `%ProgramFiles%\Git`, `%ProgramFiles(x86)%\Git`
-and `%LOCALAPPDATA%\Programs\Git`. WSL's `bash.exe` (`%WINDIR%\System32`,
-`WindowsApps`) is never used. Install Git for Windows and open a new window:
+The PowerShell launcher discovers Git for Windows and forwards the original
+command, arguments, environment, exit code, and output to `aap-demo.sh`. The
+CLI looks for `bash.exe` in `AAP_DEMO_BASH`, next to `git.exe` on `PATH`, then
+in `%ProgramFiles%\Git`, `%ProgramFiles(x86)%\Git` and
+`%LOCALAPPDATA%\Programs\Git`. WSL's `bash.exe` (`%WINDIR%\System32`,
+`WindowsApps`) is never used. If the wrapper reports that Git Bash is
+unavailable, install Git for Windows and open a new window, or run the Bash
+CLI directly:
 
 ```powershell
 winget install --id Git.Git -e
 # or point at a specific install:
 $env:AAP_DEMO_BASH = 'C:\Program Files\Git\bin\bash.exe'
 ```
-
-Other commands (`create`, `deploy`, `destroy`, …) do not need Git Bash.
 
 ### `oc` or `crc` not found
 
@@ -398,9 +469,11 @@ Then run commands with `pwsh` instead of `powershell`.
 
 ```
 aap-demo (launcher in ~/.local/bin)
-  └── powershell/aap-demo.ps1
-        └── powershell/native/AapDemo.psm1  (all commands)
-              └── deploy.sh addons  →  Git for Windows Bash
+  └── aap-demo.cmd (policy-safe command shim)
+        └── powershell/aap-demo.ps1
+              └── powershell/native/AapDemo.psm1  (all commands)
+                    ├── addon and lifecycle commands  →  Git for Windows Bash (aap-demo.sh)
+                    └── native process runner         →  oc/kubectl/helm/python/ansible
 ```
 
 ## Updating

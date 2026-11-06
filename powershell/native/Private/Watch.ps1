@@ -111,6 +111,11 @@ function Invoke-AapDemoWatch {
       Write-Host "Password: hidden (run 'aap-demo status --show-secrets' in a terminal)"
       Write-Host ''
       Write-AapSetupPahReminder
+      try {
+        Invoke-AapDemoWire -Namespace $Namespace -Quiet
+      } catch {
+        Write-AapWarn "Addon wiring skipped: $($_.Exception.Message)"
+      }
       return
     }
 

@@ -10,8 +10,8 @@ if [ -n "${_AAP_DEMO_HELP_LOADED:-}" ]; then return 0; fi
 _AAP_DEMO_HELP_LOADED=1
 
 show_help() {
-  cat <<'EOF'
-aap-demo - Deploy AAP 2.7 to OpenShift Local
+  cat <<EOF
+aap-demo - Deploy AAP ${AAP_VERSION:-2.7} to OpenShift Local
 
 USAGE:
     aap-demo [OPTIONS] <COMMAND>
@@ -20,6 +20,9 @@ OPTIONS:
     --kubeconfig FILE, --kubeconfig=FILE  Kubeconfig path
     --context NAME, --context=NAME        kubectl context
     --branch NAME, --branch=NAME          Branch used by update
+    --backend NAME, --backend=NAME        Fleet backend: qemu (default) or kube-native
+    --no-import                           With enable fleet --backend kube-native:
+                                          skip AAP registration
     --json                                Emit JSON for status or system-info
     --redact                              Mask secrets in system-info output
     --output FILE, --output=FILE          Write system-info to a custom path
@@ -30,6 +33,9 @@ OPTIONS:
                                           install the Satellite Demo content
     --show-secrets                        Reveal credentials with interactive status only
     --ai                                  Enable AI diagnosis for diagnose
+    AAP_DEMO_ALLOW_REMOTE_KUBECONFIG=true Allow a remote kubeconfig context
+                                          (default: refuse, so oc login cannot
+                                          retarget deploy or enable)
     --reset                               Clear config after destroy
     --skip-cache                          Do not save images during destroy
     --force                               Force supported reinstall operations
@@ -40,7 +46,7 @@ OPTIONS:
     -V, --version                         Show version and build timestamp
 
 CORE COMMANDS:
-    deploy | deploy-all             Deploy AAP 2.7; create cluster if needed
+    deploy | deploy-all             Deploy AAP ${AAP_VERSION:-2.7}; create cluster if needed
     status                          Show cluster, AAP, addons, routes, and Fleet
     status --show-secrets           Reveal login credentials in an interactive terminal
     status --json                   Emit machine-readable status without secret values
@@ -68,6 +74,7 @@ CORE COMMANDS:
     config                          Configure project settings
     redhat-status | rh-status       Check Red Hat registry status
     update [--branch NAME]          Update source and reinstall the CLI
+    v2 [args...]                    Run the Python v2 CLI (for example: aap-demo v2 deploy)
     version                         Show version and build timestamp
     help                            Show this help
 
@@ -89,6 +96,7 @@ CLUSTER COMMANDS:
     service status                 Show platform recovery service status
     service disable                Save state, stop demo, and disable boot restore
     repair                          Repair cluster state after a crash
+    trust-ca                        Repair ingress certificate trust only
     setup                           Configure storage, DNS, and local certificate trust
     ssh                             Open a shell on the cluster node
     kubeconfig                      Extract and merge kubeconfig
@@ -100,13 +108,16 @@ ADDON COMMANDS:
 
     Available addons:
       fleet                  Local RHEL QEMU managed nodes
+                           (--backend kube-native uses the Python v2 Fleet addon)
       mcp-server             AAP MCP server; required by AO
       ao                     Automation Orchestrator
+      ao-pr-testing          PR validation workflow and read-only OpenShift MCP
       ollama                 Local qwen2.5:3b LLM provider for AO
       setup-pah              Configure Private Automation Hub
       portal                 Helm self-service portal
       portal-operator        AAP Portal Operator Technology Preview (AMD64 only)
       apme-eap               APME early-access portal
+      keycloak               Keycloak OIDC provider for local AAP/AO auth tests
       product-demos          Non-Satellite Ansible Product Demos
       product-demo-satellite Satellite demo; requires an external Satellite server
       opa                    Open Policy Agent integration
@@ -116,6 +127,12 @@ ADDON COMMANDS:
       aap-demo enable local-cache [save|load|clear]
 
 FLEET COMMANDS:
+    (legacy Bash v1; local QEMU VMs only) — unless --backend kube-native is given
+    fleet --backend qemu|kube-native|all <action>
+                                    Select the legacy QEMU backend (default), the
+                                    Kubernetes-native Python v2 backend, or both
+                                    (all is read-only; list only)
+    Kubernetes-native fleet: aap-demo fleet list --backend kube-native
     fleet auth [configure|status|reset]
                                     Manage encrypted Red Hat credentials
     fleet add [count] --image <rhel9|rhel10|local-qcow2-path>
@@ -128,6 +145,12 @@ FLEET COMMANDS:
     fleet list                      List Fleet VM state
     fleet remove [count|name]       Deregister and remove newest or named VMs
     fleet destroy                   Remove all Fleet VMs and AAP Fleet resources
+
+KEYCLOAK COMMANDS:
+    enable keycloak                 Deploy the Keycloak OIDC provider
+    keycloak configure [--target aap|ao|all] [--map-groups] [--apply]
+                                    Configure Keycloak OIDC consumers; dry-run
+                                    unless --apply
 
 SATELLITE LAB:
     The satellite-lab builds a Satellite 6 demo VM on this host and wires it

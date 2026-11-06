@@ -1,4 +1,4 @@
-# AAP Demo - Standalone Makefile
+# AAP Demo - Lint and CI Makefile
 
 include lint.mk
 
@@ -11,10 +11,9 @@ aap-demo: ## Deploy AAP 2.7
 
 help: ## Show this help
 	@echo ""
-	@echo "AAP Demo - AAP 2.7 Deployment Tool"
+	@echo "AAP Demo - Lint and CI"
 	@echo ""
 	@echo "Usage:"
-	@echo "  make aap-demo              Deploy AAP 2.7"
 	@echo "  make lint                  Run all linters"
 	@echo "  make ci                    Run all CI checks locally"
 	@echo ""

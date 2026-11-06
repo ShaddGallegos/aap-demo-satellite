@@ -10,7 +10,29 @@ Validation tests for `aap-demo.sh` command-line interface.
 
 # Run an individual test
 ./test/test-core-commands.sh
+./test/test-aap-readiness.sh
+./test/test-aap-version-selection.sh
+./test/test-ingress-ca-export.sh
+./test/test-macos-ingress-ca-auth.sh
+./test/test-macos-ingress-ca-trust-state.sh
+./test/test-fix-ssl-command.sh
+./test/test-apme-eap-oauth.sh
+python3 ./test/test-ao-import-demos.py
+
+# AAP provisioning fast-path test
+python3 ./test/test-provision-aap-demos.py
+
+# AO replica profile rendering (no cluster required)
+./test/test-ao-replica-profile.sh
+./test/test-keycloak-addon.sh
+./test/test-keycloak-configure.sh
+
+# Run against a running local MicroShift cluster after enabling Keycloak.
+KUBECONFIG="$HOME/.aap-demo/kubeconfig.microshift" ./test/test-keycloak-live.sh
 ```
+
+`run-unit-tests.sh` applies a per-test timeout (default 120 seconds) so a single
+hanging test cannot stall the whole suite; override it with `AAP_DEMO_TEST_TIMEOUT`.
 
 The cold-state regression test uses `jq`, `qemu-img`, `rsync` and `xmllint` on
 small temporary disk images; it does not stop or restore a real VM. CI installs
@@ -38,7 +60,6 @@ small temporary disk images; it does not stop or restore a real VM. CI installs
 - ✓ `idle [true|false]` arg parsing
 - ✓ `idle notabool` shows error
 - ✓ `diagnose` runs without cluster
-- ✓ `diagnose --ai` flag parsing
 - ✓ `enable` / `disable` (no args shows usage)
 - ✓ `enable fake-addon` errors
 - ✓ `deploy-all`, `redeploy-all` aliases recognized
@@ -54,6 +75,8 @@ small temporary disk images; it does not stop or restore a real VM. CI installs
 - ✓ Systemd state service: cold CRC/Fleet backups with flattened backing chains,
   configuration/credential restore, checksums, failed-backup preservation,
   retention, boot/shutdown ordering, lifecycle routing and concurrent-operation locks
+- ✓ Keycloak OIDC addon wiring, namespace isolation, client separation, and secret handling
+- ✓ Keycloak live Route, readiness, discovery, realm, groups, users, and client validation
 
 ### Test Design
 

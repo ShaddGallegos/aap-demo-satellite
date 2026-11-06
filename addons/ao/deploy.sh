@@ -10,6 +10,8 @@ source "${SCRIPT_DIR}/../../includes/credential-vault.sh"
 source "${SCRIPT_DIR}/lib/admin-password.sh"
 # shellcheck source=lib/replica-profile.sh
 source "${SCRIPT_DIR}/lib/replica-profile.sh"
+# shellcheck source=lib/install-plan-approval.sh
+source "${SCRIPT_DIR}/lib/install-plan-approval.sh"
 KUBECONFIG_PATH="$(aap_demo_resolve_kubeconfig "${KUBECONFIG:-}")"
 export KUBECONFIG="$KUBECONFIG_PATH"
 
@@ -37,6 +39,7 @@ export KUBECONFIG="$KUBECONFIG_PATH"
 #   ./deploy.sh --force            # Reinstall even if already running
 #   ./deploy.sh --refresh-catalog  # Re-pull redhat-operator-index before install
 #   AO_REFRESH_CATALOG=1 ./deploy.sh
+#   AO_INSTALL_PLAN_APPROVAL=Manual ./deploy.sh  # Pause upgrades for review
 #   AO_INDEX_IMAGE=registry.redhat.io/redhat/redhat-operator-index:v4.22-... ./deploy.sh
 
 NAMESPACE="automation-orchestrator"
@@ -73,6 +76,11 @@ ACTION="${1:-deploy}"
 FORCE="${FORCE:-}"
 REFRESH_CATALOG="${AO_REFRESH_CATALOG:-}"
 PURGE_DATA="${AO_PURGE_DATA:-}"
+AO_INSTALL_PLAN_APPROVAL_REQUESTED="${AO_INSTALL_PLAN_APPROVAL:-}"
+if [ -n "$AO_INSTALL_PLAN_APPROVAL_REQUESTED" ]; then
+  ao_validate_install_plan_approval "$AO_INSTALL_PLAN_APPROVAL_REQUESTED"
+fi
+AO_INSTALL_PLAN_APPROVAL=""
 for _arg in "$@"; do
   case "$_arg" in
     --force) FORCE=1 ;;
@@ -96,6 +104,18 @@ short_image_ref() {
     */*) printf '%s' "${_ref#*/}" ;;
     *) printf '%s' "$_ref" ;;
   esac
+}
+
+ao_python_command() {
+  local _candidate
+  for _candidate in "${AO_PYTHON:-}" python3 python py; do
+    [ -n "$_candidate" ] || continue
+    command -v "$_candidate" >/dev/null 2>&1 || continue
+    "$_candidate" -c 'import sys' >/dev/null 2>&1 || continue
+    printf '%s\n' "$_candidate"
+    return 0
+  done
+  return 1
 }
 
 find_catalog_namespace() {
@@ -150,7 +170,8 @@ report_catalog_failure() {
   echo "    kubectl get pods -n ${AAP_NAMESPACE} -l olm.catalogSource=redhat-operators" >&2
   echo "" >&2
   echo "  Then inspect the AO catalog pod and events:" >&2
-  echo "    kubectl describe pod -n ${_catalog_ns} -l olm.catalogSource=redhat-operators" >&2
+  echo "    kubectl describe catalogsource ${_catalog_name} -n ${_catalog_ns}" >&2
+  echo "    kubectl get pods -n ${_catalog_ns}" >&2
   echo "    kubectl get events -n ${_catalog_ns} --sort-by=.lastTimestamp | tail -15" >&2
   echo "" >&2
   echo "  Retry with a longer wait or after fixing AAP deploy:" >&2
@@ -239,22 +260,18 @@ copy_pull_secret_to_namespace() {
   if ! kubectl get secret "$_src_name" -n "$_src_ns" &>/dev/null; then
     return 1
   fi
-  kubectl get secret "$_src_name" -n "$_src_ns" -o json \
-    | DST_NAME="$_dst_name" DST_NS="$_dst_ns" python3 -c "
-import json, os, sys
-secret = json.load(sys.stdin)
-out = {
-    'apiVersion': 'v1',
-    'kind': 'Secret',
-    'metadata': {
-        'name': os.environ['DST_NAME'],
-        'namespace': os.environ['DST_NS'],
-    },
-    'type': secret.get('type', 'kubernetes.io/dockerconfigjson'),
-    'data': secret.get('data', {}),
-}
-json.dump(out, sys.stdout)
-" | kubectl apply -f - >&2
+  local _dockerconfig_b64
+  _dockerconfig_b64=$(kubectl get secret "$_src_name" -n "$_src_ns" \
+    -o jsonpath='{.data.\.dockerconfigjson}' 2>/dev/null || echo "")
+  if [ -z "$_dockerconfig_b64" ]; then
+    echo "ERROR: Secret ${_src_name} does not contain .dockerconfigjson" >&2
+    return 1
+  fi
+  printf '%s' "$_dockerconfig_b64" | base64 -d 2>/dev/null \
+    | kubectl create secret generic "$_dst_name" -n "$_dst_ns" \
+      --from-file=.dockerconfigjson=/dev/stdin \
+      --type=kubernetes.io/dockerconfigjson --dry-run=client -o yaml \
+    | kubectl apply -f - >&2
 }
 
 ensure_catalog_service_account() {
@@ -306,6 +323,8 @@ remove_fallback_catalog_source() {
   local _catalog_ns="$1"
   kubectl delete catalogsource "$AO_FALLBACK_CATALOG_NAME" -n "$_catalog_ns" \
     --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  kubectl delete deployment,service "${AO_FALLBACK_CATALOG_NAME}-registry" -n "$_catalog_ns" \
+    --ignore-not-found >/dev/null 2>&1 || true
   kubectl delete serviceaccount "$AO_FALLBACK_CATALOG_NAME" -n "$_catalog_ns" \
     --ignore-not-found >/dev/null 2>&1 || true
   kubectl delete clusterrolebinding \
@@ -317,11 +336,26 @@ remove_fallback_catalog_source() {
 ensure_fallback_catalog_source() {
   local _catalog_ns="$1"
   local _image="$2"
-  echo "  Creating fallback CatalogSource ${AO_FALLBACK_CATALOG_NAME} in ${_catalog_ns}..." >&2
-  ensure_catalog_service_account "$AO_FALLBACK_CATALOG_NAME" "$_catalog_ns" || return 1
-  apply_image_catalog_source "$AO_FALLBACK_CATALOG_NAME" "$_catalog_ns" "$_image"
+  local _registry_name="${AO_FALLBACK_CATALOG_NAME}-registry" _existing_image
+  echo "  Creating fallback catalog registry ${_registry_name} in ${_catalog_ns}..." >&2
+  # OLM's generated pod has a short fixed startup probe; use the longer
+  # startup allowance already used by the AAP catalog registry.
+  sed -e "s|redhat-operators-registry|${_registry_name}|g" \
+    -e "s|namespace: aap-operator|namespace: ${_catalog_ns}|g" \
+    -e "s|image: registry.redhat.io/redhat/redhat-operator-index:v[0-9.]*|image: ${_image}|" \
+    "${REPO_ROOT}/config/olm/catalog-registry.yaml" | kubectl apply -f - >&2 || return 1
+  _existing_image=$(kubectl get catalogsource "$AO_FALLBACK_CATALOG_NAME" -n "$_catalog_ns" \
+    -o jsonpath='{.spec.image}' 2>/dev/null || true)
+  if [ -n "$_existing_image" ]; then
+    kubectl delete catalogsource "$AO_FALLBACK_CATALOG_NAME" -n "$_catalog_ns" --wait=true >&2 || return 1
+  fi
+  echo "  Waiting for fallback registry startup..." >&2
+  kubectl rollout status deployment/"$_registry_name" -n "$_catalog_ns" \
+    --timeout="$(catalog_wait_timeout_seconds)s" >&2 || return 1
+  apply_address_catalog_source "$AO_FALLBACK_CATALOG_NAME" "$_catalog_ns" \
+    "${_registry_name}.${_catalog_ns}.svc:50051" || return 1
   echo "  Waiting for fallback CatalogSource READY..." >&2
-  if ! wait_for_catalog_service_ready "$_catalog_ns" "$AO_FALLBACK_CATALOG_NAME"; then
+  if ! wait_for_catalog_ready "$_catalog_ns" "$AO_FALLBACK_CATALOG_NAME"; then
     report_catalog_failure "$_catalog_ns" "$AO_FALLBACK_CATALOG_NAME"
     return 1
   fi
@@ -329,7 +363,7 @@ ensure_fallback_catalog_source() {
     echo "ERROR: automation-orchestrator-operator not found in fallback catalog." >&2
     return 1
   fi
-  printf '%s.%s.svc:50051\n' "$AO_FALLBACK_CATALOG_NAME" "$_catalog_ns"
+  printf '%s.%s.svc:50051\n' "$_registry_name" "$_catalog_ns"
 }
 
 select_ao_index_image() {
@@ -421,8 +455,14 @@ ensure_ao_catalog_source() {
 
   if [ -n "$REFRESH_CATALOG" ] || { [ -n "$_current_image" ] && [ "$_current_image" != "$_target_image" ]; }; then
     echo "  Restarting catalog pod..." >&2
-    kubectl delete pod -n "$_refresh_ns" -l "olm.catalogSource=${_refresh_catalog_name}" \
-      --wait=false >/dev/null 2>&1 || true
+    if [ "$_refresh_catalog_name" = "$AO_FALLBACK_CATALOG_NAME" ]; then
+      kubectl rollout restart deployment/"${AO_FALLBACK_CATALOG_NAME}-registry" -n "$_refresh_ns" >&2 || return 1
+      kubectl rollout status deployment/"${AO_FALLBACK_CATALOG_NAME}-registry" -n "$_refresh_ns" \
+        --timeout="$(catalog_wait_timeout_seconds)s" >&2 || return 1
+    else
+      kubectl delete pod -n "$_refresh_ns" -l "olm.catalogSource=${_refresh_catalog_name}" \
+        --wait=false >/dev/null 2>&1 || true
+    fi
   fi
 
   echo "  Waiting for CatalogSource READY..." >&2
@@ -487,23 +527,28 @@ operator_package_in_catalog() {
 }
 
 subscription_has_resolution_failure() {
-  kubectl get subscription automation-orchestrator-operator -n "${OLM_NAMESPACE}" \
-    -o json 2>/dev/null | python3 -c '
-import json, sys
-try:
-    data = json.load(sys.stdin)
-except json.JSONDecodeError:
-    sys.exit(1)
-for cond in data.get("status", {}).get("conditions", []):
-    if cond.get("status") != "True":
-        continue
-    if cond.get("type") == "ResolutionFailed":
-        sys.exit(0)
-    if cond.get("type") == "CatalogSourcesUnhealthy":
-        if cond.get("reason") != "AllCatalogSourcesHealthy":
-            sys.exit(0)
-sys.exit(1)
-' 2>/dev/null
+  local _type _status _reason
+  while IFS='|' read -r _type _status _reason; do
+    [ "$_status" = "True" ] || continue
+    if [ "$_type" = "ResolutionFailed" ]; then
+      return 0
+    fi
+    if [ "$_type" = "CatalogSourcesUnhealthy" ] \
+      && [ "$_reason" != "AllCatalogSourcesHealthy" ]; then
+      return 0
+    fi
+  done < <(kubectl get subscription automation-orchestrator-operator \
+    -n "${OLM_NAMESPACE}" \
+    -o jsonpath='{range .status.conditions[*]}{.type}|{.status}|{.reason}{"\n"}{end}' \
+    2>/dev/null || true)
+  return 1
+}
+
+pending_installplans() {
+  kubectl get installplan -n "$OLM_NAMESPACE" \
+    -o jsonpath='{range .items[*]}{.metadata.name}|{.spec.approved}{"\n"}{end}' \
+    2>/dev/null \
+    | awk -F'|' '$1 != "" && $2 != "true" { print $1 }'
 }
 
 subscription_failure_detail() {
@@ -516,6 +561,7 @@ apply_operator_olm_manifests() {
   sed -e "s|__NAMESPACE__|${NAMESPACE}|g" \
     -e "s|__CATALOG_NAMESPACE__|${CATALOG_NAMESPACE}|g" \
     -e "s|__OPERATOR_CHANNEL__|${OPERATOR_CHANNEL}|g" \
+    -e "s|__INSTALL_PLAN_APPROVAL__|${AO_INSTALL_PLAN_APPROVAL}|g" \
     "${MANIFESTS_DIR}/operator-subscription.yaml" | kubectl apply -f -
   sed -e "s|__NAMESPACE__|${NAMESPACE}|g" \
     "${MANIFESTS_DIR}/operator-rbac.yaml" | kubectl apply -f -
@@ -701,30 +747,22 @@ configure_ao_local_aap_access() {
   ensure_coredns_route_rewrite || true
   ao_pod_route_host_aliases || true
 
-  _hosts_json=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "$_aap_host")
+  _hosts_json=$(printf '["%s"]' "$_aap_host")
   _cm_current=$(kubectl get configmap automation-orchestrator-admin-settings -n "$NAMESPACE" \
     -o jsonpath='{.data.APP_INTEGRATION_URL_ALLOWED_HOSTS}' 2>/dev/null || echo "")
-  HOST="$_aap_host" NAMESPACE="$NAMESPACE" python3 -c '
-import json, os
-host = os.environ["HOST"]
-hosts = json.dumps([host])
-print(json.dumps({
-    "apiVersion": "v1",
-    "kind": "ConfigMap",
-    "metadata": {
-        "name": "automation-orchestrator-admin-settings",
-        "namespace": os.environ["NAMESPACE"],
-        "labels": {
-            "app.kubernetes.io/managed-by": "aap-demo",
-            "app.kubernetes.io/part-of": "automation-orchestrator",
-        },
-    },
-    "data": {
-        "APP_INTEGRATION_URL_ALLOWED_HOSTS": hosts,
-        "APP_WORKFLOW_HTTP_REQUEST_ALLOWED_HOSTS": hosts,
-    },
-}))
-' | kubectl apply -f - >/dev/null
+  cat <<EOF | kubectl apply -f - >/dev/null
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: automation-orchestrator-admin-settings
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/managed-by: aap-demo
+    app.kubernetes.io/part-of: automation-orchestrator
+data:
+  APP_INTEGRATION_URL_ALLOWED_HOSTS: '${_hosts_json}'
+  APP_WORKFLOW_HTTP_REQUEST_ALLOWED_HOSTS: '${_hosts_json}'
+EOF
   if [ "$_cm_current" != "$_hosts_json" ]; then
     _changed=1
   fi
@@ -858,7 +896,12 @@ sync_ao_demos() {
   if [ -n "$_project" ]; then
     _import_args+=(--project-id "$_project")
   fi
-  python3 "${SCRIPT_DIR}/scripts/import-demos.py" "${_import_args[@]}" \
+  local _python_cmd
+  if ! _python_cmd=$(ao_python_command); then
+    echo "  ⚠ Python runtime unavailable; skipping optional AO demo import"
+    return 0
+  fi
+  "$_python_cmd" "${SCRIPT_DIR}/scripts/import-demos.py" "${_import_args[@]}" \
     3< <(printf '%s' "$_token") || true
 }
 
@@ -930,7 +973,12 @@ provision_aap_demos() {
     echo "  ⚠ AAP AO sync job deferred (AO credentials not ready)"
   fi
   local _provision_rc
-  if python3 "${SCRIPT_DIR}/scripts/provision-aap-demos.py" "${_provision_args[@]}" \
+  local _python_cmd
+  if ! _python_cmd=$(ao_python_command); then
+    echo "  ⚠ Python runtime unavailable; skipping optional AAP demo provisioning"
+    return 0
+  fi
+  if "$_python_cmd" "${SCRIPT_DIR}/scripts/provision-aap-demos.py" "${_provision_args[@]}" \
     3< <(printf '%s' "$_aap_token") 4< <(printf '%s' "$_ao_token"); then
     if [ -n "$_ao_token" ] && [ -n "$_ao_credential" ] && [ -n "$_ao_integration" ]; then
       AO_AAP_SYNC_RAN=1
@@ -1356,6 +1404,10 @@ if [ -z "$FORCE" ]; then
     && [ "$_sub_channel" = "$OPERATOR_CHANNEL" ] \
     && operator_is_available \
     && ao_instance_ready_to_skip; then
+    if [ -n "$AO_INSTALL_PLAN_APPROVAL_REQUESTED" ]; then
+      ao_apply_install_plan_approval "$NAMESPACE" \
+        automation-orchestrator-operator "$AO_INSTALL_PLAN_APPROVAL_REQUESTED"
+    fi
     deploy_ao_instance
     wait_for_ao_instance_ready
     echo "✓ Automation Orchestrator already running (${_ao_running}/${_ao_total} pods, ${OPERATOR_CHANNEL} channel)"
@@ -1553,6 +1605,9 @@ wait_for_ao_postgres_databases
 # --- Operator install (GA OLM subscription) ---
 # AAP already has an OperatorGroup in aap-operator; a second one there
 # makes OLM refuse all subscriptions in that namespace.
+AO_INSTALL_PLAN_APPROVAL=$(ao_resolve_install_plan_approval \
+  "$OLM_NAMESPACE" automation-orchestrator-operator \
+  "$AO_INSTALL_PLAN_APPROVAL_REQUESTED" Automatic)
 kubectl delete subscription automation-orchestrator-operator -n "$AAP_NAMESPACE" --wait=false 2>/dev/null || true
 kubectl delete operatorgroup automation-orchestrator-operator -n "$AAP_NAMESPACE" --wait=false 2>/dev/null || true
 
@@ -1589,21 +1644,22 @@ apply_operator_olm_manifests
 echo "Waiting for InstallPlan..."
 _sub_reset=0
 for i in $(seq 1 30); do
-  _pending_ips=$(kubectl get installplan -n "$OLM_NAMESPACE" -o json 2>/dev/null \
-    | python3 -c '
-import json, sys
-data = json.load(sys.stdin)
-for item in data.get("items", []):
-    if not item.get("spec", {}).get("approved", False):
-        print(item["metadata"]["name"])
-' 2>/dev/null || echo "")
-  if [ -n "$_pending_ips" ]; then
+  _pending_ips=$(pending_installplans || echo "")
+  if [ "$AO_INSTALL_PLAN_APPROVAL" = "Automatic" ] && [ -n "$_pending_ips" ]; then
     while read -r _ip; do
       [ -z "$_ip" ] && continue
       echo "  Approving InstallPlan: ${_ip}"
       kubectl patch installplan "$_ip" -n "$OLM_NAMESPACE" \
         --type merge -p '{"spec":{"approved":true}}'
     done <<<"$_pending_ips"
+  elif [ "$AO_INSTALL_PLAN_APPROVAL" = "Manual" ] && [ -n "$_pending_ips" ]; then
+    if [ "${_manual_installplan_notice:-}" != "$_pending_ips" ]; then
+      while read -r _ip; do
+        [ -z "$_ip" ] && continue
+        ao_manual_install_plan_instructions "$OLM_NAMESPACE" "$_ip"
+      done <<<"$_pending_ips"
+      _manual_installplan_notice="$_pending_ips"
+    fi
   fi
   if kubectl get csv -n "$OLM_NAMESPACE" -o name 2>/dev/null | grep -q "automation-orchestrator"; then
     echo "✓ CSV created"
@@ -1643,7 +1699,8 @@ for item in data.get("items", []):
   fi
   if [ "$i" -eq 30 ]; then
     echo ""
-    echo "ERROR: Operator CSV not found after 5 minutes."
+    ao_install_plan_timeout_message "$AO_INSTALL_PLAN_APPROVAL" \
+      "${_pending_ips%%$'\n'*}"
     echo "  Subscription conditions:"
     subscription_failure_detail | sed 's/^/    /'
     echo "  InstallPlans:"

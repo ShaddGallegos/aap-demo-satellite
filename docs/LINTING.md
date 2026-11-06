@@ -31,6 +31,10 @@ pre-commit run --all-files
 
 ### Using Make
 
+The Make targets lint tracked repository files. This prevents installed
+virtual environments, dependency trees, and generated files in a developer
+checkout from being mistaken for project sources.
+
 ```bash
 # Run all linters
 make lint
@@ -70,7 +74,7 @@ Analyzes shell scripts for common mistakes and best practices.
 
 ```bash
 shellcheck script.sh
-find . -name "*.sh" -exec shellcheck {} \;
+git ls-files '*.sh' | while read -r file; do shellcheck "$file"; done
 ```
 
 **Disable specific warnings**:
@@ -98,7 +102,6 @@ Validates YAML files for syntax and formatting.
 **Run manually**:
 
 ```bash
-yamllint .
 yamllint config/manifests/
 ```
 
@@ -175,10 +178,10 @@ Scans for accidentally committed secrets.
 **Run manually**:
 
 ```bash
-# Scan for secrets
-detect-secrets scan
+# Read-only scan. Requires detect-secrets 1.5.0 and does not rewrite the baseline.
+make check-secrets
 
-# Update baseline
+# Record a new allowlist entry. This is the command that writes .secrets.baseline.
 detect-secrets scan --baseline .secrets.baseline
 
 # Audit findings
@@ -465,7 +468,7 @@ ls -la .git/hooks/
 
 ```bash
 # Install missing linters
-pip install pre-commit yamllint ansible-lint detect-secrets
+pip install pre-commit yamllint ansible-lint 'detect-secrets==1.5.0'
 npm install -g markdownlint-cli @commitlint/cli @commitlint/config-conventional
 brew install shellcheck shfmt  # macOS
 ```

@@ -34,11 +34,12 @@ cmd_diagnose() {
   # Cluster connectivity
   # =========================================================================
   echo "Cluster:"
-  local crc_state
-  crc_state=$(crc status -o json 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '{}'); print(d.get('crcStatus','unknown'))" 2>/dev/null || echo "unknown")
+  local crc_state status_json
+  status_json=$(crc status -o json 2>/dev/null || echo '{}')
+  crc_state=$(aap_demo_json_value crcStatus "$status_json" 2>/dev/null || echo "unknown")
   if [ "$crc_state" = "Running" ]; then
     local ms_version
-    ms_version=$(crc status -o json 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '{}'); print(d.get('openshiftVersion',''))" 2>/dev/null || echo "")
+    ms_version=$(aap_demo_json_value openshiftVersion "$status_json" 2>/dev/null || echo "")
     _check_pass "OpenShift Local running"
   elif [ "$crc_state" = "Stopped" ]; then
     _check_fail "OpenShift Local is stopped — run: crc start"
@@ -169,7 +170,7 @@ cmd_diagnose() {
   # =========================================================================
   echo "AAP Deployment:"
   local aap_name
-  aap_name=$(kubectl get aap -n "$NAMESPACE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  aap_name=$(kubectl get aap -n "$NAMESPACE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
 
   if [ -z "$aap_name" ]; then
     _check_info "No AAP instance found in $NAMESPACE"
@@ -594,6 +595,22 @@ cmd_status() {
     echo ""
   fi
 
+  # Show the credential paths for the Keycloak OIDC lab addon without exposing
+  # secret values in terminal output or CI logs.
+  local _keycloak_state_dir="${KEYCLOAK_STATE_DIR:-${HOME}/.aap-demo/keycloak}"
+  if [ -d "$_keycloak_state_dir" ]; then
+    if [ -f "$_keycloak_state_dir/admin-password" ]; then
+      if [ "$_cred_found" = "false" ]; then
+        echo "Credentials:"
+        echo "------------"
+        _cred_found=true
+      fi
+      echo "  Keycloak users: aap-oidc-admin, aap-oidc-operator, aap-oidc-auditor, aap-oidc-developer"
+      echo "  Keycloak credential files: ${_keycloak_state_dir}/"
+      echo ""
+    fi
+  fi
+
   # Show addons with URLs or enable instructions
   local saved_addons
   saved_addons=$(_addons_list)
@@ -659,6 +676,18 @@ cmd_status() {
           label="disabled"
         fi
         ;;
+      keycloak)
+        local _keycloak_namespace="${KEYCLOAK_NAMESPACE:-aap-demo-keycloak}"
+        if [ "$enabled" = true ] || kubectl get namespace "$_keycloak_namespace" &>/dev/null 2>&1; then
+          url="https://$(kubectl get route keycloak -n "$_keycloak_namespace" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
+          if [ "$url" = "https://" ]; then
+            url=""
+            label="not-deployed"
+          fi
+        else
+          label="disabled"
+        fi
+        ;;
       *)
         if [ "$enabled" = true ]; then
           label="enabled"
@@ -676,6 +705,44 @@ cmd_status() {
     fi
   done
   echo ""
+
+  # Show both fleet backends. Bash v1 stores QEMU nodes on the host; Python v2
+  # stores pod-backed nodes in Kubernetes, so neither state can be inferred
+  # from the other's config or filesystem.
+  local _fleet_v2_rows _fleet_v2_total _fleet_v2_ready _fleet_v2_err _fleet_v2_rc
+  local _fleet_kubectl
+  # status does not run cluster setup, so pass the flags the user already gave.
+  _fleet_kubectl=(kubectl)
+  if [ -n "${KUBECTL_CONTEXT:-}" ]; then
+    _fleet_kubectl+=(--context "$KUBECTL_CONTEXT")
+  fi
+  if [ -n "${KUBECTL_KUBECONFIG:-}" ]; then
+    _fleet_kubectl+=(--kubeconfig "$KUBECTL_KUBECONFIG")
+  fi
+  _fleet_v2_err=$(mktemp)
+  # set -e would exit on a failing assignment before the rc could be read.
+  _fleet_v2_rc=0
+  # -A because the Fleet namespace is configurable. The label keeps the list
+  # small, and the timeout keeps a stopped cluster from slowing status down.
+  _fleet_v2_rows=$("${_fleet_kubectl[@]}" --request-timeout=5s get pods -A \
+    -l app.kubernetes.io/name=fleet-node \
+    --no-headers \
+    -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,READY:.status.containerStatuses[0].ready,PHASE:.status.phase' \
+    2>"$_fleet_v2_err") || _fleet_v2_rc=$?
+  if [ "$_fleet_v2_rc" -ne 0 ]; then
+    echo "Kubernetes-native Fleet: kubectl failed ($(head -1 "$_fleet_v2_err" | cut -c1-120))"
+    rm -f "$_fleet_v2_err"
+  elif [ -n "$_fleet_v2_rows" ]; then
+    rm -f "$_fleet_v2_err"
+    _fleet_v2_total=$(printf '%s\n' "$_fleet_v2_rows" | awk 'NF {count++} END {print count + 0}')
+    _fleet_v2_ready=$(printf '%s\n' "$_fleet_v2_rows" | awk '$3 == "true" {count++} END {print count + 0}')
+    echo "Kubernetes-native Fleet:"
+    printf "  %s/%s pod nodes ready\n" "$_fleet_v2_ready" "$_fleet_v2_total"
+    printf '%s\n' "$_fleet_v2_rows" | sed 's/^/  /'
+    echo ""
+  else
+    rm -f "$_fleet_v2_err"
+  fi
 
   _show_fleet_status
 }

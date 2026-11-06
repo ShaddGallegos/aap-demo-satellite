@@ -48,6 +48,7 @@ _ssh() {
 # --- Cached operator catalog reference ---
 if [ "$ACTION" = "catalog-ref" ]; then
   requested_version="${2:-}"
+  requested_aap_version="${3:-}"
   metadata_file="${CACHE_DIR}/${CACHE_CATALOG_METADATA}"
 
   if [ -z "$requested_version" ] || [ ! -s "$metadata_file" ]; then
@@ -55,8 +56,10 @@ if [ "$ACTION" = "catalog-ref" ]; then
   fi
 
   _require_crc_ssh
-  cached_catalog_ref=$(awk -F '\t' -v version="$requested_version" \
-    '$1 == version {print $3; exit}' "$metadata_file")
+  cached_catalog_ref=$(awk -F '\t' \
+    -v version="$requested_version" -v aap_version="$requested_aap_version" \
+    '$1 == version && (aap_version == "" || $4 == "" || $4 == "all" || $4 == aap_version) {print $3; exit}' \
+    "$metadata_file")
   if [ -z "$cached_catalog_ref" ] \
     || ! _crc_exec sudo crictl inspecti "$cached_catalog_ref" &>/dev/null; then
     exit 1
@@ -136,10 +139,17 @@ if [ "$ACTION" = "load" ]; then
     # on the VM, import it, and remove it. Preserve the digest so a mismatch is
     # an error, not a renamed tag.
     if _ssh "cat >'${CACHE_REMOTE_ARCHIVE}' && sudo skopeo copy --all --preserve-digests oci-archive:'${CACHE_REMOTE_ARCHIVE}':aap-demo-cache containers-storage:'${local_ref}'; status=\$?; rm -f '${CACHE_REMOTE_ARCHIVE}'; exit \$status" <"$tarball" &>/dev/null; then
-      printf "${_GREEN}✓${_NC}\n"
-      loaded=$((loaded + 1))
+      if _crc_exec sudo crictl inspecti "$local_ref" &>/dev/null; then
+        printf "${_GREEN}✓${_NC}\n"
+        loaded=$((loaded + 1))
+      else
+        printf "${_YELLOW}✗${_NC} (digest unavailable)\n"
+        rm -f "$tarball" "${tarball%.tar}.ref" "${tarball%.tar}.local-ref"
+        failed=$((failed + 1))
+      fi
     else
       printf "${_YELLOW}✗${_NC}\n"
+      rm -f "$tarball" "${tarball%.tar}.ref" "${tarball%.tar}.local-ref"
       failed=$((failed + 1))
     fi
   done
@@ -208,6 +218,15 @@ if [ "$ACTION" = "rewrite" ]; then
     [ -n "$original_ref" ] && [ -n "$local_ref" ] || continue
     mappings=$((mappings + 1))
 
+    # A cache entry can retain a digest that was valid when it was saved but
+    # was not imported into the current CRC VM. Do not rewrite live workloads
+    # to an unavailable image; leave the original registry reference in place
+    # so Kubernetes can pull it normally.
+    if ! _crc_exec sudo crictl inspecti "$local_ref" &>/dev/null; then
+      echo "  ⚠ Skipping unavailable cached image: ${local_ref}" >&2
+      continue
+    fi
+
     while IFS=$'\t' read -r kind namespace name patch; do
       [ -n "$kind" ] || continue
       if kubectl patch "$kind" "$name" -n "$namespace" --type=json -p "$patch" >/dev/null 2>&1; then
@@ -218,14 +237,44 @@ if [ "$ACTION" = "rewrite" ]; then
       .items[] |
       ([
         ((.spec.template.spec.containers // []) | to_entries[] |
-          select(.value.image == $old) |
-          {op:"replace", path:("/spec/template/spec/containers/" + (.key|tostring) + "/image"), value:$new}),
+          select(.value.image == $old or .value.image == $new) |
+          (if .value.image == $old then
+            {op:"replace", path:("/spec/template/spec/containers/" + (.key|tostring) + "/image"), value:$new}
+          else empty end),
+          (if .value.imagePullPolicy == "Always" then
+            {op:"replace", path:("/spec/template/spec/containers/" + (.key|tostring) + "/imagePullPolicy"), value:"IfNotPresent"}
+          else empty end)),
         ((.spec.template.spec.initContainers // []) | to_entries[] |
-          select(.value.image == $old) |
-          {op:"replace", path:("/spec/template/spec/initContainers/" + (.key|tostring) + "/image"), value:$new})
+          select(.value.image == $old or .value.image == $new) |
+          (if .value.image == $old then
+            {op:"replace", path:("/spec/template/spec/initContainers/" + (.key|tostring) + "/image"), value:$new}
+          else empty end),
+          (if .value.imagePullPolicy == "Always" then
+            {op:"replace", path:("/spec/template/spec/initContainers/" + (.key|tostring) + "/imagePullPolicy"), value:"IfNotPresent"}
+          else empty end))
       ] | map(select(.op == "replace"))) as $patch |
       select(($patch | length) > 0) |
       [.kind, .metadata.namespace, .metadata.name, ($patch | tojson)] | @tsv')
+
+    while IFS=$'\t' read -r namespace name patch; do
+      [ -n "$name" ] || continue
+      if kubectl patch csv "$name" -n "$namespace" --type=json -p "$patch" >/dev/null 2>&1; then
+        rewrites=$((rewrites + 1))
+      fi
+    done < <(kubectl get csv -A -o json 2>/dev/null | jq -r \
+      --arg old "$original_ref" --arg new "$local_ref" '
+      .items[] | . as $item |
+      (.spec.install.spec.deployments // []) | to_entries[] as $deployment |
+      (($deployment.value.spec.template.spec.containers // []) | to_entries[]) as $container |
+      select($container.value.image == $old or $container.value.image == $new) |
+      ([(if $container.value.image == $old then
+          {op:"replace", path:("/spec/install/spec/deployments/" + ($deployment.key|tostring) + "/spec/template/spec/containers/" + ($container.key|tostring) + "/image"), value:$new}
+        else empty end),
+        (if $container.value.imagePullPolicy == "Always" then
+          {op:"replace", path:("/spec/install/spec/deployments/" + ($deployment.key|tostring) + "/spec/template/spec/containers/" + ($container.key|tostring) + "/imagePullPolicy"), value:"IfNotPresent"}
+        else empty end)] | map(select(.op == "replace"))) as $patch |
+      select(($patch | length) > 0) |
+      [$item.metadata.namespace, $item.metadata.name, ($patch | tojson)] | @tsv')
 
     while IFS=$'\t' read -r namespace name patch; do
       [ -n "$name" ] || continue
@@ -352,8 +401,8 @@ for img in data.get('images', []):
       file_size=$(du -h "$tarball" | awk '{print $1}')
       printf "  %-62s %6s (cached)\n" "$display_name" "$file_size"
       if [ -n "$catalog_version" ] && [ -s "${tarball%.tar}.local-ref" ]; then
-        printf '%s\t%s\t%s\n' "$catalog_version" "$img_ref" \
-          "$(cat "${tarball%.tar}.local-ref")" >>"$catalog_metadata_tmp"
+        printf '%s\t%s\t%s\t%s\n' "$catalog_version" "$img_ref" \
+          "$(cat "${tarball%.tar}.local-ref")" "${AAP_VERSION:-all}" >>"$catalog_metadata_tmp"
       fi
       skipped=$((skipped + 1))
       continue
@@ -365,17 +414,18 @@ for img in data.get('images', []):
       rm -f "$tarball" "$ref_file" "${tarball%.tar}.local-ref"
     fi
 
-    # Export from CRI-O to an OCI archive on the VM, then stream that archive
-    # to the host. OCI archives retain signatures and manifest metadata.
+    # Export the current platform from CRI-O to an OCI archive on the VM, then
+    # stream that archive to the host. OCI archives do not support the source
+    # signature store, so signatures are removed during export.
     # Use -n to prevent SSH from consuming the while-read stdin
-    if _ssh -n "sudo rm -f '${CACHE_REMOTE_ARCHIVE}' && sudo skopeo copy --all --quiet containers-storage:'${img_ref}' oci-archive:'${CACHE_REMOTE_ARCHIVE}':aap-demo-cache && sudo cat '${CACHE_REMOTE_ARCHIVE}' && sudo rm -f '${CACHE_REMOTE_ARCHIVE}'" >"$tarball" 2>/dev/null; then
+    if _ssh -n "sudo rm -f '${CACHE_REMOTE_ARCHIVE}' && sudo skopeo copy --quiet --remove-signatures containers-storage:'${img_ref}' oci-archive:'${CACHE_REMOTE_ARCHIVE}':aap-demo-cache && sudo cat '${CACHE_REMOTE_ARCHIVE}' && sudo rm -f '${CACHE_REMOTE_ARCHIVE}'" >"$tarball" 2>/dev/null; then
       manifest_digest=$(skopeo inspect --raw "oci-archive:${tarball}:aap-demo-cache" 2>/dev/null | sha256sum | awk '{print $1}')
       if [ -n "$manifest_digest" ] && [ "${#manifest_digest}" -eq 64 ] && [[ "$img_ref" == *@* ]]; then
         echo "$img_ref" >"$ref_file"
         printf '%s@sha256:%s\n' "${img_ref%@*}" "$manifest_digest" >"${tarball%.tar}.local-ref"
         if [ -n "$catalog_version" ]; then
-          printf '%s\t%s\t%s\n' "$catalog_version" "$img_ref" \
-            "$(cat "${tarball%.tar}.local-ref")" >>"$catalog_metadata_tmp"
+          printf '%s\t%s\t%s\t%s\n' "$catalog_version" "$img_ref" \
+            "$(cat "${tarball%.tar}.local-ref")" "${AAP_VERSION:-all}" >>"$catalog_metadata_tmp"
         fi
         file_size=$(du -h "$tarball" | awk '{print $1}')
         printf "${_GREEN}%6s${_NC}\n" "$file_size"
@@ -387,7 +437,7 @@ for img in data.get('images', []):
       fi
     else
       rm -f "$tarball" "$ref_file" "${tarball%.tar}.local-ref"
-      printf "${_YELLOW}%6s${_NC}\n" "skip"
+      printf "${_YELLOW}%6s${_NC}\n" "fail"
       failed=$((failed + 1))
     fi
   done <<<"$all_images"
@@ -415,16 +465,19 @@ for img in data.get('images', []):
   done
   rm -f "$current_cache_names"
 
-  if [ "$failed" -eq 0 ]; then
+  if [ "$saved" -gt 0 ]; then
     printf '%s\n' "$cache_format_version" >"$cache_format_marker"
   fi
 
   echo ""
   total_size=$(du -sh "$CACHE_DIR" 2>/dev/null | awk '{print $1}')
-  echo "✓ Saved ${saved} images, ${skipped} already cached, ${failed} skipped, ${pruned} corrupt entries removed (${total_size} total)"
-  if [ "$failed" -gt 0 ]; then
-    echo "✗ Local image cache save failed: ${failed} image(s) could not be exported" >&2
+  echo "✓ Saved ${saved} images, ${skipped} already cached, ${failed} failed, ${pruned} corrupt entries removed (${total_size} total)"
+  if [ "$failed" -gt 0 ] && [ "$saved" -eq 0 ]; then
+    echo "✗ Local image cache save failed: no images could be exported" >&2
     exit 1
+  fi
+  if [ "$failed" -gt 0 ]; then
+    echo "  ⚠ ${failed} image(s) could not be exported (not available in local CRI-O storage)" >&2
   fi
   echo ""
   echo "To load after a fresh create:"

@@ -15,6 +15,8 @@ SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 source "${SCRIPT_DIR}/includes/aap-demo-paths.sh"
 # shellcheck source=includes/credential-vault.sh
 source "${SCRIPT_DIR}/includes/credential-vault.sh"
+# shellcheck source=includes/kubeconfig-guard.sh
+source "${SCRIPT_DIR}/includes/kubeconfig-guard.sh"
 
 # Source CRC infra backend (sets CRC_SSH_KEY, CRC_SSH_OPTS)
 # shellcheck source=includes/infra-crc.sh
@@ -29,6 +31,8 @@ source "${SCRIPT_DIR}/includes/ingress-ca-trust.sh"
 source "${SCRIPT_DIR}/includes/persistent-crio-store.sh"
 # shellcheck source=includes/storage-capacity.sh
 source "${SCRIPT_DIR}/includes/storage-capacity.sh"
+# shellcheck source=includes/json-utils.sh
+source "${SCRIPT_DIR}/includes/json-utils.sh"
 
 # Colors
 _RED='\033[0;31m'
@@ -94,12 +98,8 @@ _wait_for_crc_stable() {
 
   for attempt in $(seq 1 "$max_attempts"); do
     status_json=$(crc status --output json 2>/dev/null || true)
-    crc_status=$(printf '%s\n' "$status_json" | python3 -c \
-      'import json,sys; print(json.load(sys.stdin).get("crcStatus", ""))' \
-      2>/dev/null || true)
-    openshift_status=$(printf '%s\n' "$status_json" | python3 -c \
-      'import json,sys; print(json.load(sys.stdin).get("openshiftStatus", ""))' \
-      2>/dev/null || true)
+    crc_status=$(aap_demo_json_value crcStatus "$status_json" 2>/dev/null || true)
+    openshift_status=$(aap_demo_json_value openshiftStatus "$status_json" 2>/dev/null || true)
 
     api_healthy=false
     if [ "$openshift_status" = "Running" ]; then
@@ -314,7 +314,60 @@ _crc_daemon_ensure() {
   return 1
 }
 
+_crc_windows_daemon_task_exists() {
+  _is_mingw || return 0
+  command -v powershell.exe >/dev/null 2>&1 || return 1
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \
+    "if (Get-ScheduledTask -TaskName crcDaemon -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }" \
+    >/dev/null 2>&1
+}
+
+_crc_needs_setup() {
+  [ "${CRC_STATUS:-Unknown}" = "Unknown" ] && return 0
+  if _is_mingw && ! _crc_windows_daemon_task_exists; then
+    return 0
+  fi
+  return 1
+}
+
+_crc_machine_exists() {
+  [ -e "${HOME}/.crc/machines/crc/.crc-exist" ] || [ -d "${HOME}/.crc/machines/crc" ]
+}
+
+_crc_resource_prompt_needed() {
+  return 0
+}
+
+_crc_should_prompt_resources() {
+  [ "${QUIET:-false}" = "true" ] && return 1
+  aap_demo_resource_prompt_enabled || return 1
+  _crc_resource_prompt_needed
+}
+
 # When sourced for CoreDNS only (aap-demo start), skip cluster creation.
+aap_demo_resource_prompt_enabled() {
+  if [ -t 0 ] || [ "${AAP_DEMO_INTERACTIVE:-}" = "1" ]; then
+    return 0
+  fi
+
+  local _tty_fd
+  if { exec {_tty_fd}</dev/tty; } 2>/dev/null; then
+    if [ -t "$_tty_fd" ]; then
+      exec {_tty_fd}<&-
+      return 0
+    fi
+    exec {_tty_fd}<&-
+  fi
+  return 1
+}
+
+aap_demo_normalize_crc_status() {
+  case "${1:-}" in
+    Running | Stopped) printf '%s\n' "$1" ;;
+    *) printf '%s\n' 'Unknown' ;;
+  esac
+}
+
 [[ "${AAP_DEMO_CONFIGURE_COREDNS_ONLY:-}" == "1" ]] && return 0
 
 echo ""
@@ -336,6 +389,7 @@ if ! command -v crc &>/dev/null; then
   exit 1
 fi
 
+# Ensure CRC daemon is running (Linux only — macOS/Windows manage the daemon)
 if ! _is_mingw && [ "$(uname)" != "Darwin" ] \
   && systemctl --user cat crc-http.socket crc-vsock.socket >/dev/null 2>&1; then
   _crc_daemon_ensure || {
@@ -346,7 +400,8 @@ fi
 
 # Check if already running
 CRC_STATUS_JSON=$(crc status --output json 2>/dev/null || echo '{}')
-CRC_STATUS=$(echo "$CRC_STATUS_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('crcStatus','Unknown'))" 2>/dev/null || echo "Unknown")
+CRC_STATUS=$(aap_demo_json_value crcStatus "$CRC_STATUS_JSON" 2>/dev/null || echo "Unknown")
+CRC_STATUS=$(aap_demo_normalize_crc_status "$CRC_STATUS")
 
 if [ "$CRC_STATUS" = "Running" ]; then
   echo "CRC is already running"
@@ -406,7 +461,7 @@ if [ -f "${AAP_DEMO_CONFIG:-${AAP_DEMO_DIR:-$HOME/.aap-demo}/config}" ]; then
   [ -n "$_saved_memory" ] && _DEFAULT_MEMORY_GB=$(((_saved_memory + 512) / 1024))
 fi
 
-if [ "$CRC_STATUS" = "Unknown" ] && [ -t 0 ]; then
+if _crc_should_prompt_resources; then
   echo ""
   printf "${_BOLD}Resource allocation for CRC VM:${_NC}\n"
   if [ "$HOST_CPUS" -gt 0 ]; then
@@ -511,7 +566,7 @@ printf "${_GREEN}▸${_NC} Resources: ${CRC_CPUS} CPUs, $((CRC_MEMORY / 1024))GB
 # ---------------------------------------------------------------------------
 # Setup CRC (if needed)
 # ---------------------------------------------------------------------------
-if [ "$CRC_STATUS" = "Unknown" ]; then
+if _crc_needs_setup; then
   crc_setup_rc=0
   printf "${_GREEN}▸${_NC} Running CRC setup...\n"
   if crc setup --show-progressbars 2>&1 |
@@ -708,6 +763,19 @@ else
   exit 1
 fi
 
+# CRC's oc-env is not reliable on every Windows installation. Resolve the
+# Kubernetes client explicitly before the post-create resources use kubectl;
+# OpenShift's oc is API-compatible for these operations.
+if ! command -v kubectl >/dev/null 2>&1 || ! kubectl version --client >/dev/null 2>&1; then
+  if command -v oc >/dev/null 2>&1; then
+    kubectl() { oc "$@"; }
+  else
+    echo "ERROR: kubectl/oc is required to finish cluster setup (metrics-server and NFS)." >&2
+    echo "Install the OpenShift client, then rerun: aap-demo create" >&2
+    exit 1
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # Register podman connection
 # ---------------------------------------------------------------------------
@@ -723,15 +791,18 @@ echo "  podman --connection aap-demo build ."
 printf "${_GREEN}▸${_NC} Installing metrics-server...\n"
 KUBECONFIG="$(aap_demo_resolve_kubeconfig)"
 export KUBECONFIG
+if ! aap_demo_reject_remote_kubeconfig; then
+  exit 1
+fi
 if [ "$CURRENT_PRESET" = "openshift" ]; then
   echo "  Built into OpenShift monitoring (skipped)"
 elif kubectl get deployment metrics-server -n kube-system &>/dev/null; then
   echo "  Already installed"
 else
-  kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml 2>/dev/null
+  kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
   # MicroShift needs --kubelet-insecure-tls
   kubectl patch deployment metrics-server -n kube-system --type=json \
-    -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]' 2>/dev/null
+    -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
   echo "  ✓ metrics-server installed"
 fi
 
@@ -759,13 +830,41 @@ else
       DEFAULT_SC="topolvm-provisioner"
     fi
   fi
-  sed "s/__DEFAULT_SC__/${DEFAULT_SC}/g" "${SCRIPT_DIR}/config/manifests/nfs-server.yaml" | kubectl apply -f -
-  echo "  Waiting for NFS server..."
-  kubectl wait --for=condition=Available deployment/nfs-server -n nfs-storage --timeout=120s 2>/dev/null || {
+  NFS_BACKING_STORAGE_SIZE="${NFS_BACKING_STORAGE_SIZE:-5Gi}"
+  sed -e "s/__DEFAULT_SC__/${DEFAULT_SC}/g" \
+    -e "s/__NFS_BACKING_STORAGE_SIZE__/${NFS_BACKING_STORAGE_SIZE}/g" \
+    "${SCRIPT_DIR}/config/manifests/nfs-server.yaml" | kubectl apply -f -
+
+  wait_for_nfs_server() {
+    if kubectl wait --for=condition=Available deployment/nfs-server -n nfs-storage --timeout=120s 2>/dev/null; then
+      return 0
+    fi
+
+    local nfs_events
+    nfs_events=$(kubectl get events -n nfs-storage \
+      --field-selector involvedObject.name=nfs-backing-storage \
+      --sort-by=.metadata.creationTimestamp \
+      -o jsonpath='{range .items[*]}{.reason}{" "}{.message}{"\n"}{end}' 2>/dev/null || true)
+
+    if grep -Eiq 'NotEnoughCapacity|no enough space left on VG|ResourceExhausted|requested storage .*greater than available capacity' <<<"$nfs_events"; then
+      echo "ERROR: NFS backing PVC could not be provisioned"
+      echo "  Requested size: ${NFS_BACKING_STORAGE_SIZE}"
+      echo "$nfs_events" | tail -n 5 | sed 's/^/  /'
+      echo "  Increase CRC_DISK and/or CRC_PV_SIZE, then recreate the CRC cluster before retrying."
+      return 1
+    fi
+
     echo "  Waiting for NFS backing PVC to bind..."
     sleep 10
-    kubectl wait --for=condition=Available deployment/nfs-server -n nfs-storage --timeout=120s
+    if ! kubectl wait --for=condition=Available deployment/nfs-server -n nfs-storage --timeout=120s; then
+      echo "ERROR: NFS server did not become ready"
+      kubectl describe pvc nfs-backing-storage -n nfs-storage 2>/dev/null | tail -n 20 || true
+      return 1
+    fi
   }
+
+  echo "  Waiting for NFS server..."
+  wait_for_nfs_server
   # Kubelet resolves NFS server by IP (can't use cluster DNS for mount)
   NFS_IP=$(kubectl get svc nfs-server -n nfs-storage -o jsonpath='{.spec.clusterIP}')
   sed "s/__NFS_SERVER_IP__/${NFS_IP}/g" "${SCRIPT_DIR}/config/manifests/nfs-provisioner.yaml" | kubectl apply -f -
