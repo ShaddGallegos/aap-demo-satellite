@@ -56,6 +56,19 @@ reach the host (and AAP's forwarded ports) through host NAT/forwarding.
 the Satellite VM that loopback is the *host's* forwarded AAP port, reached via
 the `default` gateway (`192.168.122.1`). No extra DNS wiring is needed.
 
+**Reaching the Satellite from AAP (the reverse direction):** the cluster's
+CoreDNS maps `satellite.demo.lab` to the VM's real IP (`192.168.122.20`) via a
+`hosts` block, applied by `configure_coredns` whenever the Satellite VM is
+running. This is what lets the AAP controller pods run the Satellite demo
+content. The `apps.127.0.0.1.nip.io` wildcard cannot be used for the Satellite
+— it resolves to `127.0.0.1`, which from inside a pod is the pod itself. On the
+host, `satellite.demo.lab` is added to `/etc/hosts` so the UI is reachable at
+`https://satellite.demo.lab`.
+
+**Organization:** the lab uses Satellite's built-in `Default Organization`
+(not a custom org) so the upstream product-demos Satellite content — which
+hardcodes that name — works without editing host_vars.
+
 ## Prerequisites
 
 - KVM host: RHEL 9/Fedora with `libvirt`, `virt-install`, `qemu-kvm`; ~200 GB
@@ -72,10 +85,17 @@ the `default` gateway (`192.168.122.1`). No extra DNS wiring is needed.
   `.treeinfo`-bearing install tree, so Anaconda cannot set up a network software
   source. If the host is not registered, place the DVD ISO at
   `/var/lib/libvirt/images/rhel-9.5-x86_64-dvd.iso` and it will be used directly.
-- Red Hat account credentials (or an activation key) for the Satellite VM itself.
-  This host's aap-demo Vault already holds `RHSM_ORG_ID` + `RHSM_ACTIVATION_KEY`;
-  export them before step 1:
-  `RHSM_ORG=$(ansible-vault view --vault-password-file ~/.ansible/conf/.vaultpass.txt ~/.ansible/conf/env.yml | awk '/RHSM_ORG_ID:/ {print $2}')`
+- Red Hat content access for the Satellite VM itself. The build registers the
+  VM **post-boot over SSH** (`_stage_register` in `build-and-configure.sh`),
+  not in the kickstart `%post` — a bad credential there hangs the install
+  silently with no TTY to debug it. Registration tries, in order:
+  1. an existing registration or working entitlement certs on the VM,
+  2. `RHSM_ORG_ID` + `RHSM_ACTIVATION_KEY` from the aap-demo Vault,
+  3. `RHSM_USERNAME` + `RHSM_PASSWORD` from the Vault,
+  4. the **host's entitlement cert** copied to the VM (the same CDN cert-auth
+     pattern `00a-fetch-rhel-iso.sh` uses), so a registered host is enough —
+     no separate VM credentials are required.
+  To store Vault credentials: `aap-demo fleet auth configure`.
 - A **manifest** with Satellite infrastructure + RHEL entitlements. Generate it
   programmatically with the aap-demo addon (writes `~/.aap-demo/satellite/manifest.zip`):
   `aap-demo enable satellite-manifest` — then `scp` it to the Satellite VM as

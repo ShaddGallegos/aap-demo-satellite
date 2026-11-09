@@ -10,6 +10,139 @@ attempts are omitted unless they explain a requirement of the final fix.
 
 ## Unreleased - cumulative changes since `39564b5`
 
+### 55. Hands-free `--sno` / `--microshift` flags and SNO deployment fixes
+
+`aap-demo create` now accepts `--sno` and `--microshift` for non-interactive
+tier selection, complementing the interactive prompt from entry 54. `--sno`
+sets `CRC_PRESET=openshift` and `--microshift` sets `CRC_PRESET=microshift`;
+both export the preset and set `AAP_DEMO_TIER_PROMPT=false` so the tier prompt
+is skipped (the flags are the hands-free path for `create --full-demo
+--satellite --sno`). When SNO is requested but the host does not meet the
+minimums, `includes/crc-create.sh` now fails fast with the specific unmet
+requirements and points at `--microshift`, rather than OOM-starving a full
+control plane. Help text documents both flags.
+
+**Lightspeed on SNO.** The `lightspeed` addon's postgres StatefulSet runs with
+`capabilities: drop: ["ALL"]` and no `runAsUser`/`fsGroup`, so on SNO (random
+UID via the `anyuid` SCC) it could not write the root-owned PVC — CrashLoopBackOff
+with "mkdir: cannot create directory '/var/lib/pgsql/data/userdata': Permission
+denied". The operator's `postgres_data_volume_init` init container is gated to
+`not is_openshift`, so it does not help on SNO. `addons/lightspeed/deploy.sh`
+now detects the permission crash and fixes the PVC ownership with a one-off
+privileged pod (`chown -R 26:26`), then restarts postgres. Verified live on
+SNO: `aap-lightspeed-api` + `aap-lightspeed-postgres-15` Running, route
+`https://aap-lightspeed-aap-operator.apps-crc.testing` returns 200, and the
+Lightspeed API reaches the in-cluster Ollama `qwen2.5:3b` endpoint.
+
+**Validation:** `bash -n` + `shellcheck` clean on `aap-demo.sh`,
+`includes/crc-create.sh`, `includes/help.sh`, `addons/lightspeed/deploy.sh`;
+`test-cli-parsing.sh` passes; flag parsing verified to set `CRC_PRESET` and
+skip the prompt. Live: `create --full-demo --satellite --sno` completed
+end-to-end (exit 0) on OpenShift 4.22.14 SNO — AAP UI 200, OpenShift web
+console 200, Ollama serving, 3 fleet nodes registered, Satellite UI trusted,
+all full-demo addons enabled. (The `machine-config` cluster operator reports
+Degraded on single-node CRC, which is expected and cosmetic.)
+
+### 54. Hardware-aware SNO/MicroShift tier prompt in create
+
+`aap-demo create` now prompts the user to choose a deployment tier based on
+what the host hardware supports, instead of silently defaulting to MicroShift.
+A new `_prompt_tier_choice` in `includes/crc-create.sh` runs after host
+resource detection (CPUs/RAM/disk) and before the preset is locked in.
+
+When the host meets the SNO minimums (≥8 vCPUs, ≥16 GB RAM [32 GB
+recommended], ≥100 GB disk — the same thresholds as
+`scripts/aap-demo-tier-select.sh`), it prints "This hardware will support
+SNO" with both tiers listed and asks "Use Single Node OpenShift? [y/n]
+(default: y)". When the host falls short, it prints "The hardware will support
+MicroShift" with the unmet SNO requirements and asks "Continue with
+MicroShift? [y/n] (default: y)"; answering `n` aborts so the user can free
+resources or pin `CRC_PRESET`.
+
+The prompt is skipped (preserving prior behavior) when `CRC_PRESET` is already
+set, when `QUIET=true`, when `AAP_DEMO_TIER_PROMPT=false`, or on a
+non-interactive TTY — so scripts and `--full-demo` non-interactive runs are
+unaffected. The chosen tier is exported as `CRC_PRESET` and persisted to
+`~/.aap-demo/config` via the existing `_save_config_key`. Host resource
+detection (`_detect_host_resources` + disk) moved above the preset block so
+the prompt has the numbers it needs.
+
+**Validation:** `bash -n` and `shellcheck` clean; detection logic verified for
+both SNO-capable and under-resourced hosts; prompt gating verified to skip on
+pinned preset / quiet / non-interactive; `test-cli-parsing.sh` and
+`test-portability.sh` pass; full shell suite 105/106 (the one failure is the
+pre-existing `test-core-commands.sh` `status_executes`, unrelated).
+
+### 53. Satellite CA trust, fleet→Satellite registration, and AAP Lightspeed on Ollama
+
+Three lab integrations completed and automated.
+
+**Satellite CA trust on the host.** The Satellite VM serves a self-signed cert
+from its own Katello CA (`CN=satellite.demo.lab`), so browsers and CLI tools
+rejected it with `ERR_CERT_AUTHORITY_INVALID`. New
+`includes/satellite-ca-trust.sh` fetches the CA from the Satellite's
+unauthenticated `/pub/katello-server-ca.crt` (validating it is a `CA:TRUE`
+cert, not a leaf) and imports it into the dual stores per ADR-015: the OS
+store (`update-ca-trust` / `update-ca-certificates`) for curl/hammer/ansible,
+and the NSS stores (`~/.pki/nssdb`, `~/.local/share/pki/nssdb`, Firefox
+profiles) for Chrome/Chromium/Firefox. Import is idempotent (SHA-256
+fingerprint match against the installed anchor) and skipped when
+`AAP_DEMO_TRUST_CA=false`. A `_stage_ca_trust` stage in
+`build-and-configure.sh` runs it as the invoking user (not root) so browser
+trust lands in the right NSS DB. New `test/test-satellite-ca-trust.sh` (6
+cases: fingerprint format, CA accept / non-CA reject, already-trusted match /
+mismatch, skip flag).
+
+**Fleet nodes register to the Satellite.** New `aap-demo fleet
+satellite-register` (`includes/fleet-satellite.sh` +
+`satellite-lab/07-fleet-activation-key.sh`) registers every running fleet node
+to the Satellite instead of directly to Red Hat, so content is served from the
+local Pulp and hosts appear in the Satellite inventory. The Satellite-side
+script creates a `fleet-rhel9` activation key bound to the content view that
+actually has repositories (RHEL9, falling back to RHEL10) in the org that owns
+it — the lab publishes RHEL content views in **Demo Org**, while the manifest
+lives in **Default Organization**. Per node, registration (1) installs
+`katello-ca-consumer` to trust the Satellite CA, (2) registers with
+`subscription-manager --activationkey`, and (3) registers Insights / connects
+`rhc`. Two node-specific fixes were required: fleet nodes are cloned from one
+image and share a DMI UUID, which Satellite rejects as a duplicate (HTTP 422),
+so each node writes a unique `dmi.system.uuid` rhsm fact before registering;
+and a stale Insights `.registered` file from a pre-Satellite direct attempt
+makes `--register` refuse with "Machine-id found", so it is cleared first.
+Credentials and the AK name cross SSH via stdin, never argv. New
+`test/test-fleet-satellite.sh` (7 cases).
+
+**Ansible Lightspeed in AAP, backed by Ollama.** New `lightspeed` addon
+(`addons/lightspeed/deploy.sh`) deploys the Lightspeed intelligent assistant
+into the existing `aap-operator` namespace, wired to the local Ollama LLM
+(`qwen2.5:3b`) instead of a cloud model. It creates a model-configuration
+Secret pointing at the in-cluster Ollama OpenAI-compatible endpoint
+(`http://ollama.aap-demo-ollama.svc.cluster.local:11434/v1`, `model_type:
+wca-onprem`, which requires a `username` key even though Ollama ignores it),
+then an `AnsibleLightspeed` CR (`lightspeed.ansible.com/v1alpha1`) that the
+ansible-lightspeed operator reconciles into the Lightspeed API + postgres. The
+addon depends on `ollama` in `config/addons-dashboard.json` and is registered
+in `AVAILABLE_ADDONS` and the `enable` argument parser. Verified live:
+`aap-lightspeed-api` and `aap-lightspeed-postgres-15` pods Running, route
+`https://aap-lightspeed-aap-operator.apps.127.0.0.1.nip.io` returns 200.
+
+**Known manual step — Insights cloud confirmation.** Fleet nodes upload
+Insights data to the Satellite's `rh_cloud` connector, but the Satellite only
+forwards it to Red Hat after the org has a Hybrid Cloud branch ID
+(`foreman-rake rh_cloud:hybridcloud_register`). That task requires a
+**cert-based Hybrid Cloud API token** from console.redhat.com → Integrations →
+Satellite (the Vault's offline OAuth token returns 401 "Certificate required"),
+so it cannot be fully automated; until it is run, `insights-client --status`
+reports "Insights API could not be reached" on the nodes even though they are
+correctly registered to the Satellite.
+
+**Validation:** `test-satellite-ca-trust.sh` 6/6, `test-fleet-satellite.sh`
+7/7; `bash -n` and `shellcheck` clean on all touched scripts. Live: 3/3 fleet
+nodes registered and visible in `hammer host list`; Lightspeed API + route
+serving; Satellite UI trusted (302) with no browser warning. The pre-existing
+`test-core-commands.sh` `status_executes`/`status_format` failure (exit 255)
+reproduces with these changes stashed and is unrelated.
+
 Current comparison point:
 
 - Baseline: `39564b5`
@@ -18,6 +151,68 @@ Current comparison point:
   below. Entries 35-37 record the Fleet updates completed on 2026-10-23.
 - The earlier cumulative file/line counts predate these Fleet changes and are
   omitted rather than presented as current totals.
+
+### 52. Satellite lab: post-boot RHSM registration, entitlement fallback, and demo-content wiring
+
+The Satellite lab now builds end-to-end on a host whose RHSM account has a
+Satellite infrastructure subscription, and the Satellite demo content installs
+against it without manual credential edits.
+
+Registration moved out of the kickstart `%post` (a bad credential hung the
+install silently with no TTY) into a post-boot SSH stage
+(`_stage_register` in `build-and-configure.sh`). It tries, in order: an
+existing registration, existing entitlement certs, `RHSM_ORG_ID` +
+`RHSM_ACTIVATION_KEY`, `RHSM_USERNAME` + `RHSM_PASSWORD`, and finally the
+**host's entitlement cert** copied to the VM (the same CDN cert-auth pattern
+`00a-fetch-rhel-iso.sh` uses for the ISO). `_stage_repos` enables and verifies
+each required repo individually and confirms the `satellite` package is visible
+with `dnf list` (not `list available`, which false-fails once the package is
+installed). The orchestrator authorizes the Satellite's foreman SSH key in the
+invoking user's `authorized_keys` (the host's sshd refuses root login via the
+`99-csb-remote-access.conf` policy), and the Libvirt compute resource connects
+as that user (`qemu+ssh://<user>@host/system`), never root.
+
+The Satellite VM uses `satellite.demo.lab`; the cluster's CoreDNS now maps that
+FQDN to the VM's real IP (a `hosts` block in `configure_coredns`, applied only
+when the Satellite VM is running) so AAP controller pods resolve it — the
+`apps.127.0.0.1.nip.io` wildcard cannot be used because it resolves to the
+pod's own loopback. The lab org is now `Default Organization` (was `Demo Org`)
+to match the upstream product-demos Satellite content, and the manifest is
+imported there.
+
+`product-demo-satellite` now wires the APD **Satellite Credential** and
+**Satellite Inventory** to the real server (`SATELLITE_URL` /
+`SATELLITE_USERNAME` / `SATELLITE_PASSWORD`, defaulting to the lab's
+`https://satellite.demo.lab` admin) before/after the install, and re-runs
+`SETUP | Satellite` against the wired server. The SETUP bootstrap creates
+RHEL 7/8 content views from upstream host_vars, which do not apply to this
+RHEL 9/10 lab, so its failure is a warning, not an addon failure — the
+`SATELLITE | *` / `LINUX | * with Satellite` templates are installed and work
+against the lab's RHEL 9/10 content.
+
+Hammer option fixes for Satellite 6.17: `--httpboot-id` (numeric capsule ID,
+not a hostname), `--root-password` (not `--root-pass`), `--display-type VNC`
+(uppercase), `--unlimited-hosts` (a bare flag, no value), and dropped the
+nonexistent `--enable-foreman-plugin-bootc` (image-mode support ships in core).
+Subnet, hostgroup, activation-key, and compute-resource creation are now
+idempotent so re-runs converge instead of failing on "already taken".
+
+`create --full-demo` now defaults the CRC VM to 32 GB (`CRC_MEMORY=32768`)
+unless the caller pinned memory — AAP + AO + Ollama + Fleet + product demos
+OOM-starved the AO UI pod at the 16 GB default. The fleet step resolves the
+`rhel9` managed image and passes `FLEET_IMAGE` + `FLEET_NODE_COUNT=3` to
+`enable fleet` (which creates the nodes itself in current upstream), and skips
+re-enabling when the nodes already exist so re-runs do not create duplicates.
+
+**Validation:** new `test/test-satellite-register.sh` (6 cases: registration
+short-circuits, activation-key preference, username/password and host-cert
+fallback order, missing-cert guidance); `test-full-demo.sh`,
+`test-cli-parsing.sh`, `test-dashboard.py` pass; full shell suite 104/104 and
+Python suite 1058/1058 pass; `bash -n` and `shellcheck --severity=warning`
+clean on all touched scripts. Live: `create --full-demo --satellite` completes
+end-to-end — AAP Successful (27/27 pods), AO 8/8, three Fleet nodes registered,
+Satellite serving HTTPS at https://satellite.demo.lab, and the Satellite demo
+templates installed.
 
 ### 51. Fully automatic Satellite lab: ISO download, reliable install, dashboard visibility
 

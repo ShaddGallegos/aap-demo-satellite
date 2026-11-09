@@ -33,7 +33,10 @@ DEFAULT_PORT = 8765
 MAX_BODY_BYTES = 4096
 OPERATION_TIMEOUT_SECONDS = 3600
 TERMINAL_IDLE_SECONDS = 300
-INVENTORY_CACHE_TTL_SECONDS = 5
+# aap-demo status --json takes ~30s against a settling MicroShift cluster. A
+# TTL shorter than that makes every auto-refresh re-run the full collection and
+# queue behind the in-flight one, so the UI sits on a stale/empty payload.
+INVENTORY_CACHE_TTL_SECONDS = 30
 
 
 class FleetTerminal:
@@ -173,10 +176,16 @@ def addon_state(addon: dict[str, Any], inventory: dict[str, Any]) -> str:
         return "unknown"
     if not matches:
         return "degraded"
+    # Completed pods are finished jobs (migrations, setup), not unhealthy
+    # workloads — exclude them from the readiness check so a namespace with
+    # running services plus completed jobs is not reported as degraded.
+    active = [pod for pod in matches if pod.get("phase") != "Completed"]
+    if not active:
+        return "degraded"
     if all(
         pod.get("phase") == "Running"
         and pod.get("ready_containers") == pod.get("total_containers")
-        for pod in matches
+        for pod in active
     ):
         return "running"
     return "degraded"

@@ -12,7 +12,7 @@ set -euo pipefail
 
 # ---- editable variables ---------------------------------------------------
 FQDN=satellite.demo.lab
-ORG="Demo Org"
+ORG="Default Organization"
 LOC="Lab"
 ADMIN_USER=admin
 ADMIN_PASS='RedHat123!'          # change me
@@ -78,9 +78,10 @@ satellite-installer --scenario satellite \
   --enable-foreman-plugin-rh-cloud \
   --enable-foreman-plugin-discovery \
   --enable-foreman-proxy-plugin-discovery \
-  --foreman-proxy-plugin-discovery-install-images true \
-  --enable-foreman-plugin-bootc
-# NOTE: --enable-foreman-plugin-bootc requires Satellite 6.17+. Remove it on older versions.
+  --foreman-proxy-plugin-discovery-install-images true
+# NOTE: --enable-foreman-plugin-bootc is not a valid installer option in
+# Satellite 6.17.0 (the image-mode/bootc host support ships in core, not as a
+# separately-enabled plugin). 05-bootc-image-mode.sh configures it post-install.
 
 # hammer CLI auth for root
 mkdir -p ~/.hammer/cli.modules.d

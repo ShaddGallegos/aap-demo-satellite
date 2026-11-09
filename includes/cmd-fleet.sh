@@ -26,6 +26,7 @@ cmd_fleet_qemu() {
   source "${fleet_dir}/fleet-cli.sh"
   source "${fleet_dir}/fleet-images.sh"
   source "${SCRIPT_DIR}/includes/fleet-rhc.sh"
+  source "${SCRIPT_DIR}/includes/fleet-satellite.sh"
 
   local subcmd="${1:-}"
   shift 2>/dev/null || true
@@ -33,6 +34,9 @@ cmd_fleet_qemu() {
   case "$subcmd" in
     rhc-connect)
       fleet_rhc_connect "$@"
+      ;;
+    satellite-register)
+      fleet_satellite_register "$@"
       ;;
     auth)
       fleet_redhat_auth "${1:-configure}"
@@ -133,6 +137,7 @@ cmd_fleet_qemu() {
       echo "                                 Create fleet node VMs"
       echo "  register                     Register existing Fleet VMs in AAP"
       echo "  rhc-connect                  Enroll running Fleet VMs with Red Hat"
+      echo "  satellite-register           Register running Fleet VMs to the Satellite lab"
       echo "  start                        Start preserved Fleet VMs"
       echo "  node <index> <start|stop|restart>"
       echo "                               Power-control a single Fleet node"

@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SAT=satellite.demo.lab
-ORG="Demo Org"
+ORG="Default Organization"
 ORG_LABEL=Demo_Org                 # org label (spaces -> underscores); check: hammer organization list
 RHSM_USER="${RHSM_USER:-changeme}" # CDN creds to pull the upstream rhel-bootc base image
 RHSM_PASS="${RHSM_PASS:-changeme}"

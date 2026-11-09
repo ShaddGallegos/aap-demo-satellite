@@ -33,6 +33,10 @@ source "${SCRIPT_DIR}/includes/persistent-crio-store.sh"
 source "${SCRIPT_DIR}/includes/storage-capacity.sh"
 # shellcheck source=includes/json-utils.sh
 source "${SCRIPT_DIR}/includes/json-utils.sh"
+# preset.sh provides aap_demo_microshift_kubeconfig_vm_path and route-domain
+# helpers used throughout cluster creation.
+# shellcheck source=includes/preset.sh
+source "${SCRIPT_DIR}/includes/preset.sh"
 
 # Colors
 _RED='\033[0;31m'
@@ -179,9 +183,28 @@ NIPIO_EOF
     )
   fi
 
+  # When the Satellite lab VM exists, map its FQDN to its real IP so in-cluster
+  # clients (AAP controller pods running the Satellite demo) can reach it. The
+  # VM is on the same libvirt 'default' network as the CRC VM.
+  satellite_hosts=""
+  satellite_fqdn="${SATELLITE_LAB_HOST:-satellite.demo.lab}"
+  satellite_ip="${SATELLITE_LAB_IP:-192.168.122.20}"
+  if command -v virsh >/dev/null 2>&1 \
+    && virsh -c qemu:///system domstate satellite 2>/dev/null | grep -q running; then
+    satellite_hosts=$(
+      cat <<HOSTS_EOF
+    hosts {
+        ${satellite_ip} ${satellite_fqdn}
+        fallthrough
+    }
+HOSTS_EOF
+    )
+  fi
+
   current_corefile=$(kubectl get configmap dns-default -n openshift-dns -o jsonpath='{.data.Corefile}' 2>/dev/null || echo "")
   if echo "$current_corefile" | grep -q "router-internal-default" \
-    && { [ "$route_domain" = "$nipio_domain" ] || echo "$current_corefile" | grep -q "nip.io"; }; then
+    && { [ "$route_domain" = "$nipio_domain" ] || echo "$current_corefile" | grep -q "nip.io"; } \
+    && { [ -z "$satellite_hosts" ] || echo "$current_corefile" | grep -q "$satellite_fqdn"; }; then
     echo "  ✓ CoreDNS already configured for ${route_domain}"
     return 0
   fi
@@ -204,6 +227,7 @@ NIPIO_EOF
         answer auto
     }
 ${nipio_rewrite}
+${satellite_hosts}
     kubernetes cluster.local in-addr.arpa ip6.arpa {
         pods insecure
         fallthrough in-addr.arpa ip6.arpa
@@ -410,9 +434,87 @@ if [ "$CRC_STATUS" = "Running" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Detect host resources (needed before the tier prompt)
+# ---------------------------------------------------------------------------
+_detect_host_resources
+HOST_CPUS="${HOST_CPUS:-0}"
+HOST_MEMORY_MB="${HOST_MEMORY_MB:-0}"
+HOST_DISK_GB=0
+if [ "$(uname -s)" = "Linux" ] || [ "$(uname -s)" = "Darwin" ]; then
+  HOST_DISK_GB=$(df -k / 2>/dev/null | awk 'NR==2 {printf "%d", $4/1024/1024}' || echo "0")
+fi
+
+# ---------------------------------------------------------------------------
+# Hardware-aware tier selection: SNO vs MicroShift
+# ---------------------------------------------------------------------------
+# Minimums mirror scripts/aap-demo-tier-select.sh.
+_SNO_MIN_CPUS=8
+_SNO_MIN_RAM_GB=16
+_SNO_REC_RAM_GB=32
+_SNO_MIN_DISK_GB=100
+
+_host_meets_sno() {
+  [ "$HOST_CPUS" -ge "$_SNO_MIN_CPUS" ] \
+    && [ "$((HOST_MEMORY_MB / 1024))" -ge "$_SNO_MIN_RAM_GB" ] \
+    && [ "$HOST_DISK_GB" -ge "$_SNO_MIN_DISK_GB" ]
+}
+
+# Prompt the user to choose a deployment tier based on what the hardware
+# supports, with a y/n confirmation. Only prompts on an interactive TTY when
+# the preset was not explicitly pinned (CRC_PRESET env or saved config).
+_prompt_tier_choice() {
+  # Respect an explicit caller choice and non-interactive runs.
+  [ -n "${CRC_PRESET:-}" ] && return 0
+  [ "${QUIET:-false}" = "true" ] && return 0
+  [ "${AAP_DEMO_TIER_PROMPT:-true}" = "false" ] && return 0
+  aap_demo_resource_prompt_enabled || return 0
+
+  local ram_gb=$((HOST_MEMORY_MB / 1024)) choice confirm
+  echo ""
+  printf "${_BOLD}Deployment tier selection:${_NC}\n"
+  printf "  Detected hardware: ${HOST_CPUS} vCPUs, ${ram_gb}GB RAM, ${HOST_DISK_GB}GB disk available\n"
+  echo ""
+  if _host_meets_sno; then
+    printf "  ${_GREEN}This hardware will support SNO${_NC} (Single Node OpenShift).\n"
+    echo ""
+    echo "    1) Single Node OpenShift — full control plane + worker, web console"
+    printf "       (requires >= %s vCPUs, >= %sGB RAM [%sGB recommended], >= %sGB disk)\n" \
+      "$_SNO_MIN_CPUS" "$_SNO_MIN_RAM_GB" "$_SNO_REC_RAM_GB" "$_SNO_MIN_DISK_GB"
+    echo "    2) MicroShift — minimal OpenShift-compatible edge runtime, CLI-only"
+    echo ""
+    printf "  Use Single Node OpenShift? [y/n] (default: y): "
+    read -r confirm </dev/tty
+    case "${confirm,,}" in
+      n | no) choice="microshift" ;;
+      *) choice="openshift" ;;
+    esac
+  else
+    printf "  ${_YELLOW}The hardware will support MicroShift${_NC} (SNO requirements not met).\n"
+    echo ""
+    echo "    SNO requires >= ${_SNO_MIN_CPUS} vCPUs, >= ${_SNO_MIN_RAM_GB}GB RAM, >= ${_SNO_MIN_DISK_GB}GB disk."
+    echo "    MicroShift is the lightweight, CLI-only OpenShift-compatible runtime."
+    echo ""
+    printf "  Continue with MicroShift? [y/n] (default: y): "
+    read -r confirm </dev/tty
+    case "${confirm,,}" in
+      n | no)
+        printf "${_RED}▸${_NC} Aborted. Free up resources or set CRC_PRESET and re-run.\n"
+        exit 1
+        ;;
+      *) choice="microshift" ;;
+    esac
+  fi
+
+  CRC_PRESET="$choice"
+  export CRC_PRESET
+  printf "${_GREEN}▸${_NC} Selected tier: ${choice}\n"
+}
+
+# ---------------------------------------------------------------------------
 # Preset: MicroShift (default) or full single-node OpenShift (CRC_PRESET=openshift,
 # includes the OpenShift web console).
 # ---------------------------------------------------------------------------
+_prompt_tier_choice
 CURRENT_PRESET="$(_detect_crc_preset 2>/dev/null || echo microshift)"
 case "$CURRENT_PRESET" in
   microshift | openshift) ;;
@@ -421,17 +523,26 @@ case "$CURRENT_PRESET" in
     exit 1
     ;;
 esac
+
+# Fail fast when SNO was requested (via --sno or CRC_PRESET=openshift) but the
+# hardware does not meet the minimums — a full control plane OOM-starved at
+# lower resources is a worse experience than a clear up-front error.
+if [ "$CURRENT_PRESET" = "openshift" ] && ! _host_meets_sno; then
+  printf "${_RED}▸${_NC} Single Node OpenShift was requested but this host does not meet the minimums:\n"
+  [ "$HOST_CPUS" -lt "$_SNO_MIN_CPUS" ] \
+    && printf "    - vCPUs: %s detected, %s required\n" "$HOST_CPUS" "$_SNO_MIN_CPUS"
+  [ "$((HOST_MEMORY_MB / 1024))" -lt "$_SNO_MIN_RAM_GB" ] \
+    && printf "    - RAM: %sGB detected, %sGB required (%sGB recommended)\n" \
+      "$((HOST_MEMORY_MB / 1024))" "$_SNO_MIN_RAM_GB" "$_SNO_REC_RAM_GB"
+  [ "$HOST_DISK_GB" -lt "$_SNO_MIN_DISK_GB" ] \
+    && printf "    - Disk: %sGB available, %sGB required\n" "$HOST_DISK_GB" "$_SNO_MIN_DISK_GB"
+  printf "  Use MicroShift instead: aap-demo create --microshift\n"
+  exit 1
+fi
 crc config set preset "$CURRENT_PRESET" 2>/dev/null || true
 _save_config_key "CRC_PRESET" "$CURRENT_PRESET"
 
 printf "${_GREEN}▸${_NC} CRC preset: ${CURRENT_PRESET}\n"
-
-# ---------------------------------------------------------------------------
-# Detect host resources
-# ---------------------------------------------------------------------------
-_detect_host_resources
-HOST_CPUS="${HOST_CPUS:-0}"
-HOST_MEMORY_MB="${HOST_MEMORY_MB:-0}"
 
 if [ "$HOST_CPUS" -gt 0 ] && [ "$HOST_MEMORY_MB" -gt 0 ]; then
   printf "${_GREEN}▸${_NC} Host resources: ${HOST_CPUS} CPUs, $((HOST_MEMORY_MB / 1024))GB RAM\n"

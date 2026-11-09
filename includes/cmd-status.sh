@@ -581,6 +581,28 @@ cmd_status() {
     fi
   fi
 
+  # Show credentials for the Satellite lab (separate libvirt VM, not in-cluster).
+  # The admin password is a build-time default from 02-satellite-installer.sh
+  # (overridable via SATELLITE_PASSWORD when the APD credential was wired).
+  if [ "$SHOW_SECRETS" = true ]; then
+    local _sat_host="${SATELLITE_LAB_HOST:-satellite.demo.lab}"
+    local _sat_ip="${SATELLITE_LAB_IP:-192.168.122.20}"
+    # Only shown when the Satellite VM exists and is reachable.
+    if getent hosts "$_sat_host" >/dev/null 2>&1 \
+      || ping -c1 -W1 "$_sat_ip" >/dev/null 2>&1; then
+      local _sat_user _sat_pass
+      _sat_user="${SATELLITE_USERNAME:-admin}"
+      _sat_pass="${SATELLITE_PASSWORD:-RedHat123!}"
+      if [ "$_cred_found" = "false" ]; then
+        echo "Credentials:"
+        echo "------------"
+        _cred_found=true
+      fi
+      printf "  %-20s %s / %s\n" "satellite (${_sat_host}):" "$_sat_user" "$_sat_pass"
+      echo ""
+    fi
+  fi
+
   if [ "$SHOW_SECRETS" = true ]; then
     local crc_access crc_identity
     crc_access=$(_aap_demo_inventory_crc_access) || return 1

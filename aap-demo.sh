@@ -252,6 +252,19 @@ for arg in "$@"; do
     --satellite)
       FULL_DEMO_SATELLITE=true
       ;;
+    --sno)
+      # Hands-free tier selection: full single-node OpenShift (skips the
+      # interactive tier prompt). Validated against hardware minimums in create.
+      CRC_PRESET="openshift"
+      AAP_DEMO_TIER_PROMPT=false
+      export CRC_PRESET AAP_DEMO_TIER_PROMPT
+      ;;
+    --microshift)
+      # Hands-free tier selection: minimal edge runtime (skips the tier prompt).
+      CRC_PRESET="microshift"
+      AAP_DEMO_TIER_PROMPT=false
+      export CRC_PRESET AAP_DEMO_TIER_PROMPT
+      ;;
     --show-secrets)
       SHOW_SECRETS=true
       ;;
@@ -343,7 +356,7 @@ for arg in "$@"; do
       # Subcommand args for fleet command
       EXTRA_ARGS+=("$arg")
       ;;
-    fleet | mcp-server | portal | portal-operator | setup-pah | ao | ao-eap | ao-pr-testing | apme-eap | local-cache | product-demos-base | product-demos | product-demo-linux | product-demo-windows | product-demo-network | product-demo-cloud | product-demo-openshift | product-demo-satellite | opa | ollama | keycloak | satellite-manifest)
+    fleet | mcp-server | portal | portal-operator | setup-pah | ao | ao-eap | ao-pr-testing | apme-eap | local-cache | product-demos-base | product-demos | product-demo-linux | product-demo-windows | product-demo-network | product-demo-cloud | product-demo-openshift | product-demo-satellite | opa | ollama | keycloak | satellite-manifest | lightspeed)
       # Addon names for enable/disable commands
       EXTRA_ARGS+=("$arg")
       ;;
@@ -1965,6 +1978,14 @@ cmd_full_demo() {
   local ADDONS="mcp-server,setup-pah,product-demos,ollama,ao,fleet"
   local cluster_state
 
+  # The full demo (AAP + AO + Ollama + Fleet + product demos) does not fit in
+  # the 16GB default: AO's UI pod was OOM-starved at 99% memory requests.
+  # Default to 32GB unless the caller pinned CRC_MEMORY/VM_MEMORY.
+  if [ -z "${CRC_MEMORY:-}" ] && [ -z "${VM_MEMORY:-}" ]; then
+    CRC_MEMORY=32768
+    export CRC_MEMORY
+  fi
+
   echo ""
   printf "\033[1maap-demo create --full-demo\033[0m - Building complete local demo...\n"
   echo ""
@@ -2024,13 +2045,20 @@ cmd_full_demo() {
   cmd_credentials keepalive enable || return 1
   cmd_enable ollama || return 1
   AO_LLM_PROVIDER=ollama cmd_enable ao || return 1
-  cmd_enable fleet || return 1
 
+  # enable fleet creates the managed nodes itself (upstream). Point it at the
+  # downloadable rhel9 image and the target count so quiet mode does not
+  # prompt. When the fleet already has the nodes, it is already enabled too —
+  # re-enabling would create duplicate nodes, so skip straight to start.
   local fleet_nodes missing_nodes
   fleet_nodes=$(fleet_count 2>/dev/null || echo 0)
   if [ "$fleet_nodes" -lt 3 ]; then
-    missing_nodes=$((3 - fleet_nodes))
-    cmd_fleet add "$missing_nodes" --image rhel9 || return 1
+    FLEET_IMAGE=rhel9 FLEET_NODE_COUNT=3 cmd_enable fleet || return 1
+    fleet_nodes=$(fleet_count 2>/dev/null || echo 0)
+    if [ "$fleet_nodes" -lt 3 ]; then
+      missing_nodes=$((3 - fleet_nodes))
+      cmd_fleet add "$missing_nodes" --image rhel9 || return 1
+    fi
   else
     echo "✓ Fleet already has ${fleet_nodes} node(s); reusing them"
   fi
@@ -2926,7 +2954,7 @@ cmd_fleet() {
 # ---------------------------------------------------------------------------
 # product-demos installs all APD domains (runs product-demos-base automatically).
 # product-demos-base and individual domain addons are hidden from status; enable directly if needed.
-AVAILABLE_ADDONS="fleet mcp-server portal portal-operator setup-pah ao ao-pr-testing apme-eap local-cache product-demos product-demo-satellite opa ollama keycloak satellite-manifest"
+AVAILABLE_ADDONS="fleet mcp-server portal portal-operator setup-pah ao ao-pr-testing apme-eap local-cache product-demos product-demo-satellite opa ollama keycloak satellite-manifest lightspeed"
 
 _normalize_addon_name() {
   case "$1" in

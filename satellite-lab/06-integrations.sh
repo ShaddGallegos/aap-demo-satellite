@@ -5,37 +5,58 @@
 set -euo pipefail
 
 HYPERVISOR=192.168.122.1     # KVM host, reachable via the 'default' network NIC
-ORG="Demo Org"
+# The hypervisor's sshd refuses root login (PermitRootLogin no via the
+# csb-remote-access policy), so the compute resource connects as a dedicated
+# user in the host's libvirt group. Passed by build-and-configure.sh.
+HYPERVISOR_USER="${HYPERVISOR_USER:-}"
+ORG="Default Organization"
 LOC="Lab"
 
 echo "== 1. Libvirt compute resource =="
-# The Libvirt provider uses qemu+ssh as the 'foreman' user -> root on the hypervisor.
+# The Libvirt provider uses qemu+ssh as the 'foreman' user -> the hypervisor
+# user (libvirt group member; the host's sshd refuses root login).
 sudo -u foreman mkdir -p /usr/share/foreman/.ssh
 [[ -f /usr/share/foreman/.ssh/id_ed25519 ]] || \
   sudo -u foreman ssh-keygen -t ed25519 -N '' -f /usr/share/foreman/.ssh/id_ed25519
-sudo -u foreman ssh-copy-id -i /usr/share/foreman/.ssh/id_ed25519.pub "root@$HYPERVISOR"
-sudo -u foreman ssh -o StrictHostKeyChecking=accept-new "root@$HYPERVISOR" true
-# NOTE: hypervisor sshd must permit root login, or use a dedicated user in the
-# 'libvirt' group and adjust the URL below accordingly.
+# The foreman public key is authorized on the hypervisor by the orchestrator
+# (build-and-configure.sh runs on the host) before this script runs. Here we
+# only accept the host key and verify the connection non-interactively.
+# The hypervisor user must be in the host's libvirt group (root login is
+# refused by the host's sshd policy).
+HV_CONN_USER="${HYPERVISOR_USER:-root}"
+sudo -u foreman ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 "${HV_CONN_USER}@$HYPERVISOR" true
 
-hammer compute-resource create --name "KVM-Host" --provider Libvirt \
-  --url "qemu+ssh://root@$HYPERVISOR/system" \
-  --display-type vnc --set-console-password true \
-  --locations "$LOC" --organizations "$ORG"
+# Idempotent: the compute resource persists across re-runs.
+if hammer compute-resource info --name "KVM-Host" >/dev/null 2>&1; then
+  echo "  compute resource KVM-Host already exists"
+else
+  hammer compute-resource create --name "KVM-Host" --provider Libvirt \
+    --url "qemu+ssh://${HV_CONN_USER}@$HYPERVISOR/system" \
+    --display-type VNC --set-console-password true \
+    --locations "$LOC" --organizations "$ORG"
+fi
 
-# Verify Satellite can see the satlab network + storage pools on the hypervisor
-hammer compute-resource networks --name "KVM-Host"
-hammer compute-resource storage-pools --name "KVM-Host"
+# Verify Satellite can see the satlab network + storage pools on the hypervisor.
+# These queries are not implemented for the Libvirt provider in some Satellite
+# versions (ERF42-7329); they are informational only, so never fail the build.
+hammer compute-resource networks --name "KVM-Host" || \
+  echo "  (networks query not supported for Libvirt here — continuing)"
+hammer compute-resource storage-pools --name "KVM-Host" || \
+  echo "  (storage-pools query not supported for Libvirt here — continuing)"
 
 echo
 echo "== 2. Red Hat connector (rhc) / Insights =="
 # Cloud plugin is enabled by default on current Satellite; harmless to re-assert:
 satellite-installer --scenario satellite --enable-foreman-plugin-rh-cloud
 
-# Stage the clients on every managed node via Remote Execution:
+# Stage the clients on every managed node via Remote Execution. There are no
+# managed nodes on a fresh build (they are provisioned later), and the
+# os_family search field is not recognized until hosts exist — so this is
+# best-effort and never fails the build.
 hammer job-invocation create --job-template "Run Command - Script Default" \
   --search-query "os_family = Redhat" \
-  --inputs command="dnf install -y rhc insights-client"
+  --inputs command="dnf install -y rhc insights-client" || \
+  echo "  (rhc/Insights staging skipped — no managed nodes yet)"
 
 cat <<'EOF'
 Choose ONE connectivity pattern per node:
