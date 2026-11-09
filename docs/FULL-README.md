@@ -32,9 +32,12 @@ success and can be safely retried after connectivity is restored.
 
 #### System Requirements
 
-A typical MicroShift and AAP 2.7 environment requires 24GB of RAM, 2 cores, and
+A typical MicroShift and AAP 2.7 environment requires 16GB of RAM, 2 cores, and
 100 GB of storage. We recommend having a total of 32GB RAM available on your system.
-The 24GB default supports AAP plus EAP addons (AO, APME); use `CRC_MEMORY=16384` for 16GB if running AAP alone.
+The 16GB default (`CRC_MEMORY=16384`) runs AAP alone; `create --full-demo`
+raises the VM to 32GB automatically because AAP + AO + Ollama + Fleet + product
+demos do not fit in 16GB (AO's UI pod is OOM-starved at 99% memory requests).
+Override with `CRC_MEMORY=<MiB>`.
 
 #### MacOS
 
@@ -534,7 +537,7 @@ design, storage, OLM, addons, and cross-platform support).
 
 ```bash
 CRC_CPUS=8                   # VM CPU count (default: 8)
-CRC_MEMORY=24576             # VM memory in MiB (default: 24576, use 16384 for AAP-only)
+CRC_MEMORY=16384             # VM memory in MiB (default: 16384; full-demo auto-uses 32768)
 CRC_DISK=180                 # VM disk; minimum leaves 100 GiB for root/container images
 CRC_PV_SIZE=70               # LVMS PV override; otherwise derived below CRC_DISK
 NAMESPACE=aap-operator       # Target namespace

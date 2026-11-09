@@ -31,6 +31,11 @@ OPTIONS:
     --satellite                           With create --full-demo: also build and configure the
                                           Satellite lab (Satellite Build and Configure), then
                                           install the Satellite Demo content
+    --sno                                 With create: use Single Node OpenShift (full control
+                                          plane + web console); skips the tier prompt and fails
+                                          if the host does not meet SNO minimums
+    --microshift                          With create: use MicroShift (minimal edge runtime);
+                                          skips the tier prompt
     --show-secrets                        Reveal credentials with interactive status only
     --ai                                  Enable AI diagnosis for diagnose
     AAP_DEMO_ALLOW_REMOTE_KUBECONFIG=true Allow a remote kubeconfig context
@@ -187,6 +192,7 @@ ENVIRONMENT AND OVERRIDES:
     QUIET=true                      Disable interactive prompts where supported
     AAP_START_TIMEOUT=seconds       Readiness timeout per start phase (default: 600)
     FORCE=true                      Force supported reinstall operations
+    CRC_MEMORY=MiB                  CRC VM memory (default: 16384; full-demo auto-uses 32768)
     CRC_DISK=GiB                    CRC VM disk; minimum preserves 100 GiB for images
     CRC_PV_SIZE=GiB                 LVMS PV area; adaptive default stays below CRC_DISK
     AAP_RESOURCE_PREFLIGHT_STRICT=true

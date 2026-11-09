@@ -13,6 +13,8 @@ Validation tests for `aap-demo.sh` command-line interface.
 ./test/test-aap-readiness.sh
 ./test/test-aap-version-selection.sh
 ./test/test-ingress-ca-export.sh
+./test/test-satellite-ca-trust.sh
+./test/test-fleet-satellite.sh
 ./test/test-macos-ingress-ca-auth.sh
 ./test/test-macos-ingress-ca-trust-state.sh
 ./test/test-fix-ssl-command.sh

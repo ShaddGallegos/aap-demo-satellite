@@ -92,43 +92,49 @@ chmod 700 /root/.ssh
 echo "__HOST_SSH_PUBKEY__" >> /root/.ssh/authorized_keys
 chmod 600 /root/.ssh/authorized_keys
 restorecon -R /root/.ssh 2>/dev/null || true
-# Register (activation key preferred, username/password fallback)
-if [ -n "__RHSM_AK__" ]; then
-  subscription-manager register --org="__RHSM_ORG__" --activationkey="__RHSM_AK__"
-else
-  subscription-manager register --username="__RHSM_USER__" --password="__RHSM_PASS__" --auto-attach
-fi
+# Enable sshd (start is a no-op in chroot; it starts on first boot)
+systemctl enable sshd
+
+echo "Kickstart %post complete" > /root/KICKSTART_DONE
+
+# RHSM registration + repo setup run post-boot over SSH (see
+# build-and-configure.sh _stage_register) where errors are visible
+# POSTBOOT: if [ -n "__RHSM_AK__" ]; then
+# POSTBOOT:   subscription-manager register --org="__RHSM_ORG__" --activationkey="__RHSM_AK__"
+# POSTBOOT: else
+# POSTBOOT:   subscription-manager register --username="__RHSM_USER__" --password="__RHSM_PASS__" --auto-attach
+# POSTBOOT: fi
 
 # Attach only what Satellite 6.17 on RHEL 9 needs (adjust SAT_VER as required)
-subscription-manager repos --disable='*'
-subscription-manager repos \
-  --enable=rhel-9-for-x86_64-baseos-rpms \
-  --enable=rhel-9-for-x86_64-appstream-rpms \
-  --enable=satellite-6.17-for-rhel-9-x86_64-rpms \
-  --enable=satellite-maintenance-6.17-for-rhel-9-x86_64-rpms
+# POSTBOOT: subscription-manager repos --disable='*'
+# POSTBOOT: subscription-manager repos \
+# POSTBOOT:   --enable=rhel-9-for-x86_64-baseos-rpms \
+# POSTBOOT:   --enable=rhel-9-for-x86_64-appstream-rpms \
+# POSTBOOT:   --enable=satellite-6.17-for-rhel-9-x86_64-rpms \
+# POSTBOOT:   --enable=satellite-maintenance-6.17-for-rhel-9-x86_64-rpms
 
 # FQDN must resolve locally for the installer
-echo "192.168.150.10 satellite.demo.lab satellite" >> /etc/hosts
+# POSTBOOT: echo "192.168.150.10 satellite.demo.lab satellite" >> /etc/hosts
 
 # Mount /var/lib/pulp from the host NFS export (keeps the VM OS disk small).
 # The host is reachable at the default-net gateway. NFSv4 does not need
 # rpc.mountd, so attempt the mount directly rather than relying on showmount.
 # The mount is added to fstab with _netdev so it mounts after networking.
-HOST_GW=192.168.122.1
-NFS_EXPORT=/var/lib/satlab/pulp
-mkdir -p /var/lib/pulp
-mounted=0
-for i in $(seq 1 30); do
-  if mount -t nfs4 -o rw,sync,hard,intr "$HOST_GW:$NFS_EXPORT" /var/lib/pulp 2>/dev/null; then
-    mounted=1
-    break
-  fi
-  sleep 2
-done
-if [ "$mounted" = 1 ]; then
-  grep -q "$NFS_EXPORT" /etc/fstab || \
-    echo "$HOST_GW:$NFS_EXPORT /var/lib/pulp nfs4 rw,sync,hard,intr,_netdev 0 0" >> /etc/fstab
-else
-  echo "WARN: host NFS export $NFS_EXPORT not reachable; /var/lib/pulp is local" >> /root/ks-post.log
-fi
+# POSTBOOT: HOST_GW=192.168.122.1
+# POSTBOOT: NFS_EXPORT=/var/lib/satlab/pulp
+# POSTBOOT: mkdir -p /var/lib/pulp
+# POSTBOOT: mounted=0
+# POSTBOOT: for i in $(seq 1 30); do
+# POSTBOOT:   if mount -t nfs4 -o rw,sync,hard,intr "$HOST_GW:$NFS_EXPORT" /var/lib/pulp 2>/dev/null; then
+# POSTBOOT:     mounted=1
+# POSTBOOT:     break
+# POSTBOOT:   fi
+# POSTBOOT:   sleep 2
+# POSTBOOT: done
+# POSTBOOT: if [ "$mounted" = 1 ]; then
+# POSTBOOT:   grep -q "$NFS_EXPORT" /etc/fstab || \
+# POSTBOOT:     echo "$HOST_GW:$NFS_EXPORT /var/lib/pulp nfs4 rw,sync,hard,intr,_netdev 0 0" >> /etc/fstab
+# POSTBOOT: else
+# POSTBOOT:   echo "WARN: host NFS export $NFS_EXPORT not reachable; /var/lib/pulp is local" >> /root/ks-post.log
+# POSTBOOT: fi
 %end

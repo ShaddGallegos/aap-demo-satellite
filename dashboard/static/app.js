@@ -8,6 +8,7 @@ const state = {
   dismissedOperationId: null,
   dismissTimer: null,
   restarting: false,
+  refreshing: false,
 };
 
 const elements = {
@@ -99,11 +100,15 @@ function renderSummary(inventory) {
     ? Math.round((capacity.actual_vm_used_gib / capacity.actual_vm_disk_gib) * 100)
     : Number.parseInt(String(disk).match(/\((\d+)% used\)/)?.[1] || "0", 10);
   const diskTone = diskPercent >= 90 ? "critical" : diskPercent >= 80 ? "warning" : "";
+  const fleetV2Count = (inventory.fleet_v2 || []).length;
+  const fleetTotal = (inventory.fleet || []).length + fleetV2Count;
   elements.summaryGrid.innerHTML = [
     summaryCard("Namespaces ready", `${healthyNamespaces}/${inventory.namespaces.length}`),
     summaryCard("Pods ready", `${readyPods}/${inventory.pods.length}`),
     summaryCard("Active routes", inventory.routes.filter((route) => route.admitted).length),
+    summaryCard("Fleet nodes", fleetTotal || "0"),
     summaryCard("Disk usage", disk, diskTone),
+    summaryCard("Python v2 CLI", inventory.tool?.v2_available ? "Available" : "Not installed"),
   ].join("");
 }
 
@@ -215,8 +220,8 @@ function renderAddons(addons) {
   });
 }
 
-function renderRoutes(routes, fleet = []) {
-  if (!routes.length && !fleet.length) {
+function renderRoutes(routes, fleet = [], fleetV2 = []) {
+  if (!routes.length && !fleet.length && !fleetV2.length) {
     elements.routesList.innerHTML = '<p class="empty-state">No application routes found.</p>';
     return;
   }
@@ -249,6 +254,14 @@ function renderRoutes(routes, fleet = []) {
           </span>
         </div>
         <span class="pill ${node.state === "running" ? "running" : "disabled"}">${escapeHtml(node.state)}</span>
+      </div>`).join("") + fleetV2.map((node) => `
+      <div class="route-row">
+        <div>
+          <span class="fleet-v2-name">${escapeHtml(node.name)}</span>
+          <span class="route-name">Kubernetes-native fleet · ${escapeHtml(node.namespace)}
+            / pod IP ${escapeHtml(node.pod_ip || "pending")}</span>
+        </div>
+        <span class="pill ${node.ready ? "running" : "degraded"}">${escapeHtml(node.state)}</span>
       </div>`).join("");
   elements.routesList.querySelectorAll("button[data-power]").forEach((button) => {
     button.addEventListener("click", () => fleetPower(button.dataset.node, button.dataset.power, button));
@@ -317,16 +330,20 @@ function render(payload) {
   renderCapacity(payload.inventory);
   renderCategories(payload.addons);
   renderAddons(payload.addons);
-  renderRoutes(payload.inventory.routes, payload.inventory.fleet || []);
+  renderRoutes(payload.inventory.routes, payload.inventory.fleet || [], payload.inventory.fleet_v2 || []);
   renderNamespaces(payload.inventory.namespaces);
   renderOperation(payload.operation);
   elements.lastUpdated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
 }
 
 async function refresh() {
-  if (state.restarting) {
+  // Skip when a refresh is already in flight: aap-demo status --json can take
+  // ~30s against a settling cluster, and overlapping fetches pile up server-side
+  // and leave the UI showing an empty/stale payload (e.g. "Active routes: 0").
+  if (state.restarting || state.refreshing) {
     return;
   }
+  state.refreshing = true;
   elements.refreshButton.disabled = true;
   try {
     const payload = await api("/api/status");
@@ -335,6 +352,7 @@ async function refresh() {
   } catch (error) {
     showAlert(error.message);
   } finally {
+    state.refreshing = false;
     elements.refreshButton.disabled = false;
   }
 }
@@ -457,11 +475,13 @@ async function initialize() {
     if (state.payload?.operation?.status === "running") {
       startOperationPolling();
     }
+    // Poll no faster than the slowest status collection; refresh() also
+    // self-skips while one is in flight, so this only fires when idle.
     window.setInterval(() => {
       if (!state.polling) {
         refresh();
       }
-    }, 15000);
+    }, 45000);
   } catch (error) {
     showAlert(error.message);
   }

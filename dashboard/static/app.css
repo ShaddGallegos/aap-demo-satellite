@@ -519,6 +519,16 @@ p {
   white-space: nowrap;
 }
 
+.fleet-v2-name {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .route-row a:hover {
   color: var(--blue);
 }

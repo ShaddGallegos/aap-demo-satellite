@@ -59,6 +59,7 @@ def fixture_inventory() -> dict[str, Any]:
             },
         ],
         "host": {"os": "Fedora Linux 44", "architecture": "x86_64"},
+        "tool": {"version": "1.0.48", "v2_available": True},
         "cluster": {"state": "running", "vm": {"guest_os": "Red Hat Enterprise Linux 9.6"}},
         "storage": {
             "capacity_planning": {
@@ -84,6 +85,10 @@ def fixture_inventory() -> dict[str, Any]:
         "fleet": [
             {"index": 1, "hostname": "aap-fleet-node-1", "state": "running",
              "ssh_host": "127.0.0.1", "ssh_port": 2201, "username": "admin", "password": None}
+        ],
+        "fleet_v2": [
+            {"namespace": "aap-fleet", "name": "fleet-node-0", "state": "running",
+             "ready": True, "pod_ip": "10.42.0.12"}
         ],
         "namespaces": [],
     }
@@ -215,6 +220,30 @@ class DashboardUnitTests(unittest.TestCase):
         cli_addons = set(match.group(1).split())
         catalog_addons = {addon["id"] for addon in self.catalog["addons"]}
         self.assertEqual(cli_addons, catalog_addons)
+
+    def test_status_payload_passes_through_fleet_v2_and_v2_availability(self) -> None:
+        app = dashboard.DashboardApp(REPO_ROOT, 0)
+        app.inventory = lambda: fixture_inventory()
+        payload = app.status_payload()
+        self.assertEqual(
+            payload["inventory"]["fleet_v2"],
+            [{"namespace": "aap-fleet", "name": "fleet-node-0", "state": "running",
+              "ready": True, "pod_ip": "10.42.0.12"}],
+        )
+        self.assertTrue(payload["inventory"]["tool"]["v2_available"])
+
+    def test_completed_job_pods_do_not_mark_namespace_degraded(self) -> None:
+        # A namespace with running services plus Completed migration/job pods is
+        # healthy — Completed pods are finished work, not failed workloads.
+        inventory = fixture_inventory()
+        inventory["pods"].append({
+            "namespace": "automation-orchestrator",
+            "name": "automation-orchestrator-migration-abc",
+            "phase": "Completed",
+            "ready_containers": 0,
+            "total_containers": 1,
+        })
+        self.assertEqual(dashboard.addon_state(self.addons["ao"], inventory), "running")
 
     def test_health_and_conditional_dependencies(self) -> None:
         inventory = fixture_inventory()

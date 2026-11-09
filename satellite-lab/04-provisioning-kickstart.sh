@@ -4,7 +4,7 @@
 set -euo pipefail
 
 SAT=satellite.demo.lab
-ORG="Demo Org"
+ORG="Default Organization"
 LOC="Lab"
 ROOTPW='RedHat123!'
 
@@ -12,14 +12,23 @@ echo "== Domain + subnet (backed by the integrated smart proxy) =="
 hammer domain create --name demo.lab --dns "$SAT" \
   --locations "$LOC" --organizations "$ORG" 2>/dev/null || true
 
-hammer subnet create --name satlab \
-  --network 192.168.150.0 --mask 255.255.255.0 \
-  --gateway 192.168.150.1 --dns-primary 192.168.150.10 \
-  --from 192.168.150.100 --to 192.168.150.200 \
-  --boot-mode DHCP --ipam DHCP \
-  --domains demo.lab \
-  --dhcp "$SAT" --tftp "$SAT" --dns "$SAT" --httpboot "$SAT" \
-  --locations "$LOC" --organizations "$ORG"
+# --httpboot-id needs the capsule's numeric ID, not its hostname.
+CAPSULE_ID=$(hammer --no-headers capsule list --search "name = $SAT" 2>/dev/null | awk '{print $1}' | head -1)
+CAPSULE_ID="${CAPSULE_ID:-1}"
+
+# Idempotent: skip creation when the subnet already exists.
+if hammer subnet info --name satlab >/dev/null 2>&1; then
+  echo "  subnet satlab already exists"
+else
+  hammer subnet create --name satlab \
+    --network 192.168.150.0 --mask 255.255.255.0 \
+    --gateway 192.168.150.1 --dns-primary 192.168.150.10 \
+    --from 192.168.150.100 --to 192.168.150.200 \
+    --boot-mode DHCP --ipam DHCP \
+    --domains demo.lab \
+    --dhcp "$SAT" --tftp "$SAT" --dns "$SAT" --httpboot-id "$CAPSULE_ID" \
+    --locations "$LOC" --organizations "$ORG"
+fi
 hammer subnet info --name satlab
 
 echo "== Operating systems (auto-created by the kickstart tree sync) =="
@@ -29,17 +38,22 @@ echo "== Host groups (kickstart via synced content + activation key) =="
 # The default 'Kickstart default' provisioning template already contains the
 # 'redhat_register' snippet, which consumes the host parameter kt_activation_keys.
 mk_hostgroup() { # <name> <os title> <kickstart repo> <cv> <lce> <activation key>
-  hammer hostgroup create --name "$1" \
-    --domain demo.lab --subnet satlab \
-    --architecture x86_64 \
-    --operatingsystem "$2" \
-    --pxe-loader "PXELinux BIOS" \
-    --partition-table "Kickstart default" \
-    --lifecycle-environment "$5" --content-view "$4" \
-    --content-source "$SAT" \
-    --kickstart-repository "$3" \
-    --root-pass "$ROOTPW" \
-    --locations "$LOC" --organizations "$ORG" --query-organization "$ORG"
+  # Idempotent: update the activation-key parameter when the hostgroup exists.
+  if hammer hostgroup info --name "$1" >/dev/null 2>&1; then
+    echo "  hostgroup $1 already exists"
+  else
+    hammer hostgroup create --name "$1" \
+      --domain demo.lab --subnet satlab \
+      --architecture x86_64 \
+      --operatingsystem "$2" \
+      --pxe-loader "PXELinux BIOS" \
+      --partition-table "Kickstart default" \
+      --lifecycle-environment "$5" --content-view "$4" \
+      --content-source "$SAT" \
+      --kickstart-repository "$3" \
+      --root-password "$ROOTPW" \
+      --locations "$LOC" --organizations "$ORG" --query-organization "$ORG"
+  fi
   hammer hostgroup set-parameter --hostgroup "$1" \
     --name kt_activation_keys --value "$6"
 }

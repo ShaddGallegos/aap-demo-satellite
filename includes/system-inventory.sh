@@ -71,6 +71,36 @@ _aap_demo_inventory_external_namespaces() {
     }'
 }
 
+# Kubernetes-native (Python v2) Fleet nodes are pod-backed, so they never
+# appear in the QEMU fleet inventory. List them separately so status and the
+# dashboard can show both backends.
+_aap_demo_inventory_fleet_v2() {
+  kubectl get pods -A -l app.kubernetes.io/name=fleet-node -o json 2>/dev/null \
+    | jq -c '[.items[] | {
+        namespace: .metadata.namespace,
+        name: .metadata.name,
+        state: (.status.phase // "Unknown" | ascii_downcase),
+        ready: ([.status.containerStatuses[]?.ready] | all),
+        pod_ip: (.status.podIP // null)
+      }]' 2>/dev/null || printf '[]'
+}
+
+# The Python v2 CLI is available when this checkout has src/aap_demo and a
+# Python with PyYAML is on hand (mirrors the _fleet_delegate_v2 lookup chain).
+_aap_demo_inventory_v2_available() {
+  [ -d "${SCRIPT_DIR}/src/aap_demo" ] || return 1
+  local candidate
+  for candidate in "${AAP_DEMO_PYTHON:-}" \
+    "${SCRIPT_DIR}/.venv/bin/python" "${SCRIPT_DIR}/.venv/bin/python3" \
+    "$(command -v python3 2>/dev/null)"; do
+    if [ -n "$candidate" ] && command -v "$candidate" >/dev/null 2>&1 \
+      && "$candidate" -c 'import yaml' >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # satellite-manifest addon is enabled and the Satellite VM exists.
 _aap_demo_inventory_external_routes() {
   local addons_text="$1"
@@ -492,10 +522,16 @@ _aap_demo_inventory_crc_access() {
 aap_demo_collect_system_inventory() {
   local secret_mode="${1:-omit}"
   local cluster_state cluster_name generated_at addons addons_text host_os host_arch aap_subscription context kubernetes_version
-  local namespaces services pods namespace_status routes credentials api_keys ingress vm storage fleet crc_access
+  local namespaces services pods namespace_status routes credentials api_keys ingress vm storage fleet fleet_v2 crc_access v2_available
   # shellcheck source=fleet-access.sh
   source "$(dirname "${BASH_SOURCE[0]}")/fleet-access.sh"
   fleet=$(fleet_access_inventory "$secret_mode") || return 1
+  fleet_v2='[]'
+  if _aap_demo_inventory_v2_available; then
+    v2_available=true
+  else
+    v2_available=false
+  fi
 
   case "$secret_mode" in
     include | redact | omit) ;;
@@ -552,6 +588,7 @@ aap_demo_collect_system_inventory() {
     credentials=$(_aap_demo_inventory_credentials "$secret_mode")
     ingress=$(_aap_demo_inventory_ingress)
     vm=$(_aap_demo_inventory_vm)
+    fleet_v2=$(_aap_demo_inventory_fleet_v2)
   fi
   storage=$(_aap_demo_inventory_storage "$addons_text" "$vm")
   crc_access=$(_aap_demo_inventory_crc_access)
@@ -577,6 +614,8 @@ aap_demo_collect_system_inventory() {
     --argjson routes "$routes" \
     --argjson credentials "$credentials" \
     --argjson fleet "$fleet" \
+    --argjson fleet_v2 "$fleet_v2" \
+    --argjson v2_available "$v2_available" \
     --argjson api_keys "$api_keys" \
     --argjson services "$services" \
     --argjson pods "$pods" \
@@ -593,7 +632,8 @@ aap_demo_collect_system_inventory() {
         built: $built,
         source: $source,
         branch: $branch,
-        repository: ($repo | select(length > 0) // null)
+        repository: ($repo | select(length > 0) // null),
+        v2_available: $v2_available
       },
       host: {
         os: $host_os,
@@ -619,6 +659,7 @@ aap_demo_collect_system_inventory() {
       routes: $routes,
       credentials: $credentials,
       fleet: $fleet,
+      fleet_v2: $fleet_v2,
       api_keys: $api_keys,
       services: $services,
       pods: $pods,

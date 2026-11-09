@@ -5,7 +5,7 @@
 # Usage: ./03-content-hammer.sh [/root/manifest.zip]
 set -euo pipefail
 
-ORG="Demo Org"
+ORG="Default Organization"
 MANIFEST="${1:-/root/manifest.zip}"
 RHEL_PRODUCT="Red Hat Enterprise Linux for x86_64"
 CLIENT_PRODUCT="Red Hat Satellite Client 6"   # verify: hammer repository-set list --search "Satellite Client"
@@ -91,9 +91,13 @@ echo "== 7/7 Activation keys per OS x lifecycle stage =="
 for spec in "rhel9 RHEL9" "rhel10 RHEL10"; do
   set -- $spec
   for env in DEV TEST PROD; do
-    hammer activation-key create --name "ak-$1-${env,,}" \
-      --lifecycle-environment "$env" --content-view "$2" \
-      --auto-attach true --unlimited-hosts true
+    if hammer activation-key info --name "ak-$1-${env,,}" >/dev/null 2>&1; then
+      echo "  activation key ak-$1-${env,,} already exists"
+    else
+      hammer activation-key create --name "ak-$1-${env,,}" \
+        --lifecycle-environment "$env" --content-view "$2" \
+        --auto-attach true --unlimited-hosts
+    fi
   done
 done
 
