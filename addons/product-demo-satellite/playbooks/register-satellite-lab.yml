@@ -1,0 +1,37 @@
+---
+- name: Register selected RHEL lab hosts with Satellite
+  hosts: "{{ _hosts | mandatory }}"
+  become: true
+  tasks:
+    - name: Validate supported host and lifecycle environment
+      ansible.builtin.assert:
+        that:
+          - ansible_os_family == 'RedHat'
+          - ansible_distribution_major_version in ['9', '10']
+          - env in ['DEV', 'TEST', 'PROD']
+
+    - name: Trust the lab CA supplied by the managing host
+      ansible.builtin.copy:
+        content: "{{ satellite_lab_ca_pem }}"
+        dest: /etc/pki/ca-trust/source/anchors/aap-demo-satellite.crt
+        mode: "0644"
+      register: satellite_lab_ca
+
+    - name: Update system CA trust
+      ansible.builtin.command: update-ca-trust
+      when: satellite_lab_ca.changed
+      changed_when: true
+
+    - name: Install the Satellite consumer certificate package
+      ansible.builtin.dnf:
+        name: "{{ lookup('ansible.builtin.env', 'SATELLITE_SERVER') }}/pub/katello-ca-consumer-latest.noarch.rpm"
+        state: present
+        disable_gpg_check: true
+
+    - name: Register using the selected lab activation key
+      community.general.redhat_subscription:
+        state: present
+        org_id: "{{ org_id }}"
+        activationkey: "ak-rhel{{ ansible_distribution_major_version }}-{{ env | lower }}"
+        server_hostname: "{{ lookup('ansible.builtin.env', 'SATELLITE_SERVER') | urlsplit('hostname') }}"
+        force_register: false

@@ -15,6 +15,8 @@ Validation tests for `aap-demo.sh` command-line interface.
 ./test/test-ingress-ca-export.sh
 ./test/test-satellite-ca-trust.sh
 ./test/test-fleet-satellite.sh
+./test/test-satellite-maintenance.sh
+./test/test-lab-ssh.sh
 ./test/test-macos-ingress-ca-auth.sh
 ./test/test-macos-ingress-ca-trust-state.sh
 ./test/test-fix-ssl-command.sh
@@ -97,6 +99,8 @@ Tests validate:
    Deployment readiness diagnostics
 8. **Fault injection** — CRC start/stop failures, CoreDNS restoration failure,
    malformed Kubernetes JSON and quantities, and rollout failures return nonzero
+9. **VM inventory** — empty MicroShift version fields on SNO preserve CPU, memory
+   and disk metrics, including the dashboard's VM free-space value
 
 ### Live Idempotency
 

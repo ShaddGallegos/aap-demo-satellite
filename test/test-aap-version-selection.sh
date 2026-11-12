@@ -49,8 +49,8 @@ echo "PASS: unsupported AAP version rejected"
 
 config_file=$(mktemp)
 printf '%s\n' 'AAP_VERSION=2.6' >"$config_file"
-if ! env -u AAP_VERSION -u AAP_CHANNEL AAP_DEMO_CONFIG="$config_file" QUIET=true \
-  "$REPO_DIR/aap-demo.sh" help 2>&1 | grep -q 'Deploy AAP 2.6'; then
+if ! help_output=$(env -u AAP_VERSION -u AAP_CHANNEL AAP_DEMO_CONFIG="$config_file" QUIET=true \
+  "$REPO_DIR/aap-demo.sh" help 2>&1) || ! grep -q 'Deploy AAP 2.6' <<<"$help_output"; then
   echo "FAIL: config file does not select AAP version"
   rm -f "$config_file"
   exit 1
@@ -58,8 +58,8 @@ fi
 echo "PASS: config file selects AAP version"
 
 printf '%s\n' '# command-line environment takes precedence' >"$config_file"
-if ! AAP_VERSION=2.6 AAP_DEMO_CONFIG="$config_file" QUIET=true \
-  "$REPO_DIR/aap-demo.sh" help 2>&1 | grep -q 'Deploy AAP 2.6'; then
+if ! help_output=$(AAP_VERSION=2.6 AAP_DEMO_CONFIG="$config_file" QUIET=true \
+  "$REPO_DIR/aap-demo.sh" help 2>&1) || ! grep -q 'Deploy AAP 2.6' <<<"$help_output"; then
   echo "FAIL: help does not reflect selected AAP version"
   rm -f "$config_file"
   exit 1

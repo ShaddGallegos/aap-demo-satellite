@@ -2090,11 +2090,6 @@ cmd_create() {
   setup_kubeconfig
 }
 
-# Default Satellite-lab helpers for the full demo. Tests override these.
-_full_demo_satellite_vm_exists() {
-  sudo virsh -c qemu:///system dominfo satellite >/dev/null 2>&1
-}
-
 _full_demo_satellite_build() {
   bash "${SCRIPT_DIR}/satellite-lab/build-and-configure.sh"
 }
@@ -2124,7 +2119,7 @@ cmd_full_demo() {
   echo "  6. Enable Fleet, attach the AAP subscription, and register three RHEL 9 nodes"
   echo "  7. Enable Product Demos"
   if [ "$FULL_DEMO_SATELLITE" = true ]; then
-    echo "  7a. Build and configure the Satellite lab (if not present), then Satellite Demo"
+    echo "  7a. Reuse/install Satellite, maintain it, import subscriptions, then Satellite Demo"
   fi
   echo "  8. Reapply all integrations"
   echo "  9. Install boot recovery (restores CRC settings/state on reboot) and launch dashboard"
@@ -2198,19 +2193,14 @@ cmd_full_demo() {
   PRODUCT_DEMOS_DOMAINS="${PRODUCT_DEMOS_DOMAINS:-linux windows network cloud}" \
     cmd_enable product-demos || return 1
 
-  # Optional Satellite lab: build/configure the Satellite VM when it does not
-  # yet exist, then install the Satellite Demo content against it.
+  # The builder distinguishes installed Satellite from a VM awaiting installation.
   if [ "$FULL_DEMO_SATELLITE" = true ]; then
-    if ! _full_demo_satellite_vm_exists; then
-      echo ""
-      echo "▸ Satellite not found — running Satellite Build and Configure..."
-      _full_demo_satellite_build || {
-        echo "ERROR: Satellite Build and Configure failed" >&2
-        return 1
-      }
-    else
-      echo "✓ Satellite VM already exists; skipping build"
-    fi
+    echo ""
+    echo "▸ Reconciling Satellite installation, maintenance, and subscription manifest..."
+    _full_demo_satellite_build || {
+      echo "ERROR: Satellite Build and Configure failed" >&2
+      return 1
+    }
     echo ""
     echo "▸ Installing Satellite Demo content..."
     cmd_enable product-demo-satellite || return 1

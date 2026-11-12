@@ -15,7 +15,7 @@ CLIENT_PRODUCT="Red Hat Satellite Client 6"   # verify: hammer repository-set li
 hammer defaults add --param-name organization --param-value "$ORG" 2>/dev/null || true
 
 echo "== 1/7 Upload manifest =="
-hammer subscription upload --file "$MANIFEST"
+hammer subscription upload --organization "$ORG" --file "$MANIFEST"
 
 echo "== 2/7 Force on_demand download policy (BEFORE enabling repos) =="
 hammer settings set --name default_redhat_download_policy --value on_demand

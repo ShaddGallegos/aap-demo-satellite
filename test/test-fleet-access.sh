@@ -44,7 +44,7 @@ if grep -q NOPASSWD "$TEST_SSH_SCRIPT"; then
 fi
 grep -q 'sudo visudo -cf' "$TEST_SSH_SCRIPT"
 grep -q 'sudo -u admin ssh-keygen' "$TEST_SSH_SCRIPT"
-grep -q 'StrictHostKeyChecking=accept-new' "$TEST_SSH_ARGS"
+grep -q 'StrictHostKeyChecking=no' "$TEST_SSH_ARGS"
 if grep -Fq "$password" "$TEST_SSH_ARGS" "$TEST_SSH_SCRIPT" "$TEST_DIR/output"; then
   echo "FAIL: plaintext Fleet password leaked" >&2
   exit 1

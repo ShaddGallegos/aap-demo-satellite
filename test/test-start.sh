@@ -102,11 +102,28 @@ kubectl() {
     'get pods '*)
       jq -n --arg scenario "$SCENARIO" '{
         items: [{
-          metadata: {name:"demo"},
+          metadata: {
+            name:"demo",
+            ownerReferences: (if $scenario == "failed-job-complete"
+                                  or $scenario == "failed-job-incomplete"
+                                  or $scenario == "failed-job-replaced"
+                                  or $scenario == "failed-job-query" then
+              [{kind:"Job", controller:true, uid:"original-job"}]
+              else [] end)
+          },
           status: {
-            phase: "Running",
+            phase: (if $scenario | startswith("failed-") then "Failed" else "Running" end),
             conditions:[{type:"Ready",status:(if $scenario == "unready-pod" then "False" else "True" end)}]
           }
+        }]
+      }'
+      ;;
+    'get jobs '*)
+      [ "$SCENARIO" != failed-job-query ] || return 1
+      jq -n --arg scenario "$SCENARIO" '{
+        items: [{
+          metadata: {uid: (if $scenario == "failed-job-replaced" then "new-job" else "original-job" end)},
+          status: {conditions: [{type:"Complete", status:(if $scenario == "failed-job-incomplete" then "False" else "True" end)}]}
         }]
       }'
       ;;
@@ -162,6 +179,18 @@ for addon in portal portal-operator apme-eap; do
   grep -q "get deployment,statefulset,daemonset -n $namespace " "$START_LOG"
 done
 echo "PASS: enabled portal and APME workloads are checked"
+
+SCENARIO=failed-job-complete aap_demo_start_workloads_ready custom-aap || {
+  echo "FAIL: a failed retry pod from a completed Job blocked startup" >&2
+  exit 1
+}
+for scenario in failed-job-incomplete failed-job-replaced failed-job-query failed-unowned; do
+  if SCENARIO="$scenario" aap_demo_start_workloads_ready custom-aap; then
+    echo "FAIL: $scenario reported workloads ready" >&2
+    exit 1
+  fi
+done
+echo "PASS: only failed retry pods owned by completed Jobs are ignored"
 
 for scenario in api-failure node-failure no-aap missing-mcp missing-namespace \
   empty-workloads malformed-json stale-generation old-rollout stateful-not-ready \

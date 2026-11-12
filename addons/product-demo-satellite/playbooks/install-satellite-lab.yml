@@ -1,0 +1,23 @@
+---
+- name: Install Satellite demo resources without legacy content setup
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - satellite/setup.yml
+  tasks:
+    - name: Prepare local demo templates without external telemetry notifications
+      ansible.builtin.set_fact:
+        satellite_lab_templates: >-
+          {{ controller_templates | map('combine', {
+            'notification_templates_started': [],
+            'notification_templates_success': [],
+            'notification_templates_error': []
+          }) | list }}
+
+    - name: Install Satellite demo resources
+      ansible.builtin.include_role:
+        name: infra.aap_configuration.dispatch
+      vars:
+        controller_dependency_check: false
+        controller_templates: "{{ satellite_lab_templates }}"
+        controller_launch_jobs: []

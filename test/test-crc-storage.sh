@@ -218,6 +218,9 @@ case "$1 $2 $3" in
     ;;
 esac
 case "$*" in
+  "config get preset")
+    printf '%s\n' 'preset is not set'
+    ;;
   "config set persistent-volume-size 16")
     printf 'persistent-volume-size value 16 is invalid, must be greater than or equal to 15\n' >&2
     exit 1
@@ -238,6 +241,12 @@ case "$*" in
 esac
 MOCK_CRC
 chmod +x "${TEST_DIR}/bin/crc"
+
+cat >"${TEST_DIR}/bin/systemctl" <<'MOCK_SYSTEMCTL'
+#!/usr/bin/env bash
+exit 1
+MOCK_SYSTEMCTL
+chmod +x "${TEST_DIR}/bin/systemctl"
 
 cli() {
   env -u CRC_DISK -u CRC_PV_SIZE -u VM_DISK_SIZE -u VM_PV_SIZE \
@@ -441,7 +450,7 @@ run_rejected_create() {
 if run_rejected_create below-min 30 20 $'CRC_DISK=120\nCRC_PV_SIZE=70'; then
   fail "create should stop when CRC_DISK is below the OpenShift Local minimum: $(cat "${TEST_DIR}/create-below-min.out" "${TEST_DIR}/create-below-min.err")"
 fi
-grep -q 'at least 31GB' "${TEST_DIR}/create-below-min.err" || fail "create should name the disk minimum: $(cat "${TEST_DIR}/create-below-min.err")"
+grep -q 'at least 31GB' "${TEST_DIR}/create-below-min.err" || fail "create should name the disk minimum: $(cat "${TEST_DIR}/create-below-min.out" "${TEST_DIR}/create-below-min.err")"
 grep -q '^CRC_DISK=120$' "${TEST_DIR}/create-below-min/.aap-demo/config" || fail "create should not replace a saved disk with a rejected size"
 if grep -q '^CRC_DISK=30$' "${TEST_DIR}/create-below-min/.aap-demo/config"; then
   fail "create saved CRC_DISK=30 after OpenShift Local would reject it"
@@ -453,6 +462,16 @@ if grep -q 'crc start' "${TEST_DIR}/crc.log" || grep -q 'config set disk-size 30
   fail "create should not start or send a 30GB disk: $(cat "${TEST_DIR}/crc.log")"
 fi
 pass "create stops before start when CRC_DISK is below 31GB"
+
+for saved_resources in 'CRC_CPUS=8' 'CRC_MEMORY=16384'; do
+  if run_rejected_create partial-resources 30 20 \
+    "$(printf 'CRC_DISK=120\nCRC_PV_SIZE=70\n%s' "$saved_resources")"; then
+    fail "create should reject an invalid disk with partial saved resources"
+  fi
+  grep -q 'at least 31GB' "${TEST_DIR}/create-partial-resources.err" \
+    || fail "create exited before storage validation with ${saved_resources}: $(cat "${TEST_DIR}/create-partial-resources.out" "${TEST_DIR}/create-partial-resources.err")"
+done
+pass "create validates storage when only one resource setting is saved"
 
 if run_rejected_create crc-reject 32 16 $'CRC_DISK=120\nCRC_PV_SIZE=70'; then
   fail "create should stop when crc rejects the disk: $(cat "${TEST_DIR}/create-crc-reject.out" "${TEST_DIR}/create-crc-reject.err")"

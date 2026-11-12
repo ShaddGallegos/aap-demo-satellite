@@ -139,6 +139,46 @@ else
   _fail "help_grouped_by_task"
 fi
 
+echo "Test 2a3: help retains beginner examples and warns before destructive examples"
+examples=$(printf '%s\n' "$help_output" | awk '/^Examples$/{inside=1;next} /^Requirements$/{exit} inside')
+example_commands=$(printf '%s\n' "$examples" | awk '
+  /^    aap-demo / {sub(/ +#.*/, ""); sub(/^ +/, ""); print}
+')
+examples_ok=true
+for example in \
+  'aap-demo create' \
+  'aap-demo create --full-demo --satellite --sno' \
+  'aap-demo deploy' \
+  'aap-demo status' \
+  'aap-demo enable portal' \
+  'aap-demo enable fleet' \
+  'aap-demo fleet add 3 --image rhel9' \
+  'aap-demo redeploy-all' \
+  'aap-demo idle true' \
+  'aap-demo idle false' \
+  'aap-demo fleet auth' \
+  'aap-demo fleet register' \
+  'aap-demo fleet ssh 1' \
+  'aap-demo wire'; do
+  if ! grep -Fxq "$example" <<<"$example_commands"; then
+    echo "  missing example: $example"
+    examples_ok=false
+  fi
+done
+if ! awk '
+  /WARNING:/ {warned=1}
+  /^    aap-demo (clean|redeploy-all|destroy)( |$)/ {if(!warned) exit 1}
+  END {if(!warned) exit 1}
+' <<<"$examples"; then
+  echo "  destructive examples must follow a data-loss warning"
+  examples_ok=false
+fi
+if [ "$examples_ok" = true ]; then
+  _pass "help_beginner_examples"
+else
+  _fail "help_beginner_examples"
+fi
+
 # Test 2b: persistent storage is shown under the VM section
 echo "Test 2b: status places persistent storage under VM"
 # cmd_status lives in includes/cmd-status.sh after the includes/ refactor.

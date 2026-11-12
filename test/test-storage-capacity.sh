@@ -28,6 +28,7 @@ all_plan=$(aap_demo_capacity_plan "$all_addons")
 [ "$(jq -r '.host_only_gib' <<<"$all_plan")" = 66 ]
 [ "$(jq -r '.addons.fleet.vm_gib' <<<"$all_plan")" = 0 ]
 [ "$(jq -r '.addons.fleet.host_gib' <<<"$all_plan")" = 25 ]
+[ "$(jq -r '.addons.lightspeed.vm_gib' <<<"$all_plan")" = 2 ]
 
 cli_addons=$(sed -n 's/^AVAILABLE_ADDONS="\([^"]*\)"/\1/p' "$REPO_ROOT/aap-demo.sh" | tr ' ' '\n' | sort)
 model_addons=$(jq -r '.addons | keys[]' "$AAP_DEMO_CAPACITY_MODEL" | sort)

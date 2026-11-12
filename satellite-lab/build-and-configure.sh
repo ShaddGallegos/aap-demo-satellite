@@ -4,8 +4,8 @@
 #   network -> host NFS storage -> provision VM -> wait for install ->
 #   satellite-installer -> content (hammer) -> provisioning -> integrations
 #
-# Invoked by `aap-demo create --full-demo --satellite` when the Satellite VM
-# does not yet exist. Safe to re-run: each stage is skipped when already done.
+# Invoked by `aap-demo create --full-demo --satellite`. Existing installations
+# receive supported maintenance instead of initial-install configuration.
 #
 # Required env / Vault:
 #   - Red Hat offline token in the Vault (satellite-manifest addon uses it)
@@ -45,7 +45,8 @@ SAT_SCP="scp $_SAT_KEY_OPTS -o StrictHostKeyChecking=no -o UserKnownHostsFile=/d
 # Let 01-provision-satellite-vm.sh resolve the ISO path from RHEL_INSTALL_SOURCE
 # (boot vs dvd) unless the caller pinned an explicit path.
 RHEL_ISO="${RHEL_ISO:-}"
-MANIFEST="${MANIFEST:-${AAP_DEMO_DIR:-$HOME/.aap-demo}/satellite/manifest.zip}"
+_MANIFEST_PROVIDED="${MANIFEST:+true}"
+MANIFEST="${MANIFEST:-${MANIFEST_DIR:-${AAP_DEMO_DIR:-$HOME/.aap-demo}/satellite}/manifest.zip}"
 VIRSH="virsh -c qemu:///system"
 
 _err() { printf 'ERROR: %s\n' "$*" >&2; }
@@ -57,7 +58,10 @@ _vault_val() { aap_demo_vault_get "$1" 2>/dev/null || true; }
 # --- stage checks -----------------------------------------------------------
 _sat_vm_exists() { $VIRSH dominfo satellite >/dev/null 2>&1; }
 _sat_ssh_ready() { $SAT_SSH 'true' 2>/dev/null; }
-_sat_installed() { $SAT_SSH 'systemctl is-active foreman.service >/dev/null 2>&1' 2>/dev/null; }
+_sat_installed() { $SAT_SSH 'rpm -q satellite >/dev/null 2>&1'; }
+_sat_install_state() {
+  $SAT_SSH 'if rpm -q satellite >/dev/null 2>&1; then echo installed; else echo absent; fi'
+}
 _sat_content_done() { $SAT_SSH 'hammer content-view list 2>/dev/null | grep -q RHEL9' 2>/dev/null; }
 
 # --- stages -----------------------------------------------------------------
@@ -67,12 +71,13 @@ _stage_network() {
 }
 
 _stage_manifest() {
-  if [ -s "$MANIFEST" ]; then
-    _log "✓ Manifest already present: $MANIFEST"
+  if [ "$_MANIFEST_PROVIDED" = true ]; then
+    [ -s "$MANIFEST" ] || { _err "Provided manifest is missing or empty: $MANIFEST"; return 1; }
+    _log "✓ Using provided manifest: $MANIFEST"
     return 0
   fi
-  _log "▸ Stage: build subscription manifest (satellite-manifest addon)"
-  QUIET=true bash "${REPO_ROOT}/aap-demo.sh" enable satellite-manifest
+  _log "▸ Stage: attach subscriptions and refresh manifest (satellite-manifest addon)"
+  QUIET=true bash "${REPO_ROOT}/aap-demo.sh" enable satellite-manifest || return 1
   [ -s "$MANIFEST" ] || { _err "Manifest not produced at $MANIFEST"; return 1; }
 }
 
@@ -263,8 +268,68 @@ _stage_installer() {
   unset admin_pass
 }
 
+_stage_maintenance() {
+  _log "▸ Stage: maintain existing Satellite (backup, update, supported upgrades)"
+  $SAT_SCP "${SCRIPT_DIR}/maintain-satellite.sh" "root@${SAT_IP}:/root/" || return 1
+  local rc boot_id new_boot_id attempt ready
+  while :; do
+    boot_id=$($SAT_SSH 'cat /proc/sys/kernel/random/boot_id') || return 1
+    rc=0
+    printf 'export SATELLITE_BACKUP_DIR=%q\nbash /root/maintain-satellite.sh\n' \
+      "${SATELLITE_BACKUP_DIR:-/var/backup/satellite}" | $SAT_SSH 'bash -s' || rc=$?
+    [ "$rc" -ne 194 ] || {
+      _log "Satellite maintenance requires a reboot; waiting for a new boot"
+      $SAT_SSH 'systemd-run --collect --unit=aap-demo-satellite-reboot --on-active=3s systemctl reboot' || return 1
+      ready=false
+      for attempt in $(seq 1 120); do
+        sleep 5
+        new_boot_id=$($SAT_SSH 'cat /proc/sys/kernel/random/boot_id' 2>/dev/null) || continue
+        if [ -n "$new_boot_id" ] && [ "$new_boot_id" != "$boot_id" ]; then
+          ready=true
+          break
+        fi
+      done
+      [ "$ready" = true ] || { _err "Satellite did not return after reboot"; return 1; }
+      continue
+    }
+    return "$rc"
+  done
+}
+
+_stage_upload_manifest() {
+  _log "▸ Stage: import subscription manifest"
+  $SAT_SCP "$MANIFEST" "root@${SAT_IP}:/root/manifest.zip" || return 1
+  {
+    printf 'set -euo pipefail\norg=%q\n' "${SAT_ORG:-}"
+    cat <<'REMOTE'
+if [ -z "$org" ]; then
+  orgs=$(hammer --output json organization list)
+  if [ "$(jq length <<<"$orgs")" -eq 1 ]; then
+    org=$(jq -er '.[0].Name' <<<"$orgs")
+  else
+    candidates='[]'
+    while IFS= read -r row; do
+      id=$(jq -er '.Id' <<<"$row")
+      repos=$(hammer --output json repository list --organization-id "$id")
+      if [ "$(jq length <<<"$repos")" -gt 0 ]; then
+        candidates=$(jq -c --arg name "$(jq -er '.Name' <<<"$row")" '. + [$name]' <<<"$candidates")
+      fi
+    done < <(jq -c '.[]' <<<"$orgs")
+    [ "$(jq length <<<"$candidates")" -eq 1 ] || {
+      echo "ERROR: Cannot uniquely select the existing content organization; set SAT_ORG explicitly." >&2
+      exit 1
+    }
+    org=$(jq -er '.[0]' <<<"$candidates")
+  fi
+fi
+hammer subscription upload --organization "$org" --file /root/manifest.zip
+REMOTE
+  } | $SAT_SSH 'bash -s'
+}
+
 _stage_content() {
   if _sat_content_done; then
+    _stage_upload_manifest || return 1
     _log "✓ Satellite content already configured"
     return 0
   fi
@@ -332,22 +397,51 @@ _stage_ca_trust() {
 }
 
 main() {
+  local install_state=unreachable
+  if [ "${1:-}" = --manifest-only ] && [ "$#" -eq 1 ]; then
+    _stage_manifest || return 1
+    _stage_upload_manifest
+    return $?
+  fi
+  if [ "$#" -ne 0 ]; then
+    _err "Usage: build-and-configure.sh [--manifest-only]"
+    return 1
+  fi
   echo ""
-  echo "Satellite Build and Configure - building the Satellite lab..."
-  _stage_network
-  _stage_manifest
-  _stage_provision
-  _stage_wait_install
-  _stage_register
-  _stage_installer
-  _stage_content
-  _stage_provisioning
-  _stage_integrations
-  _stage_ca_trust
+  echo "Satellite Build and Configure - reconciling the Satellite lab..."
+  if _sat_ssh_ready; then
+    install_state=$(_sat_install_state) || return 1
+  fi
+  if [ "$install_state" = installed ]; then
+    _log "✓ Satellite RPM already installed; preserving its configuration"
+    _stage_maintenance || return 1
+    _stage_manifest || return 1
+    _stage_upload_manifest || return 1
+  else
+    _stage_network || return 1
+    _stage_manifest || return 1
+    _stage_provision || return 1
+    _stage_wait_install || return 1
+    install_state=$(_sat_install_state) || return 1
+    if [ "$install_state" = installed ]; then
+      _stage_maintenance || return 1
+      _stage_upload_manifest || return 1
+    else
+      _stage_register || return 1
+      _stage_installer || return 1
+      _stage_maintenance || return 1
+      _stage_content || return 1
+      _stage_provisioning || return 1
+      _stage_integrations || return 1
+    fi
+  fi
+  _stage_ca_trust || return 1
   echo ""
   echo "✓ Satellite Build and Configure complete"
   echo "  Satellite UI: https://${SAT_HOST} (admin / see 'aap-demo status --show-secrets')"
   echo "  Next: aap-demo enable product-demo-satellite (Satellite Demo content)"
 }
 
-main "$@"
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi

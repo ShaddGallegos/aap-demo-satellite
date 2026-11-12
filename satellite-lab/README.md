@@ -10,8 +10,8 @@ stages individually.
 
 ## Architecture
 
-> **Adapted for CRC user-mode networking.** This host runs CRC with the
-> MicroShift preset, which uses QEMU user-mode networking + vsock — there is no
+> **Adapted for CRC user-mode networking.** CRC with either the OpenShift or
+> MicroShift preset uses QEMU user-mode networking + vsock — there is no
 > bridged `crc` libvirt network. The Satellite VM's first NIC therefore
 > attaches to the libvirt `default` network (NAT to the host and upstream), and
 > reaches AAP/CRC through the host's forwarded ports. The `satlab` network
@@ -65,9 +65,10 @@ content. The `apps.127.0.0.1.nip.io` wildcard cannot be used for the Satellite
 host, `satellite.demo.lab` is added to `/etc/hosts` so the UI is reachable at
 `https://satellite.demo.lab`.
 
-**Organization:** the lab uses Satellite's built-in `Default Organization`
-(not a custom org) so the upstream product-demos Satellite content — which
-hardcodes that name — works without editing host_vars.
+**Organization:** new installations use `Default Organization`. Existing
+installations keep their organization and published content. The local AAP
+demo profile discovers the organization owning the RHEL9/RHEL10 content views;
+set `SAT_ORG` if more than one organization matches.
 
 ## Prerequisites
 
@@ -96,11 +97,14 @@ hardcodes that name — works without editing host_vars.
      pattern `00a-fetch-rhel-iso.sh` uses), so a registered host is enough —
      no separate VM credentials are required.
   To store Vault credentials: `aap-demo fleet auth configure`.
-- A **manifest** with Satellite infrastructure + RHEL entitlements. Generate it
-  programmatically with the aap-demo addon (writes `~/.aap-demo/satellite/manifest.zip`):
-  `aap-demo enable satellite-manifest` — then `scp` it to the Satellite VM as
-  `/root/manifest.zip`. Or download manually from access.redhat.com →
-  Subscription Allocations. The addon requires the account's "View/Renew
+- **Satellite Infrastructure + RHEL server subscriptions** in your Red Hat account.
+  The build runs `aap-demo enable satellite-manifest` automatically: it creates/reuses
+  an allocation, attaches one entitlement per missing category when each has a
+  unique eligible pool, downloads `~/.aap-demo/satellite/manifest.zip`, and uploads
+  it to Satellite. Existing attachments are reused. Missing or ambiguous pools
+  stop the build with manual-selection guidance instead of exporting an empty
+  manifest. An explicit `MANIFEST=/path/to/manifest.zip` bypasses generation and
+  imports your supplied file. The addon requires the account's "View/Renew
   Subscription Information" permission; see
   [../addons/satellite-manifest/README.md](../addons/satellite-manifest/README.md).
 - **Satellite 6.17+ recommended**: RHEL 10 content support and the image-mode
@@ -134,6 +138,73 @@ idempotent — each stage is skipped when already complete. It also trusts the
 Satellite's Katello CA on the host (`_stage_ca_trust`, sourcing
 `includes/satellite-ca-trust.sh`) so the UI and CLI tools stop warning about
 the self-signed cert; skip with `AAP_DEMO_TRUST_CA=false`.
+
+The manifest is an exception to stage skipping: unless you supply `MANIFEST`,
+it is refreshed and imported even when a cached file or configured content
+already exists. For an installed server, `aap-demo create --full-demo --satellite`
+preserves its installer settings, maintains Satellite, and refreshes/imports the
+manifest without rebuilding the VM or syncing repositories. Manifest import
+selects the sole organization with repositories, or the sole organization on
+a new server. Set `SAT_ORG` when multiple content organizations exist.
+To do just that step independently:
+
+```bash
+bash satellite-lab/build-and-configure.sh --manifest-only
+```
+
+### Existing installations and maintenance
+
+The builder checks the installed Satellite RPM over SSH, not just VM existence
+or whether Foreman is running. It starts services on an installed server and
+never reapplies initial organization, administrator, or network settings there.
+A VM without the Satellite RPM continues through installation. An incomplete
+installation with the RPM already present stops with repair guidance.
+
+Existing and newly installed servers receive package-update checks. Changes use
+`satellite-maintain update check/run`, not an unrestricted Satellite package
+upgrade. Entitled adjacent minor releases are discovered from Red Hat's
+repository list. The corresponding maintenance tool is staged, its target is
+verified, and `satellite-maintain upgrade check/run` performs each supported
+minor upgrade in sequence. Unavailable paths and failed checks stop the build;
+there are no skipped checks or automatic OS-major migrations.
+
+Before each changing maintenance step, a full offline backup, including Pulp
+content, is stored under `/var/backup/satellite/pre-<release>.*`. Override the
+parent with `SATELLITE_BACKUP_DIR`, preferably pointing at a separate mounted
+backup volume with enough capacity. Failed backups prevent package changes.
+Backups are retained for manual restoration; failed upgrades do not trigger
+an automatic rollback.
+
+Maintenance can stop services and reboot the Satellite VM. The builder waits
+for a changed boot ID, reconnects, and reruns reconciliation. Run the full demo
+only when this downtime is acceptable. A current server performs discovery and
+health checks without taking another backup or rerunning the initial installer.
+`--manifest-only` never runs maintenance.
+
+### Shared lab SSH access
+
+Fleet creation/start and `aap-demo wire` reconcile the existing Fleet private
+key onto managed running nodes as `~/.ssh/aap-demo-shared-key`. RHEL Fleet and
+Satellite accounts `admin` and `root` share this identity; CRC uses its supported
+`core` account with `sudo`, without enabling root SSH or adding CoreOS users.
+Existing private identities and unmanaged authorized keys are preserved.
+
+The generated lab aliases select forwarded Fleet ports and use
+`StrictHostKeyChecking no` with a disposable known-host store. CRC SSH traverses
+a running Fleet QEMU node to reach the host's loopback-only CRC forward.
+CoreOS uses a separate `authorized_keys.d/aap-demo` file when its SSH key helper
+is present, leaving the MCO-owned Ignition key file untouched.
+
+This is deliberately insecure **local-demo-only** access: compromise of one
+shared key grants access across the lab. Private copies have mode 600 and cross
+SSH stdin, never process arguments. The controlling host's accounts, authorized
+keys, and global SSH policy are not changed by this reconciliation. Stopped
+Fleet/Satellite nodes are reconciled after they are started.
+
+On firewalld hosts, reconciliation permits the Satellite VM's source address
+to reach only the running Fleet SSH forwards on the host gateway. These
+source/destination/port-specific rules are applied to the Satellite-facing zone,
+both persistently and at runtime, without reloading the host firewall.
 
 ## Registering Fleet nodes
 

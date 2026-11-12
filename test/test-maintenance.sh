@@ -44,6 +44,8 @@ preview_default=$(
   ' _ "${SCRIPT_DIR}/.."
 )
 grep -Fq "aap_demo credentials, so rebuilds do not re-prompt" <<<"$preview_default"
+grep -Fq "Managed Satellite lab VM" <<<"$preview_default"
+grep -Fq "host-side Satellite NFS content/backups" <<<"$preview_default"
 if grep -Fq "entries are stripped" <<<"$preview_default"; then
   echo "FAIL: default uninstall preview advertises Vault stripping"
   exit 1
@@ -70,6 +72,103 @@ fi
 
 mock_dir=$(mktemp -d)
 trap 'rm -rf "$mock_dir"' EXIT
+
+(
+  source "$MAINTENANCE_SH"
+  uname() { printf Linux; }
+  reset_satellite_case() {
+    : >"$mock_dir/satellite.log"
+    vm_state=running
+    vm_disk=/var/lib/libvirt/images/satellite.qcow2
+    valid_nics=true
+    disk_removed=false
+    failure=""
+  }
+  virsh() {
+    shift 2
+    printf 'virsh %s\n' "$*" >>"$mock_dir/satellite.log"
+    case "$*" in
+      'list --all --name')
+        [ "$failure" != discovery ] || return 1
+        printf 'unrelated-vm\n'
+        [ "$vm_state" = absent ] || printf 'satellite\n'
+        ;;
+      'list --name')
+        [ "$vm_state" != running ] || printf 'satellite\n'
+        ;;
+      'domiflist satellite')
+        [ "$valid_nics" = true ] || return 0
+        printf 'vnet0 network default virtio 52:54:00:5a:7e:01\nvnet1 network satlab virtio 52:54:00:5a:7e:02\n'
+        ;;
+      'domblklist satellite --details')
+        printf 'file disk vda %s\nfile disk vdb /shared/keep-this-disk.qcow2\nfile cdrom sda /shared/keep-this.iso\n' "$vm_disk"
+        ;;
+      'autostart satellite --disable') ;;
+      'destroy satellite')
+        [ "$failure" != stop ] || return 1
+        [ "$failure" = still-running ] || vm_state=stopped
+        ;;
+      'undefine satellite --managed-save --nvram --snapshots-metadata --checkpoints-metadata')
+        [ "$failure" != undefine ] || return 1
+        vm_state=absent
+        ;;
+      *) echo "Unexpected virsh command: $*" >&2; return 1 ;;
+    esac
+  }
+  sudo() {
+    case "$1" in
+      virsh) shift; virsh "$@" ;;
+      rm)
+        [[ "$*" == 'rm -f -- /var/lib/libvirt/images/satellite.qcow2' ]] || {
+          echo "FAIL: attempted removal of an unmanaged disk: $*" >&2; return 1;
+        }
+        printf '%s\n' "$*" >>"$mock_dir/satellite.log"
+        [ "$failure" != disk ] || return 1
+        disk_removed=true
+        ;;
+      *) echo "Unexpected privileged command: $*" >&2; return 1 ;;
+    esac
+  }
+  reset_satellite_case
+  _maintenance_remove_satellite >"$mock_dir/satellite-output"
+  [ "$vm_state" = absent ] && [ "$disk_removed" = true ]
+  awk '
+    /virsh destroy satellite/ {stopped=NR}
+    /^rm -f --/ {if(!stopped) exit 1; removed=NR}
+    /virsh undefine satellite/ {if(!removed) exit 1}
+  ' "$mock_dir/satellite.log"
+  _maintenance_remove_satellite >>"$mock_dir/satellite-output"
+  [ "$(grep -c '^rm -f --' "$mock_dir/satellite.log")" -eq 1 ]
+  reset_satellite_case
+  vm_state=stopped
+  _maintenance_remove_satellite >"$mock_dir/satellite-output"
+  [ "$vm_state" = absent ] && [ "$disk_removed" = true ]
+  ! grep -q '^virsh destroy ' "$mock_dir/satellite.log"
+  for unsafe in disk nics; do
+    reset_satellite_case
+    case "$unsafe" in
+      disk) vm_disk=/shared/not-aap-demo.qcow2 ;;
+      nics) valid_nics=false ;;
+    esac
+    if _maintenance_remove_satellite >"$mock_dir/satellite-output" 2>&1; then
+      echo "FAIL: removed Satellite with unrecognized $unsafe" >&2; exit 1
+    fi
+    [ "$disk_removed" = false ] && [ "$vm_state" = running ]
+    ! grep -Eq '^virsh (destroy|autostart|undefine) ' "$mock_dir/satellite.log"
+  done
+  for failure_case in discovery stop still-running disk undefine; do
+    reset_satellite_case
+    failure="$failure_case"
+    if _maintenance_remove_satellite >"$mock_dir/satellite-output" 2>&1; then
+      echo "FAIL: Satellite cleanup ignored $failure failure" >&2; exit 1
+    fi
+    [ "$vm_state" != absent ]
+    if [ "$failure" != undefine ]; then [ "$disk_removed" = false ]; fi
+    failure=""
+    _maintenance_remove_satellite >"$mock_dir/satellite-output"
+    [ "$vm_state" = absent ] && [ "$disk_removed" = true ]
+  done
+)
 
 cat >"$mock_dir/sudo" <<'EOF'
 #!/usr/bin/env bash
@@ -173,7 +272,30 @@ cat >"$mock_dir/systemctl" <<EOF
 #!/usr/bin/env bash
 echo "systemctl \$*" >>"$mock_dir/uninstall.log"
 EOF
-chmod +x "$mock_dir/crc" "$mock_dir/claude" "$mock_dir/podman" "$mock_dir/systemctl"
+cat >"$mock_dir/virsh" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  '-c qemu:///system list --all --name'|'-c qemu:///system list --name') ;;
+  '-c qemu:///system dominfo crc') exit 1 ;;
+  *) echo "Unexpected virsh command: $*" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$mock_dir/crc" "$mock_dir/claude" "$mock_dir/podman" "$mock_dir/systemctl" "$mock_dir/virsh"
+
+if HOME="$uninstall_home" PATH="$mock_dir:$PATH" bash -c '
+  set -euo pipefail
+  SCRIPT_DIR=$1
+  source "$SCRIPT_DIR/includes/maintenance.sh"
+  _maintenance_stop_dashboard() { :; }
+  _maintenance_remove_satellite() { echo "Satellite cleanup failed" >&2; return 1; }
+  _maintenance_uninstall_apply false
+' _ "$SCRIPT_DIR/.." >"$mock_dir/failed-uninstall" 2>&1; then
+  echo "FAIL: full uninstall continued after Satellite cleanup failed" >&2
+  exit 1
+fi
+[ -f "$uninstall_home/.aap-demo/generated-credential" ]
+[ -f "$uninstall_home/.crc/cache/bundle" ]
+! grep -q 'environment uninstalled' "$mock_dir/failed-uninstall"
 
 # shellcheck disable=SC2031
 HOME="$uninstall_home" PATH="$mock_dir:$PATH" QUIET=true \

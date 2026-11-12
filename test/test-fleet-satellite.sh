@@ -20,6 +20,10 @@ trap 'rm -rf "$TMPDIR"' EXIT
 # include under test calls so no real SSH/Vault is touched.
 LOG="$TMPDIR/calls.log"
 : >"$LOG"
+openssl req -x509 -newkey rsa:2048 -keyout "$TMPDIR/key.pem" \
+  -out "$TMPDIR/ca.pem" -days 1 -nodes -subj "/CN=test-satellite" \
+  -addext "basicConstraints=critical,CA:TRUE" >/dev/null 2>&1
+curl() { cat "$TMPDIR/ca.pem"; }
 
 # shellcheck source=includes/fleet-satellite.sh
 source "${REPO_ROOT}/includes/fleet-satellite.sh"
@@ -74,7 +78,7 @@ captured="$TMPDIR/remote.sh"
 fleet_stack_ssh() { shift; printf '%s\n' "$*" >"$captured"; cat >/dev/null 2>&1 || true; return 0; }
 _fleet_satellite_register_node 2201 "fleet-rhel9" >/dev/null 2>&1 || true
 
-if grep -q 'activationkey' "$captured" && grep -q 'Demo_Org' "$captured"; then
+if grep -q 'activationkey' "$captured" && grep -q 'org_label' "$captured"; then
   _pass "payload_uses_org_label"
 else
   _fail "payload_uses_org_label"
@@ -118,6 +122,16 @@ if grep -q 'read -r ak_name sat_host' "$captured"; then
   _pass "host_read_from_stdin"
 else
   _fail "host_read_from_stdin"
+fi
+if grep -q 'current_server' "$captured" && grep -q 'subscription-manager unregister' "$captured"; then
+  _pass "migrates_registration_from_other_rhsm_server"
+else
+  _fail "migrates_registration_from_other_rhsm_server"
+fi
+if grep -q 'org ID:' "$captured" && grep -q 'server.hostname' "$captured"; then
+  _pass "verifies_satellite_server_and_organization"
+else
+  _fail "verifies_satellite_server_and_organization"
 fi
 
 # --- host validation rejects shell metacharacters ------------------------------

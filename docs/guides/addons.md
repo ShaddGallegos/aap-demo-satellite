@@ -74,6 +74,57 @@ in AAP until you delete them in the UI.
 
 The cluster still wants about 8 processors and 24 GB of memory. Demo jobs add work on top of AAP.
 
+## Satellite subscriptions in the full demo
+
+When using the [older command](older-command.md), `aap-demo create --full-demo --satellite`
+also prepares and imports the Satellite subscription manifest. There is no separate
+`fleet auth` or `enable satellite-manifest` step for an interactive full-demo run:
+it checks Red Hat credentials first and prompts securely if they need configuration.
+With `QUIET=true`, configure credentials before starting.
+
+The manifest addon reuses the `aap-demo-satellite` allocation and its existing
+subscriptions. For each missing category, Satellite Infrastructure and RHEL server,
+it attaches one entitlement only if there is exactly one eligible pool. It never
+buys subscriptions. Missing or ambiguous choices stop the command with guidance
+to select subscriptions in Red Hat Console, rather than importing an empty manifest.
+This minimum enables content setup; it does not determine your host licensing requirements.
+
+Rerunning full-demo detects the installed Satellite RPM rather than assuming
+that a VM is already configured. It preserves existing installer settings,
+applies package updates and supported adjacent minor upgrades through
+`satellite-maintain`, then refreshes/imports the manifest without rebuilding
+the VM or synchronizing repositories. Each changing step requires a successful
+full offline backup and maintenance checks. Allow for Satellite downtime and
+automatic reboots; backup or check failures stop the run.
+See the [lab maintenance guide](../../satellite-lab/README.md#existing-installations-and-maintenance)
+for backup storage and failure recovery.
+See the [manifest addon guide](../../addons/satellite-manifest/README.md)
+for supported subscription names, permissions, and a manifest-only command.
+
+The Satellite demo also detects the organization that actually owns the published
+RHEL9/RHEL10 views, rather than assuming upstream's RHEL7/RHEL8 repositories exist.
+It uses the lab's DEV → TEST → PROD path, wires credentials and workflow targets,
+and synchronizes Satellite inventory with Fleet's forwarded SSH addresses.
+If multiple organizations match, set `SAT_ORG` explicitly.
+
+Enabling this local-lab profile also registers running RHEL9 Fleet nodes through
+Satellite, migrating any direct Red Hat registration only after checking the
+Satellite connection and consumer package. A custom APD SSH credential or a
+registration in a different Satellite organization stops reconciliation rather
+than being silently replaced.
+
+After a successful enable, `aap-demo wire` repeats this reconciliation. Wiring
+itself never runs patching or reboot jobs. It also distributes the shared Fleet
+SSH identity to `admin` and `root` on running Fleet/Satellite nodes, and to
+`core` on CRC (using `sudo` for root operations). Managed lab SSH aliases disable
+host-key checking; host-wide SSH defaults and host accounts are unchanged.
+This shared-key policy is only for local disposable labs; see the
+[SSH details](../../satellite-lab/README.md#shared-lab-ssh-access).
+OpenSCAP still needs version-appropriate policy
+content; the local profile does not import the upstream RHEL7/RHEL8 tailoring files.
+See the [Satellite demo guide](../../addons/product-demo-satellite/README.md)
+for local versus external Satellite behavior.
+
 ## Everything else
 
 Portal, Automation Orchestrator, a local cache of container images, and the MCP server are not in the

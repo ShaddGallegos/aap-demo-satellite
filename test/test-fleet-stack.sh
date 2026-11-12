@@ -6,6 +6,7 @@ TEST_DIR=$(mktemp -d)
 trap 'rm -rf "$TEST_DIR"' EXIT
 source "$REPO_ROOT/includes/fleet-stack.sh"
 source "$REPO_ROOT/includes/fleet-stack-remote.sh"
+lab_reconcile_ssh() { :; }
 _err() { printf 'ERROR: %s\n' "$*" >&2; }
 
 printf '127.0.0.1 localhost\n192.0.2.9 custom.example custom\n' >"$TEST_DIR/hosts"
@@ -56,7 +57,7 @@ grep -q '192.168.127.2 api.crc.testing api' <<<"$stack_hosts"
 grep -q '192.0.2.10 aap.apps.127.0.0.1.nip.io aap' <<<"$stack_hosts"
 grep -q 'Port 2202' <<<"$stack_config"
 ! grep -q 'Port 2203' <<<"$stack_config"
-grep -q 'StrictHostKeyChecking yes' <<<"$stack_config"
+grep -q 'StrictHostKeyChecking no' <<<"$stack_config"
 test "$(wc -l <<<"$stack_keys")" -eq 2
 grep -q 'aap-fleet-node-2.fleet.aap-demo.test ssh-ed25519 BBBB host-2202' <<<"$stack_known_hosts"
 fleet_access_inventory() {

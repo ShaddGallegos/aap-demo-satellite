@@ -76,14 +76,14 @@ fi
 rm -f "$ssh_config"
 REMOTE
   } | ssh -p "$port" -i "$root/ssh_key" \
-    -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$root/known_hosts" \
+    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     -o LogLevel=ERROR -o ConnectTimeout=10 -o BatchMode=yes \
     ansible@127.0.0.1 'bash -s'; then
     _err "Could not configure admin SSH access for Fleet node $index"
     return 1
   fi
   guest_ip=$(ssh -p "$port" -i "$root/ssh_key" \
-    -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$root/known_hosts" \
+    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     -o LogLevel=ERROR -o ConnectTimeout=10 -o BatchMode=yes \
     admin@127.0.0.1 "hostname -I | awk '{print \$1}'") || return 1
   printf '%s\n' "$guest_ip" >"$root/node-$index/guest_ip"

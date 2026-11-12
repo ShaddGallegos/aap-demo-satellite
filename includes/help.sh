@@ -26,8 +26,9 @@ Cluster
   repair            Repair the cluster after a crash
   trust-ca          Repair ingress certificate trust only
   setup             Run setup only (storage, CoreDNS)
-  storage [DISK] [PV]
+  storage [DISK_GB] [PV_GB]
                     Show or change the VM disk and persistent-volume size
+                    Disk must be at least 31GB and the PV pool at least 15GB
   kubeconfig        Extract and merge kubeconfig
   redeploy-all      Destroy the cluster and redeploy fresh
 
@@ -112,7 +113,8 @@ Notes
   maintenance [--apply]
                       Preview or remove safe-to-delete VM data
   maintenance uninstall [--apply]
-                      Remove all aap-demo state; requires
+                      Remove CRC, Fleet, managed Satellite VM/disk, and local state.
+                      Noninteractive apply requires
                       AAP_DEMO_UNINSTALL_CONFIRM=UNINSTALL with QUIET=true
   create --full-demo  Build AAP, Product Demos, AO/Ollama, Fleet, and dashboard
   fleet               add, list, remove, destroy
@@ -149,15 +151,75 @@ EOF
   cat <<EOF
 
 Examples
-  aap-demo create
-  aap-demo create --full-demo --satellite --sno
-  aap-demo deploy
-  aap-demo status
-  aap-demo enable portal
-  aap-demo enable fleet
-  aap-demo fleet add 3 --image rhel9
-  aap-demo redeploy-all
-  aap-demo idle true
+  Choose the task you need below; do not run every group as one script.
+  Text after # explains a command; you can type just the command before it.
+
+  First deployment, step by step
+    aap-demo create                       # Create the local cluster first
+    aap-demo deploy                       # Install AAP into that cluster
+    aap-demo watch                        # Follow progress; Ctrl+C stops watching
+    aap-demo status                       # Find the web address and check readiness
+    aap-demo status --show-secrets        # Reveal login details in your terminal
+    Keep those credentials private; do not paste them into logs or messages.
+
+  All-in-one demo instead of the manual deployment above (choose one)
+    aap-demo create --full-demo           # AAP, demo content, AO/Ollama, Fleet, dashboard
+    aap-demo create --full-demo --microshift
+                                         # Choose the smaller MicroShift cluster
+    aap-demo create --full-demo --satellite --sno
+                                         # Full OpenShift console plus the Satellite lab
+    Satellite requires Red Hat subscriptions and a Linux KVM/libvirt host.
+    Reruns reuse Satellite, but maintenance can stop services and reboot its VM.
+    Ensure there is room for the required backup before rerunning with --satellite.
+
+  Optional addons, after AAP is deployed (choose only what you need)
+    aap-demo enable                       # List the available addons
+    aap-demo enable portal                # Add the self-service portal
+    aap-demo enable mcp-server            # Expose AAP tools to AI assistants
+    aap-demo enable ollama                # Add the local language-model service
+    aap-demo enable ao                    # Add Automation Orchestrator
+    aap-demo enable product-demos         # Install the non-Satellite demo content
+
+  Add three RHEL practice machines (Fleet uses local QEMU VMs)
+    aap-demo fleet auth                   # Securely configure Red Hat credentials
+    aap-demo enable fleet                 # Enable Fleet before adding machines
+    aap-demo fleet add 3 --image rhel9     # Download/cache RHEL 9 and create three VMs
+    aap-demo fleet list                   # Check machine names and running state
+    aap-demo fleet start                  # Start any preserved, stopped Fleet VMs
+    aap-demo fleet register               # License AAP if needed, add hosts, test access
+    aap-demo fleet ssh 1                  # Open node 1's admin shell; exit to return
+    RHEL image downloads require an entitled Red Hat account.
+
+  Connect an existing Satellite lab
+    aap-demo enable satellite-manifest    # Generate/download a manifest; no import here
+    aap-demo fleet satellite-register     # Register running Fleet nodes to Satellite
+    aap-demo wire                         # Reconcile installed components and integrations
+    The full-demo --satellite path also imports the manifest automatically.
+    Satellite registration can migrate Fleet nodes away from direct Red Hat registration.
+
+  Daily use: save resources without deleting your environment
+    aap-demo idle                         # Check whether AAP is currently scaled down
+    aap-demo idle true                    # Scale AAP down to save memory
+    aap-demo idle false                   # Scale AAP back up
+    aap-demo stop                         # Stop the local cluster
+    aap-demo start                        # Resume the cluster and configured demo
+    aap-demo dashboard                    # Open the local management dashboard
+
+  Check a problem before rebuilding
+    aap-demo preflight                    # Check tools, capacity, storage, and catalogs
+    aap-demo diagnose                     # Check workload, storage, and DNS health
+    aap-demo must-gather                  # Save diagnostic files for troubleshooting
+    aap-demo maintenance                  # Preview reclaimable VM data; deletes nothing
+    Review diagnostic files before sharing them; they may contain sensitive details.
+
+  Remove or rebuild only when you intend to lose the existing deployment
+    WARNING: These operations remove resources/data. Back up anything you need first.
+    aap-demo clean                        # Remove AAP but keep the cluster
+    aap-demo redeploy-all                 # Delete the cluster and rebuild the deployment
+    aap-demo destroy                      # Delete the local cluster
+
+  More step-by-step guides:
+    https://github.com/RedHatOfficial/aap-demo/blob/main/docs/guides/older-command.md
 
 Requirements
   - OpenShift Local — https://console.redhat.com/openshift/create/local

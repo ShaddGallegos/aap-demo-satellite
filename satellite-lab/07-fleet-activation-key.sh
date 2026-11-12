@@ -20,8 +20,7 @@ LCE="${SAT_FLEET_LCE:-Library}"
 _log() { printf '  %s\n' "$*"; }
 _err() { printf 'ERROR: %s\n' "$*" >&2; }
 
-# Pick the content view that actually has repositories. RHEL9 is the fleet
-# default; fall back to RHEL10 when RHEL9 is empty. The REPOSITORY IDS column
+# Require repositories for the selected RHEL major. The REPOSITORY IDS column
 # is the last pipe-separated field on the row whose NAME matches exactly.
 _cv_has_repos() {
   local cv="$1"
@@ -34,13 +33,8 @@ _cv_has_repos() {
 
 TARGET_CV="$CV_NAME"
 if ! _cv_has_repos "$CV_NAME"; then
-  if _cv_has_repos "RHEL10"; then
-    _log "Content view $CV_NAME has no repositories; using RHEL10"
-    TARGET_CV="RHEL10"
-  else
-    _err "Neither $CV_NAME nor RHEL10 content view has repositories; run 03-content first"
-    exit 1
-  fi
+  _err "Content view $CV_NAME has no repositories in $ORG; refusing to use a different RHEL major"
+  exit 1
 fi
 
 # Create the activation key if missing.
@@ -57,7 +51,7 @@ fi
 # Bind it to the content view environment and enable auto-attach (SCA).
 hammer activation-key update --organization "$ORG" --name "$AK_NAME" \
   --content-view "$TARGET_CV" --lifecycle-environment "$LCE" \
-  --auto-attach true >/dev/null 2>&1 || true
+  --auto-attach true >/dev/null
 
 _log "✓ Activation key ready: $AK_NAME (org: $ORG, cv: $TARGET_CV, lce: $LCE)"
 printf '%s\n' "$AK_NAME"

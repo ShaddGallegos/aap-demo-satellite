@@ -57,6 +57,11 @@
       "host_gib": 0,
       "description": "Keycloak OIDC provider and its PostgreSQL database."
     },
+    "lightspeed": {
+      "vm_gib": 2,
+      "host_gib": 0,
+      "description": "Ansible Lightspeed operator, service images, PostgreSQL, and logs; the Ollama model is estimated separately."
+    },
     "local-cache": {
       "vm_gib": 0,
       "host_gib": 40,

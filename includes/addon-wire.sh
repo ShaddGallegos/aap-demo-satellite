@@ -825,6 +825,28 @@ wire_ao_ensure_integration() {
   printf '%s' "$integration_id"
 }
 
+wire_apd_satellite() {
+  # Only the local-lab profile opts into automatic Fleet registration.
+  # shellcheck source=../addons/product-demos-base/lib.sh
+  source "${REPO_ROOT}/addons/product-demos-base/lib.sh"
+  apd_addon_enabled product-demo-satellite || return 0
+  apd_init_aap_connection || return 1
+  # shellcheck source=../addons/product-demo-satellite/lib.sh
+  source "${REPO_ROOT}/addons/product-demo-satellite/lib.sh"
+  apd_satellite_is_lab || return 0
+  local template
+  template=$(apd_satellite_template "SETUP | Satellite") || return 1
+  [ "$(jq -r '.playbook' <<<"$template")" = setup-satellite-lab.yml ] || return 0
+  wire_log "Reconciling Satellite lab credentials, Fleet registration and inventory..."
+  apd_resolve_domain_install_ids || return 1
+  apd_discover_satellite_lab || return 1
+  apd_stage_satellite_lab_playbooks || return 1
+  apd_wire_satellite_credentials || return 1
+  apd_configure_satellite_lab_templates || return 1
+  apd_register_satellite_lab_fleet || return 1
+  apd_sync_satellite_lab_inventory
+}
+
 wire_apd_openshift() {
   if ! wire_apd_installed; then
     return 0
@@ -1285,10 +1307,12 @@ aap_demo_wire() {
   wire_apd_aap_credential
   wire_apd_galaxy_if_present
   wire_apd_openshift
+  wire_apd_satellite || return 1
   if compgen -G "${AAP_DEMO_DIR:-$HOME/.aap-demo}/fleet/node-*/meta" >/dev/null; then
     wire_log "Reconciling Fleet SSH access and AAP inventory..."
     # shellcheck source=fleet-access.sh
     source "${_WIRE_SCRIPT_DIR}/fleet-access.sh"
+    fleet_reconcile_stack || return 1
     fleet_reconcile_existing_inventory || return 1
   fi
   wire_restore_coredns_route_rewrite || wire_warn "CoreDNS route rewrite skipped"

@@ -1,0 +1,37 @@
+---
+- name: Configure published local Satellite content for the demo
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Validate discovered lab content
+      ansible.builtin.assert:
+        that:
+          - satellite_lab_content_views | length > 0
+          - satellite_organization | length > 0
+          - satellite_lab_environments == ['DEV', 'TEST', 'PROD']
+
+    - name: Ensure the lab lifecycle path
+      redhat.satellite.lifecycle_environment:
+        organization: "{{ satellite_organization }}"
+        name: "{{ item }}"
+        prior: "{{ 'Library' if environment_index == 0 else satellite_lab_environments[environment_index - 1] }}"
+      loop: "{{ satellite_lab_environments }}"
+      loop_control:
+        index_var: environment_index
+
+    - name: Promote existing published versions without publishing or syncing repositories
+      redhat.satellite.content_view_version:
+        organization: "{{ satellite_organization }}"
+        content_view: "{{ item.name }}"
+        version: "{{ item.latest_version }}"
+        lifecycle_environments: "{{ satellite_lab_environments }}"
+      loop: "{{ satellite_lab_content_views }}"
+
+    - name: Ensure activation keys for the published lab views
+      redhat.satellite.activation_key:
+        organization: "{{ satellite_organization }}"
+        name: "ak-{{ item.0.name | lower }}-{{ item.1 | lower }}"
+        content_view: "{{ item.0.name }}"
+        lifecycle_environment: "{{ item.1 }}"
+        unlimited_hosts: true
+      loop: "{{ satellite_lab_content_views | product(satellite_lab_environments) | list }}"

@@ -42,17 +42,30 @@ aap_demo_active_pods_ready() {
   local namespace="$1"
   local selector="${2:-}"
   local args=(-n "$namespace" -o json)
+  local pods needs_jobs jobs='{"items":[]}'
   [ -z "$selector" ] || args+=(-l "$selector")
 
-  kubectl get pods "${args[@]}" 2>/dev/null | jq -e '
-    ([.items[]
-      | select(.status.phase != "Succeeded")
-      | select(
-          .status.phase == "Running"
-          and any(.status.conditions[]?; .type == "Ready" and .status == "True")
-        )
-    ] | length)
-    ==
-    ([.items[] | select(.status.phase != "Succeeded")] | length)
-  ' >/dev/null
+  pods=$(kubectl get pods "${args[@]}") || return 1
+  needs_jobs=$(jq -r '
+    any(.items[];
+      .status.phase == "Failed"
+      and any(.metadata.ownerReferences[]?; .kind == "Job" and .controller == true))
+  ' <<<"$pods") || return 1
+  if [ "$needs_jobs" = true ]; then
+    jobs=$(kubectl get jobs -n "$namespace" -o json) || return 1
+  fi
+
+  jq -e --argjson jobs "$jobs" '
+    all(.items[];
+      .status.phase == "Succeeded"
+      or (.status.phase == "Running"
+          and any(.status.conditions[]?; .type == "Ready" and .status == "True"))
+      or (.status.phase == "Failed"
+          and any(.metadata.ownerReferences[]?;
+            .kind == "Job" and .controller == true
+            and (.uid as $uid | any($jobs.items[];
+              .metadata.uid == $uid
+              and any(.status.conditions[]?; .type == "Complete" and .status == "True")))))
+    )
+  ' <<<"$pods" >/dev/null
 }

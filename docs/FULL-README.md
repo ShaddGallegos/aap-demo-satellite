@@ -436,7 +436,8 @@ namespaces, PVCs, and the optional local image cache. It also vacuums system
 journals older than seven days and reports the VM disk space reclaimed.
 
 `maintenance uninstall --apply` requires typing `UNINSTALL` and removes the CRC
-cluster, Fleet VMs and images, CRC downloads, generated credentials and caches,
+cluster, Fleet VMs and images, the managed Satellite lab VM and its OS disk,
+CRC downloads, generated credentials and caches,
 temporary swap, ingress trust entries, MCP/shell integration, CLI symlink, and
 completions. It also stops the dashboard, removes recovery services and backups,
 and deletes `~/.aap-demo`. The encrypted credential Vault is preserved intact —
@@ -448,6 +449,9 @@ deleted, because other products and projects use them — only the aap-demo
 entries are removed. The source repository, shared command-line tools/packages,
 unrelated Vault keys, and libvirt group membership are preserved. For
 noninteractive use, also set `AAP_DEMO_UNINSTALL_CONFIRM=UNINSTALL`.
+External Satellite servers, additional attached disks, host-side Satellite
+NFS/Pulp content and backups, ISO files, and shared libvirt networks are preserved.
+Satellite cleanup failures stop the uninstall before local state is removed.
 
 Retained passwords and tokens are stored under the `aap_demo` namespace and
 the `ah_offline_token` key in Ansible Vault-encrypted `~/.ansible/conf/env.yml`, using

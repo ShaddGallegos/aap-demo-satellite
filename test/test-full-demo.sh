@@ -80,12 +80,9 @@ _aap_demo_auto_console() {
 }
 
 # Overridable satellite helpers (mirror the defaults in aap-demo.sh).
-_full_demo_satellite_vm_exists() {
-  [ "${SATELLITE_VM_EXISTS:-false}" = true ]
-}
-
 _full_demo_satellite_build() {
   printf 'satellite build-and-configure\n' >>"$LOG_FILE"
+  [ "${FAIL_SATELLITE_BUILD:-false}" != true ]
 }
 
 full_demo_function=$(sed -n '/^cmd_full_demo()/,/^}$/p' "$AAP_DEMO_SH")
@@ -174,17 +171,25 @@ if ! cmp -s "$LOG_FILE" "$LOG_FILE.expected"; then
 fi
 rm -f "$LOG_FILE.expected"
 
-# With --satellite and an existing Satellite VM, the build is skipped.
+# Existing VMs also enter the state-aware builder, which decides maintenance vs install.
 : >"$LOG_FILE"
 FULL_DEMO_SATELLITE=true SATELLITE_VM_EXISTS=true cmd_full_demo >/dev/null
-if grep -Fq 'satellite build-and-configure' "$LOG_FILE"; then
-  echo "FAIL: satellite build ran even though the VM already exists"
-  exit 1
-fi
+grep -Fxq 'satellite build-and-configure' "$LOG_FILE"
 grep -Fq 'enable product-demo-satellite' "$LOG_FILE" || {
   echo "FAIL: satellite demo content was not installed with an existing VM"
   exit 1
 }
+: >"$LOG_FILE"
+if FULL_DEMO_SATELLITE=true SATELLITE_VM_EXISTS=true FAIL_SATELLITE_BUILD=true \
+  cmd_full_demo >"$LOG_FILE.output" 2>&1; then
+  echo "FAIL: full demo reported success after Satellite reconciliation failure"
+  exit 1
+fi
+grep -Fq 'ERROR: Satellite Build and Configure failed' "$LOG_FILE.output"
+if grep -Fq 'enable product-demo-satellite' "$LOG_FILE" || grep -Fxq wire "$LOG_FILE"; then
+  echo "FAIL: full demo continued after Satellite manifest failure"
+  exit 1
+fi
 
 : >"$LOG_FILE"
 if FAIL_SERVICE_INSTALL=true cmd_full_demo >"$LOG_FILE.output" 2>&1; then

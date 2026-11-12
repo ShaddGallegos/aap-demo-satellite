@@ -114,6 +114,7 @@ _maintenance_uninstall_preview() {
   echo "The following aap-demo-managed resources will be permanently removed:"
   echo "  • CRC/MicroShift VM, containers, volumes, and libvirt resources"
   echo "  • All Fleet VMs, overlays, SSH keys, and cached Fleet images"
+  echo "  • Managed Satellite lab VM and /var/lib/libvirt/images/satellite.qcow2"
   echo "  • Downloaded CRC bundle and cache: ${crc_dir}"
   echo "  • Generated credentials, kubeconfig, addon state, caches, and virtualenvs"
   if [ "$reconfigure" = true ]; then
@@ -139,6 +140,8 @@ _maintenance_uninstall_preview() {
   fi
   echo "  • Unrelated keys in $HOME/.ansible/conf/env.yml"
   echo "  • Shared OS packages, command-line tools, and libvirt group membership"
+  echo "  • External Satellite servers, additional VM disks, shared libvirt networks,"
+  echo "    ISO files, and host-side Satellite NFS content/backups"
   echo ""
   du -sh "$data_dir" "$crc_dir" 2>/dev/null | sed 's/^/  /' || true
 }
@@ -279,6 +282,61 @@ _maintenance_remove_managed_credentials() {
   aap_demo_vault_remove_managed
 }
 
+_maintenance_remove_satellite() {
+  local disk=/var/lib/libvirt/images/satellite.qcow2 domains interfaces disks active
+  local -x LC_ALL=C
+  [ "$(uname -s)" = Linux ] || return 0
+  if ! command -v virsh >/dev/null 2>&1; then
+    if sudo test -e "$disk"; then
+      echo "ERROR: Satellite disk exists but virsh is unavailable; cannot safely remove the VM." >&2
+      return 1
+    fi
+    return 0
+  fi
+  domains=$(sudo virsh -c qemu:///system list --all --name) || {
+    echo "ERROR: Cannot discover Satellite VM state; preserving the environment for retry." >&2
+    return 1
+  }
+  grep -Fxq satellite <<<"$domains" || return 0
+  interfaces=$(sudo virsh -c qemu:///system domiflist satellite) || return 1
+  disks=$(sudo virsh -c qemu:///system domblklist satellite --details) || return 1
+  # Older labs have no ownership marker; match the provisioner's disk and both NICs.
+  if ! awk '
+    $2 == "network" && $3 == "default" && tolower($5) == "52:54:00:5a:7e:01" {host=1}
+    $2 == "network" && $3 == "satlab" && tolower($5) == "52:54:00:5a:7e:02" {lab=1}
+    END {exit !(host && lab)}
+  ' <<<"$interfaces" || ! awk -v disk="$disk" '
+    $1 == "file" && $2 == "disk" && $4 == disk {found++}
+    END {exit found != 1}
+  ' <<<"$disks"; then
+    echo "ERROR: Domain 'satellite' does not match the managed lab; refusing to delete it." >&2
+    return 1
+  fi
+  echo "  Removing managed Satellite lab VM and OS disk..."
+  sudo virsh -c qemu:///system autostart satellite --disable || return 1
+  active=$(sudo virsh -c qemu:///system list --name) || return 1
+  if grep -Fxq satellite <<<"$active"; then
+    sudo virsh -c qemu:///system destroy satellite || {
+      echo "ERROR: Satellite VM did not stop; preserving its disk and host state." >&2
+      return 1
+    }
+    active=$(sudo virsh -c qemu:///system list --name) || return 1
+    if grep -Fxq satellite <<<"$active"; then
+      echo "ERROR: Satellite VM is still active; refusing to remove its disk." >&2
+      return 1
+    fi
+  fi
+  # Keep the definition until disk removal succeeds, so a failed removal can be retried.
+  sudo rm -f -- "$disk" || return 1
+  sudo virsh -c qemu:///system undefine satellite --managed-save --nvram \
+    --snapshots-metadata --checkpoints-metadata || return 1
+  domains=$(sudo virsh -c qemu:///system list --all --name) || return 1
+  if grep -Fxq satellite <<<"$domains"; then
+    echo "ERROR: Satellite VM definition still exists after cleanup." >&2
+    return 1
+  fi
+}
+
 _maintenance_uninstall_apply() {
   local reconfigure="${1:-false}"
   local data_dir="${AAP_DEMO_DIR:-$HOME/.aap-demo}"
@@ -292,6 +350,7 @@ _maintenance_uninstall_apply() {
   echo "Removing aap-demo environment..."
 
   _maintenance_stop_dashboard || return 1
+  _maintenance_remove_satellite || return 1
 
   if command -v claude >/dev/null 2>&1; then
     claude mcp remove aap-demo --scope user >/dev/null 2>&1 || true

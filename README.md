@@ -93,7 +93,7 @@ aap-demo enable product-demos        # Five domains at once (includes base; Sate
 aap-demo enable product-demo-satellite  # Satellite demos (requires a Satellite server)
 
 # Satellite lab
-aap-demo enable satellite-manifest   # Create + download a Satellite subscription manifest
+aap-demo enable satellite-manifest   # Attach eligible subscriptions, create + download a manifest
                                      # via the RHSM API (for satellite-lab/03-content-hammer.sh)
 aap-demo fleet satellite-register    # Register running Fleet nodes to the Satellite lab
                                      # (content from local Pulp; hosts appear in the Satellite inventory)

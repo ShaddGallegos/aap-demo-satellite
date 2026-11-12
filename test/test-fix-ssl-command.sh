@@ -38,8 +38,26 @@ fi
 
 echo "PASS: targeted SSL repair installs and verifies trust without cluster repair"
 
+test_dir=$(mktemp -d)
+trap 'rm -f "$test_dir/source" "$test_dir/anchor"; rmdir "$test_dir"' EXIT
+printf 'test certificate\n' >"$test_dir/source"
+chmod 600 "$test_dir/source"
+sudo() { "$@"; }
+_ingress_ca_install_anchor "$test_dir/source" "$test_dir/anchor"
+[ "$(ls -l "$test_dir/anchor" | cut -c1-10)" = "-rw-r--r--" ] || {
+  echo "FAIL: newly installed ingress CA anchor is not publicly readable" >&2
+  exit 1
+}
+chmod 600 "$test_dir/anchor"
+_ingress_ca_install_anchor "$test_dir/source" "$test_dir/anchor"
+[ "$(ls -l "$test_dir/anchor" | cut -c1-10)" = "-rw-r--r--" ] || {
+  echo "FAIL: existing ingress CA anchor permissions were not repaired" >&2
+  exit 1
+}
+echo "PASS: Linux ingress CA anchors are installed with readable permissions"
+
 output="$("${SCRIPT_DIR}/../aap-demo.sh" help 2>&1)"
-if grep -qE '^    trust-ca[[:space:]]+Repair ingress certificate trust only$' <<<"$output"; then
+if grep -qE '^[[:space:]]+trust-ca[[:space:]]+Repair ingress certificate trust only$' <<<"$output"; then
   echo "PASS: dedicated SSL trust command is documented"
 else
   echo "FAIL: help must expose trust-ca separately from cluster repair" >&2

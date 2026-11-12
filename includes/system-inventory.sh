@@ -404,11 +404,11 @@ _aap_demo_inventory_vm() {
       "$(df -BG --output=used /var 2>/dev/null | tail -n 1 | tr -d " G")" \
       "$(df -BG --output=avail /var 2>/dev/null | tail -n 1 | tr -d " G")"
   ' 2>/dev/null || true)
-  IFS=$'\t' read -r guest_os openshift cpus memory_used memory_total memory_available load disk \
-    disk_total_gib disk_used_gib disk_free_gib <<<"$vm_info"
-  # On the OpenShift preset the VM has no microshift binary, so the version
-  # field comes back empty and shifts every later field left. Fall back to the
-  # host-side `crc version` OpenShift version.
+  # Bash read collapses tab delimiters; use a non-whitespace separator to
+  # preserve empty fields, notably the MicroShift version on SNO.
+  IFS=$'\037' read -r guest_os openshift cpus memory_used memory_total memory_available load disk \
+    disk_total_gib disk_used_gib disk_free_gib <<<"${vm_info//$'\t'/$'\037'}"
+  # SNO has no MicroShift version; use the host-side CRC version instead.
   if [ -z "$openshift" ] || [ "$openshift" = "unknown" ]; then
     openshift=$(crc version 2>/dev/null | awk -F': *' '/^OpenShift version:/ {print $2}' || true)
     openshift="${openshift:-unknown}"

@@ -49,7 +49,7 @@ _addons_list() {
 }
 
 infra_exec_cmd() {
-  printf 'Test RHEL\t4.22.1\t8\t4Gi\t16Gi\t12Gi\t0.1 0.2 0.3\t10G/50G (20%% used)\t50\t10\t40\n'
+  printf 'Test RHEL\t%s\t8\t4Gi\t16Gi\t12Gi\t0.1 0.2 0.3\t10G/50G (20%% used)\t50\t10\t40\n' "${MOCK_VM_VERSION-4.22.1}"
 }
 
 aap_demo_resolve_kubeconfig() {
@@ -140,6 +140,24 @@ omitted_inventory=$(aap_demo_collect_system_inventory omit)
 [ "$(jq -r '.storage.capacity_planning.needs_rebuild' <<<"$include_inventory")" = true ]
 [ "$(jq -r '.storage.capacity_planning.configured_not_applied' <<<"$include_inventory")" = true ]
 [ "$(jq -r '.storage.capacity_planning.projected_vm_disk_gib.ollama' <<<"$include_inventory")" = 220 ]
+
+MOCK_VM_VERSION=""
+crc() {
+  [ "$*" = version ] || return 1
+  printf 'CRC version: 2.61.0\nOpenShift version: 4.22.14\n'
+}
+sno_vm=$(_aap_demo_inventory_vm)
+jq -e '
+  .openshift_version == "4.22.14"
+  and .cpus == "8"
+  and .memory == {used: "4Gi", total: "16Gi", available: "12Gi"}
+  and .load == "0.1 0.2 0.3"
+  and .disk == "10G/50G (20% used)"
+  and .disk_gib == {size: 50, used: 10, free: 40}
+' <<<"$sno_vm" >/dev/null
+sno_storage=$(_aap_demo_inventory_storage "mcp-server ao" "$sno_vm")
+[ "$(jq -r '.actual_vm_free_gib' <<<"$sno_storage")" = 40 ]
+unset MOCK_VM_VERSION
 
 unset CRC_DISK VM_DISK_SIZE
 export INFRA_TYPE=crc

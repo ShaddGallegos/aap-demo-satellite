@@ -3,13 +3,14 @@
 if [ -n "${_FLEET_STACK_LOADED:-}" ]; then return 0; fi
 _FLEET_STACK_LOADED=1
 FLEET_STACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lab-ssh.sh
+source "$FLEET_STACK_DIR/lab-ssh.sh"
 
 fleet_stack_ssh() {
   local port="$1"
   shift
   ssh -p "$port" -i "${AAP_DEMO_DIR:-$HOME/.aap-demo}/fleet/ssh_key" \
-    -o StrictHostKeyChecking=yes \
-    -o UserKnownHostsFile="${AAP_DEMO_DIR:-$HOME/.aap-demo}/fleet/known_hosts" \
+    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     -o LogLevel=ERROR -o ConnectTimeout=10 -o BatchMode=yes ansible@127.0.0.1 "$@"
 }
 
@@ -103,7 +104,7 @@ fleet_reconcile_stack() {
     stack_config+="    IdentitiesOnly yes"$'\n'
     stack_config+="    HostKeyAlias $fqdn"$'\n'
     stack_config+="    UserKnownHostsFile ~/.ssh/aap-demo-known_hosts"$'\n'
-    stack_config+="    StrictHostKeyChecking yes"$'\n'
+    stack_config+="    StrictHostKeyChecking no"$'\n'
   done < <(jq -c '.[]' <<<"$running")
   stack_config+=$'Host *\n'
   while IFS= read -r row; do
@@ -118,5 +119,6 @@ fleet_reconcile_stack() {
       _err "Stack reconciliation failed on Fleet node $index"; return 1
     fi
   done < <(jq -c '.[]' <<<"$running")
+  lab_reconcile_ssh "$gateway" || return 1
   printf '  ✓ Fleet public keys, SSH aliases, and full-stack hosts reconciled\n'
 }

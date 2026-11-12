@@ -290,17 +290,21 @@ _fetch_ingress_ca_from_cluster() {
   return 1
 }
 
+_ingress_ca_install_anchor() {
+  sudo install -m 0644 "$1" "$2"
+}
+
 _import_ingress_ca_linux() {
   local path="$1"
 
   if [ -d /etc/pki/ca-trust/source/anchors ]; then
-    if sudo cp "$path" "$_INGRESS_CA_RHEL_ANCHOR" \
+    if _ingress_ca_install_anchor "$path" "$_INGRESS_CA_RHEL_ANCHOR" \
       && sudo update-ca-trust; then
       echo "  ✓ Ingress CA trusted (system ca-trust)"
       return 0
     fi
   elif [ -d /usr/local/share/ca-certificates ]; then
-    if sudo cp "$path" "$_INGRESS_CA_DEBIAN_ANCHOR" \
+    if _ingress_ca_install_anchor "$path" "$_INGRESS_CA_DEBIAN_ANCHOR" \
       && sudo update-ca-certificates; then
       echo "  ✓ Ingress CA trusted (system ca-certificates)"
       return 0

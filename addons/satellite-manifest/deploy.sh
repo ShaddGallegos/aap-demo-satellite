@@ -95,28 +95,51 @@ EOF
 
 # --- Manifest workflow ------------------------------------------------------
 
+_satellite_manifest_list() {
+  local path="$1" limit="$2" offset=0 out body count
+  local pages='[]'
+  while true; do
+    out=$(_rhsm_api GET "${path}?offset=${offset}&limit=${limit}") || return $?
+    RHSM_HTTP_CODE="${out%%$'\n'*}"
+    body="${out#*$'\n'}"
+    _rhsm_require_permission || return 1
+    [ "$RHSM_HTTP_CODE" = 200 ] || { _err "Listing ${path} failed (HTTP $RHSM_HTTP_CODE)"; return 1; }
+    count=$(printf '%s' "$body" | python3 -c '
+import json
+import sys
+data = json.load(sys.stdin)["body"]
+if not isinstance(data, list):
+    sys.exit("ERROR: RHSM list response body must be an array")
+print(len(data))
+') || return 1
+    pages=$(printf '%s\n%s' "$pages" "$body" | python3 -c '
+import json
+import sys
+pages = json.loads(sys.stdin.readline())
+pages.extend(json.load(sys.stdin)["body"])
+print(json.dumps(pages))
+') || return 1
+    [ "$count" -lt "$limit" ] && break
+    offset=$((offset + count))
+  done
+  printf '%s' "$pages"
+}
+
 _satellite_manifest_find_allocation() {
   # Print the UUID of an existing allocation named MANIFEST_NAME, if any.
-  local out body
-  out=$(_rhsm_api GET "/allocations") || return $?
-  RHSM_HTTP_CODE="${out%%$'\n'*}"
-  body="${out#*$'\n'}"
-  _rhsm_require_permission || return 1
-  [ "$RHSM_HTTP_CODE" = 200 ] || { _err "Listing allocations failed (HTTP $RHSM_HTTP_CODE)"; return 1; }
-  printf '%s' "$body" | MANIFEST_NAME="$MANIFEST_NAME" python3 -c '
+  local allocations
+  allocations=$(_satellite_manifest_list "/allocations" 100) || return 1
+  printf '%s' "$allocations" | MANIFEST_NAME="$MANIFEST_NAME" python3 -c '
 import json
 import os
 import sys
 
 name = os.environ["MANIFEST_NAME"]
-try:
-    data = json.load(sys.stdin)
-except (ValueError, AttributeError):
-    raise SystemExit(0)
-for alloc in data.get("body", []):
-    if isinstance(alloc, dict) and alloc.get("name") == name:
-        print(alloc.get("uuid", ""))
-        break
+matches = [alloc for alloc in json.load(sys.stdin) if alloc["name"] == name]
+if len(matches) > 1:
+    sys.exit("ERROR: Multiple RHSM allocations have the requested name; choose a unique MANIFEST_NAME")
+if matches:
+    print(matches[0]["uuid"])
 '
 }
 
@@ -125,7 +148,8 @@ _satellite_manifest_create_allocation() {
   # so anything printed to stdout would contaminate it.
   echo "▸ Creating subscription allocation '${MANIFEST_NAME}' (${MANIFEST_SAT_VERSION})..." >&2
   local out body
-  out=$(_rhsm_api POST "/allocations?name=${MANIFEST_NAME}&version=${MANIFEST_SAT_VERSION}") || return $?
+  out=$(_rhsm_api POST "/allocations" --get \
+    --data-urlencode "name=${MANIFEST_NAME}" --data-urlencode "version=${MANIFEST_SAT_VERSION}") || return $?
   RHSM_HTTP_CODE="${out%%$'\n'*}"
   body="${out#*$'\n'}"
   _rhsm_require_permission || return 1
@@ -140,6 +164,103 @@ data = json.load(sys.stdin)
 body = data.get("body", data)
 print(body.get("uuid", "") if isinstance(body, dict) else "")
 '
+}
+
+_satellite_manifest_attachment_plan() {
+  python3 -c '
+import json
+import re
+import sys
+
+pools = json.loads(sys.stdin.readline())
+attached = json.load(sys.stdin)["body"]["entitlementsAttached"]["value"]
+if not isinstance(attached, list):
+    sys.exit("ERROR: RHSM entitlementsAttached.value must be an array")
+
+def category(name):
+    name = name.casefold()
+    if name.startswith("red hat satellite infrastructure subscription"):
+        return "Satellite Infrastructure"
+    if re.match(
+        r"red hat enterprise linux (?:server|for virtual datacenters)"
+        r"(?:$|, (?:premium|standard|self-support)(?:$| \())",
+        name,
+    ):
+        return "RHEL server"
+    return None
+
+covered = set()
+for item in attached:
+    quantity = item["entitlementQuantity"]
+    if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity < 0:
+        sys.exit("ERROR: Invalid attached entitlement quantity")
+    if quantity > 0:
+        covered.add(category(item["subscriptionName"]))
+
+plan = []
+for required in ("Satellite Infrastructure", "RHEL server"):
+    if required in covered:
+        continue
+    matches = {}
+    for pool in pools:
+        if category(pool["subscriptionName"]) != required:
+            continue
+        available = pool["entitlementsAvailable"]
+        if not isinstance(available, int) or isinstance(available, bool) or available < -1:
+            sys.exit("ERROR: Invalid available entitlement quantity")
+        if available == -1 or available >= 1:
+            pool_id = pool["id"]
+            if not isinstance(pool_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", pool_id):
+                sys.exit("ERROR: Invalid RHSM pool ID")
+            matches[pool_id] = pool["subscriptionName"]
+    if len(matches) != 1:
+        detail = ", ".join(f"{key} ({value})" for key, value in matches.items()) or "none"
+        sys.exit(
+            f"ERROR: Expected one eligible {required} pool; found {len(matches)}: {detail}. "
+            "Attach the desired subscription manually under Red Hat Console > "
+            "Subscriptions > Subscription Allocations, then rerun. "
+            "For unrecognized subscription names, supply an exported MANIFEST to the lab builder. "
+            "No subscriptions from this plan were attached."
+        )
+    plan.append(next(iter(matches)))
+
+# Emit only after every missing category has a unique candidate.
+print("\n".join(plan))
+'
+}
+
+_satellite_manifest_entitlements() {
+  local uuid="$1" out
+  out=$(_rhsm_api GET "/allocations/${uuid}?include=entitlements") || return $?
+  RHSM_HTTP_CODE="${out%%$'\n'*}"
+  _rhsm_require_permission || return 1
+  [ "$RHSM_HTTP_CODE" = 200 ] || { _err "Reading allocation entitlements failed (HTTP $RHSM_HTTP_CODE)"; return 1; }
+  printf '%s' "${out#*$'\n'}"
+}
+
+_satellite_manifest_attach() {
+  local uuid="$1" pools attached plan pool out
+  pools=$(_satellite_manifest_list "/allocations/${uuid}/pools" 50) || return 1
+  attached=$(_satellite_manifest_entitlements "$uuid") || return 1
+  plan=$(printf '%s\n%s' "$pools" "$attached" | _satellite_manifest_attachment_plan) || return 1
+  if [ -z "$plan" ]; then
+    echo "✓ Required Satellite and RHEL subscriptions are already attached"
+    return 0
+  fi
+  while IFS= read -r pool; do
+    echo "▸ Attaching one entitlement from pool ${pool}..."
+    out=$(_rhsm_api POST "/allocations/${uuid}/entitlements?pool=${pool}&quantity=1") || return $?
+    RHSM_HTTP_CODE="${out%%$'\n'*}"
+    _rhsm_require_permission || return 1
+    if [ "$RHSM_HTTP_CODE" != 200 ] && [ "$RHSM_HTTP_CODE" != 201 ]; then
+      _err "Attaching subscription pool ${pool} failed (HTTP $RHSM_HTTP_CODE)"
+      return 1
+    fi
+  done <<<"$plan"
+  # Read back the allocation rather than assuming a successful POST is enough.
+  attached=$(_satellite_manifest_entitlements "$uuid") || return 1
+  plan=$(printf '%s\n%s' '[]' "$attached" | _satellite_manifest_attachment_plan) || return 1
+  echo "✓ Verified Satellite and RHEL subscriptions on the allocation"
 }
 
 _satellite_manifest_export() {
@@ -203,19 +324,20 @@ _satellite_manifest_download() {
   local token
   token=$(fleet_redhat_access_token false) || return 2
   echo "▸ Downloading manifest to ${dest}..." >&2
-  local code
+  local code tmp
+  tmp=$(mktemp "${MANIFEST_DIR}/manifest.zip.XXXXXX") || return 1
   code=$(printf 'header = "Authorization: Bearer %s"\n' "$token" |
     curl --config - --silent --show-error \
       --connect-timeout 15 --max-time 300 \
-      --output "$dest" --write-out '%{http_code}' \
-      "$MANIFEST_DOWNLOAD_URL") || { _err "Unable to download the manifest"; return 1; }
+      --output "$tmp" --write-out '%{http_code}' \
+      "$MANIFEST_DOWNLOAD_URL") || { rm -f "$tmp"; _err "Unable to download the manifest"; return 1; }
   if [ "$code" != 200 ]; then
-    rm -f "$dest"
+    rm -f "$tmp"
     _err "Manifest download failed (HTTP $code)"
     return 1
   fi
-  [ -s "$dest" ] || { rm -f "$dest"; _err "Downloaded manifest is empty"; return 1; }
-  chmod 600 "$dest"
+  [ -s "$tmp" ] || { rm -f "$tmp"; _err "Downloaded manifest is empty"; return 1; }
+  mv -f "$tmp" "$dest"
   printf '%s' "$dest"
 }
 
@@ -224,24 +346,16 @@ main() {
   echo "  Allocation: ${MANIFEST_NAME}  (${MANIFEST_SAT_VERSION})"
 
   local uuid
-  uuid=$(_satellite_manifest_find_allocation)
+  uuid=$(_satellite_manifest_find_allocation) || return 1
   if [ -n "$uuid" ]; then
     echo "✓ Reusing existing allocation ${uuid}"
   else
     uuid=$(_satellite_manifest_create_allocation) || return 1
     [ -n "$uuid" ] || { _err "Allocation creation did not return a UUID"; return 1; }
     echo "✓ Created allocation ${uuid}"
-    cat >&2 <<EOF
-
-  NOTE: the new allocation has no subscriptions yet. Add Satellite
-  infrastructure + RHEL entitlements before the manifest is useful:
-    console.redhat.com -> Subscriptions -> Subscription Allocations
-    -> ${MANIFEST_NAME} -> Add subscriptions
-  (Entitlement auto-attach via the API is account-specific and not automated
-  here; the export below produces a manifest from whatever is attached.)
-EOF
   fi
 
+  _satellite_manifest_attach "$uuid" || return 1
   _satellite_manifest_export "$uuid" || return 1
   local path
   path=$(_satellite_manifest_download) || return 1
@@ -253,4 +367,6 @@ EOF
   echo "    ssh root@192.168.122.20 'cd satellite-lab && ./03-content-hammer.sh /root/manifest.zip'"
 }
 
-main "$@"
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi

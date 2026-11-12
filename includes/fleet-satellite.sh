@@ -25,8 +25,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fleet-access.sh"
 SAT_HOST="${SATELLITE_LAB_HOST:-satellite.demo.lab}"
 SAT_IP="${SATELLITE_LAB_IP:-192.168.122.20}"
 SAT_AK_NAME="${SAT_FLEET_AK:-fleet-rhel9}"
-# Display name and subscription-manager org label differ; Demo Org owns the
-# RHEL content views in this lab.
+# The APD lab profile supplies the discovered content organization explicitly.
 SAT_ORG="${SAT_ORG:-Demo Org}"
 SAT_ORG_LABEL="${SAT_ORG_LABEL:-Demo_Org}"
 
@@ -41,19 +40,31 @@ _fleet_satellite_ensure_ak() {
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes \
     "${script_dir}/../satellite-lab/07-fleet-activation-key.sh" "root@${SAT_IP}:/root/" >/dev/null 2>&1 || return 1
-  _sat_ssh "bash /root/07-fleet-activation-key.sh" 2>/dev/null | tail -1
+  printf '%s\t%s\t%s\t%s\n' "$SAT_ORG" "$SAT_AK_NAME" "${SAT_FLEET_CV:-RHEL9}" "${SAT_FLEET_LCE:-Library}" \
+    | _sat_ssh 'IFS="$(printf "\t")" read -r SAT_ORG SAT_FLEET_AK SAT_FLEET_CV SAT_FLEET_LCE
+export SAT_ORG SAT_FLEET_AK SAT_FLEET_CV SAT_FLEET_LCE
+bash /root/07-fleet-activation-key.sh' | tail -1
 }
 
 # Register a single node. Credentials and the AK name cross SSH via stdin,
 # never as argv, so they do not leak into the remote process list or logs.
 _fleet_satellite_register_node() {
   local port="$1" ak_name="$2"
-  local remote
+  local remote ca expected_major="${SAT_FLEET_CV:-RHEL9}"
+  expected_major="${expected_major#RHEL}"
+  ca=$(curl -fsS --connect-timeout 10 --max-time 60 \
+    "https://${SAT_HOST}/pub/katello-server-ca.crt") || {
+    _err "Cannot fetch the Satellite CA through the host's trusted HTTPS connection"
+    return 1
+  }
+  printf '%s' "$ca" | openssl x509 -noout -text | grep -q 'CA:TRUE' || {
+    _err "Satellite did not return a CA certificate"
+    return 1
+  }
   remote=$(cat <<'REMOTE'
 set -euo pipefail
-# ak name and satellite host arrive on stdin (tab-separated), never via argv or
-# string interpolation into this script, so a crafted value cannot inject shell.
-IFS=$'\t' read -r ak_name sat_host
+# Registration parameters and the public CA arrive on stdin, not in argv.
+IFS=$'\t' read -r ak_name sat_host sat_ip org_label expected_major
 # Validate the host is a bare FQDN/IP before it is used in URLs and rpm names.
 case "$sat_host" in
   *[!a-zA-Z0-9.-]* | "" | .* | *..*)
@@ -61,37 +72,65 @@ case "$sat_host" in
     exit 1
     ;;
 esac
-
-# 1. Trust the Satellite CA (idempotent). Prefer dnf (which verifies the RPM
-# signature against the Satellite's own CA once the consumer package bootstraps
-# trust); the curl fallback below is a last resort and still verifies the CA
-# cert it fetches is a CA:TRUE cert before installing.
-if ! rpm -q "katello-ca-consumer-${sat_host}" >/dev/null 2>&1; then
-  if ! dnf install -y "https://${sat_host}/pub/katello-ca-consumer-latest.noarch.rpm" >/dev/null 2>&1; then
-    tmp_rpm=$(mktemp /tmp/katello-ca-consumer.XXXXXX.rpm)
-    # Verify the served CA cert is a real CA before trusting the RPM payload.
-    if curl -sS --fail "https://${sat_host}/pub/katello-server-ca.crt" 2>/dev/null \
-        | openssl x509 -noout -text 2>/dev/null | grep -q 'CA:TRUE' \
-      && curl -sS --fail -o "$tmp_rpm" \
-        "https://${sat_host}/pub/katello-ca-consumer-latest.noarch.rpm" 2>/dev/null; then
-      rpm -Uvh --force "$tmp_rpm" >/dev/null 2>&1 || true
-    fi
-    rm -f "$tmp_rpm"
+[[ "$sat_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+  echo "ERROR: invalid Satellite IPv4 address" >&2; exit 1;
+}
+source /etc/os-release
+if [ "${VERSION_ID%%.*}" != "$expected_major" ]; then
+  echo "ERROR: RHEL major does not match the selected Satellite content view" >&2
+  exit 1
+fi
+ca_file=$(mktemp /tmp/aap-demo-satellite-ca.XXXXXX)
+rpm_file=$(mktemp /tmp/aap-demo-satellite-consumer.XXXXXX.rpm)
+trap 'rm -f "$ca_file" "$rpm_file"' EXIT
+cat >"$ca_file"
+openssl x509 -in "$ca_file" -noout -text | grep -q 'CA:TRUE'
+resolved=$(getent ahostsv4 "$sat_host" | awk 'NR == 1 {print $1}') || resolved=""
+if [ -z "$resolved" ]; then
+  printf '%s %s # aap-demo Satellite\n' "$sat_ip" "$sat_host" >>/etc/hosts
+elif [ "$resolved" != "$sat_ip" ]; then
+  echo "ERROR: $sat_host resolves to $resolved, expected $sat_ip; refusing to replace custom DNS" >&2
+  exit 1
+fi
+# Fetch and validate the consumer package before changing an existing registration.
+curl -fsS --cacert "$ca_file" --connect-timeout 10 --max-time 60 \
+  "https://${sat_host}/pub/katello-ca-consumer-latest.noarch.rpm" -o "$rpm_file"
+rpm -qp "$rpm_file" >/dev/null
+current_server=$(subscription-manager config --list | awk '
+  $1 == "hostname" {gsub(/[][]/, "", $3); print $3; exit}')
+registered=false
+if subscription-manager identity >/dev/null 2>&1; then
+  registered=true
+  if [ "$current_server" != "$sat_host" ]; then
+    subscription-manager unregister
+    registered=false
+  elif ! subscription-manager identity | grep -Fq "org ID: $org_label"; then
+    echo "ERROR: Host is registered to another Satellite organization; migrate it explicitly" >&2
+    exit 1
   fi
 fi
+
+# 1. The public CA arrives over the existing SSH trust channel.
+install -m 0644 "$ca_file" /etc/pki/ca-trust/source/anchors/aap-demo-satellite.crt
+update-ca-trust
+if ! rpm -q "katello-ca-consumer-${sat_host}" >/dev/null 2>&1; then
+  rpm -Uvh "$rpm_file"
+fi
+subscription-manager config --server.hostname="$sat_host" --server.prefix=/rhsm \
+  --server.port=443 --rhsm.baseurl="https://${sat_host}/pulp/content/"
 
 # 2. Register to the Satellite with the activation key (idempotent). Fleet
 # nodes are cloned from one image and share a DMI UUID, which Satellite
 # rejects as a duplicate ("DMI UUID matches other registered hosts"). Give
 # each node a unique product UUID before registering.
-if ! subscription-manager identity >/dev/null 2>&1; then
+if [ "$registered" != true ]; then
   if [ ! -f /etc/aap-demo-fleet-uuid ]; then
     uuidgen > /etc/aap-demo-fleet-uuid
   fi
   mkdir -p /etc/rhsm/facts
   printf '{"dmi.system.uuid": "%s"}\n' "$(cat /etc/aap-demo-fleet-uuid)" \
     > /etc/rhsm/facts/uuid.facts
-  subscription-manager register --org="__SAT_ORG_ID__" \
+  subscription-manager register --org="$org_label" \
     --activationkey "$ak_name" >/dev/null
 fi
 
@@ -112,17 +151,17 @@ if rpm -q rhc >/dev/null 2>&1; then
     || rhc connect >/dev/null 2>&1 || true
 fi
 
-subscription-manager identity >/dev/null 2>&1
+subscription-manager identity | grep -Fq "org ID: $org_label"
+subscription-manager config --list | awk -v expected="$sat_host" '
+  $1 == "hostname" {gsub(/[][]/, "", $3); if ($3 == expected) found=1}
+  END {exit(found ? 0 : 1)}'
 REMOTE
 )
-  # subscription-manager wants the org label, not the display name. The org
-  # label is a fixed, operator-controlled value (not user input), so
-  # interpolating it here is safe; the host and AK name go over stdin instead.
-  remote="${remote//__SAT_ORG_ID__/$SAT_ORG_LABEL}"
-  # Send "ak_name<TAB>sat_host" on stdin; the remote reads them with read -r.
-  printf '%s\t%s\n' "$ak_name" "$SAT_HOST" | fleet_stack_ssh "$port" "sudo bash -c $(
-    printf '%q' "$remote"
-  )"
+  { printf '%s\t%s\t%s\t%s\t%s\n' "$ak_name" "$SAT_HOST" "$SAT_IP" "$SAT_ORG_LABEL" \
+      "$expected_major"; printf '%s\n' "$ca"; } \
+    | fleet_stack_ssh "$port" "sudo bash -c $(
+      printf '%q' "$remote"
+    )"
 }
 
 fleet_satellite_register() {
