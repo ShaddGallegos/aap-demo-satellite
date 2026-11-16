@@ -10,6 +10,56 @@ attempts are omitted unless they explain a requirement of the final fix.
 
 ## Unreleased - cumulative changes since `39564b5`
 
+### 56. Satellite upgrade recovery, operator ownership, and OpenShift access
+
+**Supported Satellite maintenance.** Stage both `satellite-maintain` and
+`rubygem-foreman_maintain` from the next maintenance repository with
+`foreman-protector` disabled only for that package-staging transaction.
+The native maintenance tool still owns server updates, backups, prechecks,
+and sequential minor upgrades. Do not automatically pin the RHEL minor:
+the vendor's upgrade checks require the latest supported RHEL content.
+Verified live: Satellite 6.17 → 6.18 → 6.19, ending at 6.19.6 on RHEL 9.9,
+with retained backups on the host-backed NFS mount.
+
+**Full OpenShift operator ownership.** The registry signature workaround
+now leaves MCO-owned container policy untouched on full OpenShift.
+CoreDNS setup also preserves the operator-owned Corefile; diagnosis no longer
+mistakes the absent MicroShift rewrite for a full OpenShift DNS failure.
+AO route host aliases remain reconciled by the existing wiring workflow.
+The affected node policy was restored to its exact rendered MachineConfig
+content, and the master pool and machine-config/DNS operators are healthy.
+MicroShift retains its existing signature-policy and DNS behavior.
+
+**Satellite activation keys.** Remove the obsolete Hammer `--auto-attach`
+option under Simple Content Access. Key preparation writes progress to
+standard error and returns only the exact key name on success. Fleet
+registration now propagates remote failures and rejects unexpected output,
+without stripping spaces from legitimate key names. Live addon enable and
+subsequent reconciliation succeeded: all three Fleet nodes registered,
+Satellite inventory synchronized, and Fleet/APD Ansible pings passed.
+
+**OpenShift login access.** Status now lists the discovered OAuth route under
+**Routes**, and the shared inventory includes it in dashboard/report routes
+without exposing unrelated system routes. Interactive
+`aap-demo status --show-secrets` includes `kubeadmin` and the CRC password
+under **Credentials**. Normal inventory omits the password; redacted reports
+mask it. Missing credentials produce guidance, and OAuth discovery errors
+propagate. MicroShift does not gain an OAuth login.
+
+**Validation:** Focused Fleet activation-key, Satellite registration,
+Satellite demo, maintenance, registry-policy, startup, system-info,
+secret-handling, and core CLI regression tests passed. Changed shell files
+passed ShellCheck and syntax checks; related Markdown and diff checks passed.
+Live AO validation succeeded for AAP, MCP, and Ollama, including authenticated
+AAP proxy access and the default `qwen2.5:3b` model. Interactive status and
+password-free JSON inventory were verified without logging credentials.
+
+**Known limits:** CRC monitoring remains disabled by user choice, so the MCP
+and AO worker HPAs cannot compute CPU-based replica counts. Diagnosis reports
+a missing TopoLVM warning with working NFS storage. Historical external-demo
+inventory failures are not evidence of working AWS/Insights/PanOS/ContainerLab
+integrations. No live uninstall or destructive rebuild was performed.
+
 ### 55. Hands-free `--sno` / `--microshift` flags and SNO deployment fixes
 
 `aap-demo create` now accepts `--sno` and `--microshift` for non-interactive
@@ -40,8 +90,9 @@ Lightspeed API reaches the in-cluster Ollama `qwen2.5:3b` endpoint.
 skip the prompt. Live: `create --full-demo --satellite --sno` completed
 end-to-end (exit 0) on OpenShift 4.22.14 SNO — AAP UI 200, OpenShift web
 console 200, Ollama serving, 3 fleet nodes registered, Satellite UI trusted,
-all full-demo addons enabled. (The `machine-config` cluster operator reports
-Degraded on single-node CRC, which is expected and cosmetic.)
+all full-demo addons enabled. The observed `machine-config` degradation was
+subsequently traced to node policy drift and repaired; it is not an expected
+or cosmetic condition (see entry 56).
 
 ### 54. Hardware-aware SNO/MicroShift tier prompt in create
 

@@ -258,7 +258,9 @@ cmd_diagnose() {
   fi
   corefile=$(kubectl get configmap dns-default -n openshift-dns \
     -o jsonpath='{.data.Corefile}' 2>/dev/null || echo "")
-  if echo "$corefile" | grep -q "router-internal-default"; then
+  if kubectl get ingresses.config/cluster --request-timeout=5s >/dev/null 2>&1; then
+    _check_info "OpenShift DNS is operator-managed; addon route aliases are verified during wiring"
+  elif echo "$corefile" | grep -q "router-internal-default"; then
     _check_pass "CoreDNS route rewrite present"
   elif [ -n "$corefile" ]; then
     _check_fail "CoreDNS missing rewrite for apps.<domain> route hostnames"
@@ -514,12 +516,12 @@ cmd_status() {
   fi
   echo ""
 
-  # Show deployment routes (exclude OpenShift/system namespaces)
-  echo "AAP Deployments:"
-  echo "----------------"
-  ROUTES=$(kubectl get route -A --no-headers 2>/dev/null \
-    | grep -v -E '^(openshift-|kube-|aap-demo-)' \
-    | awk '{printf "  https://%s\n", $3}' | sort -u)
+  echo "Routes:"
+  echo "-------"
+  local route_inventory
+  route_inventory=$(_aap_demo_inventory_routes "$(_addons_list)") || return 1
+  ROUTES=$(jq -r '.[] | select(.namespace | startswith("aap-demo-") | not) | "  " + .url' \
+    <<<"$route_inventory" | sort -u)
   if [ -n "$ROUTES" ]; then
     echo "$ROUTES"
   else
@@ -531,6 +533,15 @@ cmd_status() {
   local _cred_namespaces _cred_found
   _cred_found=false
   if [ "$SHOW_SECRETS" = true ]; then
+    local openshift_credential
+    openshift_credential=$(_aap_demo_inventory_openshift_credential include) || return 1
+    if [ "$openshift_credential" != null ]; then
+      echo "Credentials:"
+      echo "------------"
+      _cred_found=true
+      printf "  %-20s kubeadmin / %s\n" "openshift:" \
+        "$(jq -r '.password // "unavailable (run crc console --credentials)"' <<<"$openshift_credential")"
+    fi
     _cred_namespaces=$(kubectl get aap -A --no-headers 2>/dev/null | awk '{print $1}' | sort -u)
     for ns in $_cred_namespaces; do
       local ADMIN_PASSWORD=""

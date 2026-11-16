@@ -120,8 +120,10 @@ satellite_maintenance_main() {
       return 1
     }
     satellite_backup "$current" || return 1
-    # Only update the maintenance tool here; it owns the actual server upgrade.
-    dnf -y --enablerepo="$maintenance_repo" upgrade satellite-maintain rubygem-foreman_maintain || return 1
+    # The protector also hides the wrapper containing the next release's target.
+    # Only these maintenance packages are staged; the native tool upgrades Satellite.
+    dnf -y --disableplugin=foreman-protector --enablerepo="$maintenance_repo" \
+      upgrade satellite-maintain rubygem-foreman_maintain || return 1
     target=$(satellite_maintenance_target) || return 1
     [ "$target" = "$next" ] || {
       echo "ERROR: Maintenance repository did not provide the supported $current -> $next upgrade." >&2

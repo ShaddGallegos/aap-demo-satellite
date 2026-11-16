@@ -49,8 +49,14 @@ dnf() {
   case "$*" in
     *check-update) return "${DISCOVERY_RC:-$(cat "$TEST_DIR/pending")}" ;;
     *needs-restarting*) return "$REBOOT_RC" ;;
-    *satellite-maintenance-6.18-*) printf 6.18 >"$TEST_DIR/target" ;;
-    *satellite-maintenance-6.19-*) printf 6.19 >"$TEST_DIR/target" ;;
+    *satellite-maintenance-6.18-*)
+      [[ "$*" == *--disableplugin=foreman-protector* ]] || return 0
+      printf 6.18 >"$TEST_DIR/target"
+      ;;
+    *satellite-maintenance-6.19-*)
+      [[ "$*" == *--disableplugin=foreman-protector* ]] || return 0
+      printf 6.19 >"$TEST_DIR/target"
+      ;;
     *) return 1 ;;
   esac
 }

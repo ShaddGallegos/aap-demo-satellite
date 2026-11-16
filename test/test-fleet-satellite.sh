@@ -49,6 +49,49 @@ fleet_stack_ssh() {
 ssh()  { echo "SAT_SSH $*" >>"$LOG"; return 0; }
 scp()  { echo "SAT_SCP $*" >>"$LOG"; return 0; }
 
+if (
+  _sat_ssh() {
+    cat >/dev/null
+    printf '%s\n' "${AK_OUTPUT:-fleet-rhel9}"
+    return "${AK_RC:-0}"
+  }
+  [ "$(_fleet_satellite_ensure_ak)" = fleet-rhel9 ] || exit 1
+  if AK_RC=1 _fleet_satellite_ensure_ak >/dev/null 2>&1; then exit 1; fi
+  if AK_OUTPUT="unexpected log line" _fleet_satellite_ensure_ak >/dev/null 2>&1; then exit 1; fi
+  SAT_AK_NAME="fleet key" AK_OUTPUT="fleet key" _fleet_satellite_ensure_ak >/dev/null || exit 1
+); then
+  _pass "activation_key_ensure_validates_name_and_remote_failure"
+else
+  _fail "activation_key_ensure_validates_name_and_remote_failure"
+fi
+
+if (
+  export AK_LOG="$TMPDIR/activation-key.log"
+  hammer() {
+    printf '%s\n' "$*" >>"$AK_LOG"
+    case "$*" in
+      '--no-headers content-view list --organization Demo Org') printf '1 | RHEL9 | 1,2\n' ;;
+      '--no-headers activation-key list --organization Demo Org') printf '1 | fleet-rhel9\n' ;;
+      'activation-key update '*)
+        [[ "$*" != *--auto-attach* ]] || return 1
+        [ "${AK_UPDATE_FAIL:-false}" != true ]
+        ;;
+      *) return 1 ;;
+    esac
+  }
+  export -f hammer
+  output=$(bash "$REPO_ROOT/satellite-lab/07-fleet-activation-key.sh" 2>"$TMPDIR/ak-stderr") || exit 1
+  [ "$output" = fleet-rhel9 ] || exit 1
+  grep -q 'Activation key ready' "$TMPDIR/ak-stderr" || exit 1
+  if AK_UPDATE_FAIL=true bash "$REPO_ROOT/satellite-lab/07-fleet-activation-key.sh" \
+    >"$TMPDIR/ak-failed-stdout" 2>"$TMPDIR/ak-stderr"; then exit 1; fi
+  [ ! -s "$TMPDIR/ak-failed-stdout" ] || exit 1
+); then
+  _pass "activation_key_is_sca_compatible_and_only_returns_name_on_success"
+else
+  _fail "activation_key_is_sca_compatible_and_only_returns_name_on_success"
+fi
+
 # Force the AK ensure to return a known name without touching the Satellite.
 _fleet_satellite_ensure_ak() { echo "fleet-rhel9"; }
 

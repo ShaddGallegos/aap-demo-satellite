@@ -23,7 +23,10 @@ _aap_demo_inventory_routes() {
       '. + [$row + {resolved_ipv4: ($ip | select(length > 0) // null)}]' <<<"$routes")
   done < <(jq -c '
     .items[]
-    | select(.metadata.namespace | test("^(openshift-|kube-)") | not)
+    | select(
+        (.metadata.namespace | test("^(openshift-|kube-)") | not)
+        or (.metadata.namespace == "openshift-authentication" and .metadata.name == "oauth-openshift")
+      )
     | {
         namespace: .metadata.namespace,
         name: .metadata.name,
@@ -250,9 +253,54 @@ _aap_demo_inventory_secret_value() {
   esac
 }
 
+_aap_demo_inventory_openshift_credential() {
+  local mode="$1" route password="null"
+  case "$mode" in
+    include | redact | omit) ;;
+    *)
+      echo "ERROR: Unsupported inventory secret mode: $mode" >&2
+      return 1
+      ;;
+  esac
+
+  route=$(kubectl get route oauth-openshift -n openshift-authentication \
+    --ignore-not-found --request-timeout=5s -o name) || {
+    echo "ERROR: Unable to discover the OpenShift OAuth route" >&2
+    return 1
+  }
+  if [ -z "$route" ]; then
+    printf 'null'
+    return 0
+  fi
+
+  case "$mode" in
+    include)
+      local password_file="${HOME}/.crc/machines/crc/kubeadmin-password"
+      if [ -s "$password_file" ]; then
+        password=$(cat "$password_file") || {
+          echo "ERROR: Unable to read the CRC kubeadmin password file" >&2
+          return 1
+        }
+      else
+        echo "WARNING: OpenShift kubeadmin password unavailable; run 'crc console --credentials'." >&2
+      fi
+      ;;
+    redact) password="******" ;;
+  esac
+
+  jq -cn --arg password "$password" '{
+    component: "OpenShift",
+    namespace: "openshift-authentication",
+    username: "kubeadmin",
+    secret_name: null,
+    password: (if $password == "null" then null else $password end)
+  }'
+}
+
 _aap_demo_inventory_credentials() {
   local mode="$1"
-  local aap_json credentials item namespace secret password ao_password
+  local aap_json credentials item namespace secret password ao_password openshift
+  openshift=$(_aap_demo_inventory_openshift_credential "$mode") || return 1
   aap_json=$(kubectl get aap -A -o json 2>/dev/null || printf '{"items":[]}')
   credentials='[]'
 
@@ -303,7 +351,8 @@ _aap_demo_inventory_credentials() {
         password: (if $password == "null" then null else $password end)
       }]' <<<"$credentials")
   fi
-  printf '%s' "$credentials"
+  jq -c --argjson openshift "$openshift" \
+    '. + (if $openshift == null then [] else [$openshift] end)' <<<"$credentials"
 }
 
 _aap_demo_inventory_api_keys() {
@@ -585,7 +634,7 @@ aap_demo_collect_system_inventory() {
       namespace_status=$(jq -c --argjson row "$ext_ns" '. + [$row]' <<<"$namespace_status")
     done < <(_aap_demo_inventory_external_namespaces "$addons_text")
     routes=$(_aap_demo_inventory_routes "$addons_text")
-    credentials=$(_aap_demo_inventory_credentials "$secret_mode")
+    credentials=$(_aap_demo_inventory_credentials "$secret_mode") || return 1
     ingress=$(_aap_demo_inventory_ingress)
     vm=$(_aap_demo_inventory_vm)
     fleet_v2=$(_aap_demo_inventory_fleet_v2)

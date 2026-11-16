@@ -109,6 +109,22 @@ The source checkout and shared OS tools are not removed.
 If the earlier uninstall removed the command's symlink, run the equivalent
 `./aap-demo.sh maintenance uninstall --apply` from your checkout.
 
+## Restart and check a full OpenShift lab
+
+```bash
+aap-demo-v1 start
+aap-demo-v1 status
+aap-demo-v1 diagnose
+```
+
+`start` resumes preserved Fleet nodes and reconciles enabled addon connections.
+Full OpenShift owns its DNS Corefile and node container-signature policy through
+operators; the MicroShift-specific direct-file workarounds are not applied there.
+Addon wiring supplies route host aliases for AO where needed. A missing
+MicroShift rewrite alone is therefore not a DNS failure on full OpenShift.
+Test actual in-pod resolution and API connectivity when investigating an
+integration problem.
+
 ## What we are not doing
 
 We are not turning the older command off, and we are not listing features as deprecated. When a feature

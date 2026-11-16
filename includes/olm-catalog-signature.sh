@@ -70,10 +70,18 @@ _ensure_crc_ssh_ready() {
 
 maybe_relax_redhat_registry_signature_policy() {
   # MicroShift 4.22+ requires GPG signatures for registry.redhat.io; the operator
-  # index image fails verification. Demo-only: relax policy on the CRC VM.
-  # Optional arg 1: force CRI-O reload even when policy.json is already relaxed.
-  local _force_crio_reload="${1:-0}"
+  # index image fails verification. Never edit MCO-owned node policy on OpenShift.
+  local _force_crio_reload="${1:-0}" ingress
   if ! needs_signature_policy_relaxation; then
+    return 0
+  fi
+  ingress=$(kubectl get ingresses.config/cluster --ignore-not-found \
+    --request-timeout=5s -o name) || {
+    echo "ERROR: Cannot detect the cluster preset; refusing to change node signature policy." >&2
+    return 1
+  }
+  if [ -n "$ingress" ]; then
+    echo "  OpenShift container signature policy is MCO-managed; leaving it unchanged."
     return 0
   fi
   if ! _ensure_crc_ssh_ready; then

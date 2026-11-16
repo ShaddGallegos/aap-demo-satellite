@@ -149,6 +149,12 @@ configure_coredns() {
   local route_domain current_domain escaped_domain current_corefile corefile
   local crc_ssh_key crc_ssh_opts nipio_domain escaped_nipio nipio_rewrite
 
+  if kubectl get ingresses.config/cluster --request-timeout=5s >/dev/null 2>&1; then
+    echo "  OpenShift DNS is operator-managed; keeping its Corefile unchanged."
+    echo "  Addons use router host aliases where in-cluster route access is required."
+    return 0
+  fi
+
   # Re-detect SSH key now that cluster is running
   if crc_ssh_key="$(_detect_crc_ssh_key 2>/dev/null)"; then
     crc_ssh_opts="-i ${crc_ssh_key} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"

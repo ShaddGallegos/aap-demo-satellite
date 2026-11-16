@@ -4,7 +4,7 @@
 # Fleet nodes register to the Satellite (not directly to Red Hat) so content
 # is served from the local Pulp and hosts appear in the Satellite inventory.
 # This creates an activation key bound to the RHEL9 content view in Library,
-# with auto-attach enabled (Simple Content Access). Idempotent.
+# for Simple Content Access. Idempotent.
 #
 # Runs on the Satellite VM as root (hammer is configured for the admin user).
 set -euo pipefail
@@ -17,7 +17,7 @@ AK_NAME="${SAT_FLEET_AK:-fleet-rhel9}"
 CV_NAME="${SAT_FLEET_CV:-RHEL9}"
 LCE="${SAT_FLEET_LCE:-Library}"
 
-_log() { printf '  %s\n' "$*"; }
+_log() { printf '  %s\n' "$*" >&2; }
 _err() { printf 'ERROR: %s\n' "$*" >&2; }
 
 # Require repositories for the selected RHEL major. The REPOSITORY IDS column
@@ -48,10 +48,9 @@ else
   _log "✓ Created activation key $AK_NAME ($TARGET_CV / $LCE)"
 fi
 
-# Bind it to the content view environment and enable auto-attach (SCA).
+# SCA uses content access, not auto-attach (removed from newer Hammer versions).
 hammer activation-key update --organization "$ORG" --name "$AK_NAME" \
-  --content-view "$TARGET_CV" --lifecycle-environment "$LCE" \
-  --auto-attach true >/dev/null
+  --content-view "$TARGET_CV" --lifecycle-environment "$LCE" >/dev/null
 
 _log "✓ Activation key ready: $AK_NAME (org: $ORG, cv: $TARGET_CV, lce: $LCE)"
 printf '%s\n' "$AK_NAME"

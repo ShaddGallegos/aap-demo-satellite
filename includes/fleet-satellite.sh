@@ -36,14 +36,19 @@ _sat_ssh() {
 
 # Ensure the Satellite has an activation key for the fleet; echo its name.
 _fleet_satellite_ensure_ak() {
-  local script_dir
+  local script_dir output
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes \
     "${script_dir}/../satellite-lab/07-fleet-activation-key.sh" "root@${SAT_IP}:/root/" >/dev/null 2>&1 || return 1
-  printf '%s\t%s\t%s\t%s\n' "$SAT_ORG" "$SAT_AK_NAME" "${SAT_FLEET_CV:-RHEL9}" "${SAT_FLEET_LCE:-Library}" \
+  output=$(printf '%s\t%s\t%s\t%s\n' "$SAT_ORG" "$SAT_AK_NAME" "${SAT_FLEET_CV:-RHEL9}" "${SAT_FLEET_LCE:-Library}" \
     | _sat_ssh 'IFS="$(printf "\t")" read -r SAT_ORG SAT_FLEET_AK SAT_FLEET_CV SAT_FLEET_LCE
 export SAT_ORG SAT_FLEET_AK SAT_FLEET_CV SAT_FLEET_LCE
-bash /root/07-fleet-activation-key.sh' | tail -1
+bash /root/07-fleet-activation-key.sh') || return 1
+  [ "$output" = "$SAT_AK_NAME" ] || {
+    _err "Satellite activation-key preparation returned an unexpected name"
+    return 1
+  }
+  printf '%s\n' "$output"
 }
 
 # Register a single node. Credentials and the AK name cross SSH via stdin,
@@ -180,8 +185,10 @@ fleet_satellite_register() {
     _err "Could not create the Satellite activation key (is the Satellite up?)"
     return 1
   }
-  ak_name=$(tail -1 <<<"$ak_name" | tr -d '[:space:]')
-  [ -n "$ak_name" ] || { _err "Satellite activation key name is empty"; return 1; }
+  [ "$ak_name" = "$SAT_AK_NAME" ] || {
+    _err "Satellite activation key name does not match the configured key"
+    return 1
+  }
   echo "  Using activation key: $ak_name"
 
   echo "Registering running Fleet nodes to Satellite ($SAT_HOST)..."

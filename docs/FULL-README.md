@@ -508,8 +508,15 @@ See [Fleet inventory and node access](../README.md#fleet-inventory-and-node-acce
 for networking and SSH host-key details.
 
 `aap-demo status --show-secrets` reveals available AAP and addon login
-passwords only in an interactive terminal; redirected output is rejected. The
-Customer Portal token from `https://access.redhat.com/management/api` is stored
+passwords only in an interactive terminal; redirected output is rejected.
+
+The OpenShift OAuth login URL also appears under **Routes** on full OpenShift
+clusters. On CRC, **Credentials** includes `kubeadmin` and its password from
+`~/.crc/machines/crc/kubeadmin-password` only when secrets are explicitly
+requested. Normal status and inventory output omit the password; redacted
+reports mask it. MicroShift does not have this OAuth route or login.
+
+The Customer Portal token from `https://access.redhat.com/management/api` is stored
 as `aap_demo.redhat.offline_token`. The distinct Automation Hub token from
 `https://console.redhat.com/ansible/automation-hub/token` is stored as
 `ah_offline_token` (the older `aap_demo.galaxy.offline_token` key remains readable).

@@ -163,10 +163,17 @@ installation with the RPM already present stops with repair guidance.
 Existing and newly installed servers receive package-update checks. Changes use
 `satellite-maintain update check/run`, not an unrestricted Satellite package
 upgrade. Entitled adjacent minor releases are discovered from Red Hat's
-repository list. The corresponding maintenance tool is staged, its target is
+repository list. Only the maintenance wrapper and its Ruby gem are staged with
+the Foreman package protector disabled so both packages can advance together.
+The wrapper's target is
 verified, and `satellite-maintain upgrade check/run` performs each supported
 minor upgrade in sequence. Unavailable paths and failed checks stop the build;
 there are no skipped checks or automatic OS-major migrations.
+
+Satellite's native upgrade checks require the latest supported RHEL minor
+release and may reject an RHSM minor-release pin. The builder does not change
+an existing pin; resolve a rejected pin and any repository dependency conflicts
+before retrying. Do not bypass the native checks or skip broken packages.
 
 Before each changing maintenance step, a full offline backup, including Pulp
 content, is stored under `/var/backup/satellite/pre-<release>.*`. Override the
@@ -234,7 +241,9 @@ Insights. See [../addons/fleet/README.md](../addons/fleet/README.md).
   Kickstart trees and container images always sync in full — that is expected
   and is why we only pull BaseOS+AppStream kickstart trees for 9.5/10.0.
 - **Simple Content Access** is assumed (default for current manifests);
-  `--auto-attach true` on activation keys is kept for compatibility.
+  activation keys bind the content view and lifecycle environment without
+  `--auto-attach`, which newer Hammer versions no longer accept. Key preparation
+  emits only the key name on standard output, and failures stop registration.
 - Repo-set names occasionally change between CDN releases. If an enable fails,
   find the exact string: `hammer repository-set list --search "RHEL 10"`.
 - Firewall: `02-satellite-installer.sh` opens the demo-required ports
