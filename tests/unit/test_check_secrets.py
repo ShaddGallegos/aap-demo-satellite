@@ -25,6 +25,7 @@ def test_secret_scan_is_pinned_and_read_only() -> None:
     assert "git diff --exit-code -- .secrets.baseline" in script
     assert "1.5.0" in script
     assert "compare_secrets.py" in script
+    assert "detect-secrets scan --no-verify" in script
 
 
 def _document(path: Path, results: Dict[str, List[Dict[str, Any]]]) -> str:

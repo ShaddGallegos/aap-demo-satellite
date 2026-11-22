@@ -49,6 +49,10 @@ source "${SCRIPT_DIR}/includes/preset.sh"
 source "${SCRIPT_DIR}/includes/cmd-dashboard.sh"
 # shellcheck source=includes/cmd-status.sh
 source "${SCRIPT_DIR}/includes/cmd-status.sh"
+# shellcheck source=includes/workflow-journal.sh
+source "${SCRIPT_DIR}/includes/workflow-journal.sh"
+# shellcheck source=includes/integration-check.sh
+source "${SCRIPT_DIR}/includes/integration-check.sh"
 # shellcheck source=includes/help.sh
 source "${SCRIPT_DIR}/includes/help.sh"
 # shellcheck source=includes/cmd-fleet.sh
@@ -63,6 +67,8 @@ source "${SCRIPT_DIR}/includes/resource-preflight.sh"
 source "${SCRIPT_DIR}/includes/ao-llm.sh"
 # shellcheck source=includes/credential-vault.sh
 source "${SCRIPT_DIR}/includes/credential-vault.sh"
+# shellcheck source=includes/github-auth.sh
+source "${SCRIPT_DIR}/includes/github-auth.sh"
 # shellcheck source=includes/addon-restore.sh
 source "${SCRIPT_DIR}/includes/addon-restore.sh"
 # shellcheck source=includes/kubeconfig-guard.sh
@@ -89,6 +95,8 @@ source "${SCRIPT_DIR}/includes/demo-start.sh"
 source "${SCRIPT_DIR}/includes/crc-storage.sh"
 # shellcheck source=includes/state-service.sh
 source "${SCRIPT_DIR}/includes/state-service.sh"
+# shellcheck source=includes/gpu-passthrough.sh
+source "${SCRIPT_DIR}/includes/gpu-passthrough.sh"
 
 # KUBECONFIG is set later by setup_kubeconfig() after argument parsing
 
@@ -175,8 +183,14 @@ SYSTEM_INFO_OUTPUT=""
 DASHBOARD_NO_OPEN=false
 MAINTENANCE_APPLY=false
 MAINTENANCE_RECONFIGURE=false
+# Deliberately undocumented factory-reset path. It is accepted only by the
+# maintenance uninstall dispatcher and has its own confirmation in that helper.
+MAINTENANCE_ZERO=false
 FULL_DEMO=false
 FULL_DEMO_SATELLITE=false
+FULL_DEMO_LIGHTSPEED=false
+FULL_DEMO_LIGHTWELL=false
+FULL_DEMO_GITEA=false
 SHOW_SECRETS=false
 
 for arg in "$@"; do
@@ -246,11 +260,22 @@ for arg in "$@"; do
     --no-open)
       DASHBOARD_NO_OPEN=true
       ;;
-    --full-demo)
+    --ansible | --full-demo)
+      # --full-demo remains a compatibility alias for the original complete
+      # Ansible/AAP + AO/MCP/Fleet demonstration profile.
       FULL_DEMO=true
       ;;
     --satellite)
       FULL_DEMO_SATELLITE=true
+      ;;
+    --lightwell)
+      FULL_DEMO_LIGHTWELL=true
+      ;;
+    --lightspeed)
+      FULL_DEMO_LIGHTSPEED=true
+      ;;
+    --gitea | --gittea)
+      FULL_DEMO_GITEA=true
       ;;
     --sno)
       # Hands-free tier selection: full single-node OpenShift (skips the
@@ -269,7 +294,9 @@ for arg in "$@"; do
       SHOW_SECRETS=true
       ;;
     status)
-      if [ "$COMMAND" = "fleet" ] && [ "${EXTRA_ARGS[0]:-}" = "auth" ]; then
+      if [ "$COMMAND" = "gpu" ]; then
+        EXTRA_ARGS+=("$arg")
+      elif [ "$COMMAND" = "fleet" ] && [ "${EXTRA_ARGS[0]:-}" = "auth" ]; then
         EXTRA_ARGS+=("$arg")
       elif [ "$COMMAND" = "credentials" ]; then
         EXTRA_ARGS+=("$arg")
@@ -301,8 +328,10 @@ for arg in "$@"; do
     --backend)
       PENDING_FLAG="backend"
       ;;
-    deploy | deploy-all | repair | trust-ca | clean | maintenance | credentials | stop | restart | service | setup | create | storage | watch | update | config | redeploy | redeploy-all | redhat-status | rh-status | kubeconfig | idle | preflight | diagnose | must-gather | enable | disable | wire | system-info | dashboard | console | keycloak | v2 | version | help | --help | -h | --version | -V)
-      if [ "$COMMAND" = "credentials" ]; then
+    deploy | deploy-all | repair | trust-ca | clean | maintenance | credentials | stop | restart | service | setup | create | storage | watch | update | config | redeploy | redeploy-all | redhat-status | rh-status | kubeconfig | idle | preflight | diagnose | check-integrations | must-gather | enable | disable | wire | system-info | dashboard | console | keycloak | gpu | v2 | version | help | --help | -h | --version | -V)
+      if [ "$COMMAND" = "gpu" ]; then
+        EXTRA_ARGS+=("$arg")
+      elif [ "$COMMAND" = "credentials" ]; then
         EXTRA_ARGS+=("$arg")
       elif [ "$COMMAND" = "fleet" ]; then
         # start/stop/restart are also fleet node power actions; keep them as
@@ -341,6 +370,13 @@ for arg in "$@"; do
         COMMAND="$arg"
       fi
       ;;
+    --prepare)
+      if [ "$COMMAND" != enable ] || [ "${EXTRA_ARGS[0]:-}" != lightwell ]; then
+        echo "ERROR: --prepare is supported only by enable lightwell" >&2
+        exit 2
+      fi
+      EXTRA_ARGS+=("$arg")
+      ;;
     --ai | --reset | --skip-cache | --force | --refresh-catalog | --purge-data | --purge-creds | --no-import)
       # Flags for diagnose --ai, destroy --reset, addon deploy.sh options.
       # --no-import is forwarded to Python for: enable fleet --backend kube-native
@@ -352,11 +388,14 @@ for arg in "$@"; do
     --reconfigure)
       MAINTENANCE_RECONFIGURE=true
       ;;
+    --zero)
+      MAINTENANCE_ZERO=true
+      ;;
     add | remove | list)
       # Subcommand args for fleet command
       EXTRA_ARGS+=("$arg")
       ;;
-    fleet | mcp-server | portal | portal-operator | setup-pah | ao | ao-eap | ao-pr-testing | apme-eap | local-cache | product-demos-base | product-demos | product-demo-linux | product-demo-windows | product-demo-network | product-demo-cloud | product-demo-openshift | product-demo-satellite | opa | ollama | keycloak | satellite-manifest | lightspeed)
+    fleet | mcp-server | portal | portal-operator | setup-pah | ao | ao-eap | ao-pr-testing | apme-eap | local-cache | eda | product-demos-base | product-demos | product-demo-linux | product-demo-windows | product-demo-network | product-demo-cloud | product-demo-openshift | product-demo-satellite | product-demo-infrastructure | product-demo-eda | opa | ollama | keycloak | satellite-manifest | lightspeed | lightwell | gitea | gittea)
       # Addon names for enable/disable commands
       EXTRA_ARGS+=("$arg")
       ;;
@@ -402,6 +441,30 @@ for arg in "$@"; do
   esac
 done
 
+# Resolve create-profile dependencies in one place.  The original full-demo
+# remains the Ansible/AAP foundation; feature flags add their prerequisites so
+# callers state their goal rather than reconstructing an implementation order.
+if { [ -z "$COMMAND" ] || [ "$COMMAND" = create ]; }; then
+  if [ "$FULL_DEMO_SATELLITE" = true ] || [ "$FULL_DEMO_LIGHTSPEED" = true ] \
+    || [ "$FULL_DEMO_LIGHTWELL" = true ]; then
+    FULL_DEMO=true
+  fi
+  if [ "$FULL_DEMO_LIGHTWELL" = true ]; then
+    # Lightwell depends on the complete local AAP/AO/MCP/Fleet environment,
+    # Satellite, the local Lightspeed assistant, and its retained Gitea service.
+    FULL_DEMO_SATELLITE=true
+    FULL_DEMO_LIGHTSPEED=true
+    FULL_DEMO_GITEA=true
+  fi
+fi
+
+if [ -z "$COMMAND" ] && [ "$FULL_DEMO" = true ]; then
+  COMMAND=create
+elif [ -z "$COMMAND" ] && [ "$FULL_DEMO_GITEA" = true ]; then
+  COMMAND=enable
+  EXTRA_ARGS=(gitea)
+fi
+
 # Check for unprocessed pending flag
 if [ -n "$PENDING_FLAG" ]; then
   echo "ERROR: --$PENDING_FLAG requires a value"
@@ -440,15 +503,42 @@ if [ "$FULL_DEMO" = true ] && [ "$COMMAND" != create ]; then
   exit 1
 fi
 if [ "$FULL_DEMO_SATELLITE" = true ] && ! { [ "$COMMAND" = create ] && [ "$FULL_DEMO" = true ]; }; then
-  echo "ERROR: --satellite is supported only by create --full-demo" >&2
+  echo "ERROR: --satellite is supported only by create (it enables --ansible)" >&2
   exit 1
 fi
-if [ "$MAINTENANCE_APPLY" = true ] && [ "$COMMAND" != maintenance ]; then
-  echo "ERROR: --apply is supported only by maintenance" >&2
+if [ "$FULL_DEMO_LIGHTSPEED" = true ] && ! { [ "$COMMAND" = create ] && [ "$FULL_DEMO" = true ]; }; then
+  echo "ERROR: --lightspeed is supported only by create (it enables --ansible)" >&2
+  exit 1
+fi
+if [ "$FULL_DEMO_LIGHTWELL" = true ] && [ "$COMMAND" != create ]; then
+  echo "ERROR: --lightwell is supported only by create (it enables its required profiles)" >&2
+  exit 1
+fi
+if [ "$FULL_DEMO_GITEA" = true ] && ! {
+  { [ "$COMMAND" = create ] && [ "$FULL_DEMO" = true ]; } ||
+    { [ "$COMMAND" = enable ] && [ "${EXTRA_ARGS[0]:-}" = gitea ]; }
+}; then
+  echo "ERROR: --gitea/--gittea is standalone or used with create --full-demo" >&2
+  exit 1
+fi
+if [ "$MAINTENANCE_APPLY" = true ] && [ "$COMMAND" != maintenance ] && [ "$COMMAND" != gpu ]; then
+  echo "ERROR: --apply is supported only by maintenance and gpu" >&2
   exit 1
 fi
 if [ "$MAINTENANCE_RECONFIGURE" = true ] && [ "$COMMAND" != maintenance ]; then
   echo "ERROR: --reconfigure is supported only by maintenance uninstall" >&2
+  exit 1
+fi
+if [ "$MAINTENANCE_ZERO" = true ] && [ "$COMMAND" != maintenance ]; then
+  echo "ERROR: --zero is supported only by maintenance uninstall" >&2
+  exit 1
+fi
+if [ "$MAINTENANCE_ZERO" = true ] && [ "$MAINTENANCE_APPLY" != true ]; then
+  echo "ERROR: --zero requires maintenance uninstall --apply" >&2
+  exit 1
+fi
+if [ "$MAINTENANCE_ZERO" = true ] && [ "$MAINTENANCE_RECONFIGURE" = true ]; then
+  echo "ERROR: --zero already removes the entire credential Vault; do not combine it with --reconfigure" >&2
   exit 1
 fi
 
@@ -657,7 +747,7 @@ setup_kubeconfig() {
         fi
       elif [ -n "$CRC_SSH_KEY" ]; then
         if ssh -p 2222 -i "$CRC_SSH_KEY" \
-          -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+          -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR \
           -o ConnectTimeout=2 -o BatchMode=yes \
           core@127.0.0.1 "sudo cat $(aap_demo_microshift_kubeconfig_vm_path)" \
           >"${AAP_DEMO_KUBECONFIG}.tmp" 2>/dev/null; then
@@ -676,6 +766,25 @@ setup_kubeconfig() {
 
   if [ -z "$KUBECTL_KUBECONFIG" ]; then
     aap_demo_offer_kubeconfig_shell_setup "$QUIET" "$_AAP_DEMO_KUBECONFIG_FROM_ENV"
+  fi
+}
+
+# Set an existing local kubeconfig for inspection-only commands without refreshing
+# it from the cluster or changing the selected context.
+setup_kubeconfig_read_only() {
+  check_kubectl || exit 1
+  if [ -n "$KUBECTL_KUBECONFIG" ]; then
+    KUBECONFIG="$KUBECTL_KUBECONFIG"
+  else
+    KUBECONFIG="$(aap_demo_resolve_kubeconfig)"
+  fi
+  if [ ! -r "$KUBECONFIG" ]; then
+    echo "ERROR: A readable existing kubeconfig is required for read-only inspection: $KUBECONFIG" >&2
+    exit 1
+  fi
+  export KUBECONFIG
+  if ! aap_demo_reject_remote_kubeconfig; then
+    exit 1
   fi
 }
 
@@ -720,6 +829,9 @@ _help_addon_summary() {
     ao)
       printf '%s\n' "Automation Orchestrator (prompts for LLM or no LLM)"
       ;;
+    eda)
+      printf '%s\n' "Enable the AAP Event-Driven Ansible service (no event sources or activations)"
+      ;;
     ao-pr-testing)
       printf '%s\n' "PR validation workflow and read-only OpenShift MCP (requires ao)"
       ;;
@@ -731,6 +843,12 @@ _help_addon_summary() {
       ;;
     product-demo-satellite)
       printf '%s\n' "Satellite demo content (requires the Satellite lab or an external Satellite)"
+      ;;
+    product-demo-infrastructure)
+      printf '%s\n' "Infrastructure demo templates (opt-in; never launched automatically)"
+      ;;
+    product-demo-eda)
+      printf '%s\n' "Guarded Event-Driven Ansible demo integration (explicit opt-in required)"
       ;;
     opa)
       printf '%s\n' "Open Policy Agent integration"
@@ -1587,7 +1705,7 @@ cmd_ssh() {
     _err "No CRC SSH key found. Is OpenShift Local running?"
     return 1
   fi
-  exec ssh -p 2222 -i "$CRC_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null core@127.0.0.1
+  exec ssh -p 2222 -i "$CRC_SSH_KEY" -o StrictHostKeyChecking=accept-new core@127.0.0.1
 }
 
 cmd_kubeconfig() {
@@ -1741,7 +1859,7 @@ cmd_redeploy() {
   echo ""
 
   deploy_latest || return 1
-  aap_demo_generate_system_info
+  aap_demo_generate_system_info redact
 }
 
 cmd_redeploy-all() {
@@ -1764,7 +1882,7 @@ cmd_redeploy-all() {
   # Addon names survive cluster deletion in ~/.aap-demo/config, but their
   # Kubernetes resources do not. Reinstall them and restore integrations.
   aap_demo_restore_addons "$saved_addons" || return 1
-  aap_demo_generate_system_info
+  aap_demo_generate_system_info redact
 }
 
 _remove_temp_swap() {
@@ -2094,10 +2212,129 @@ _full_demo_satellite_build() {
   bash "${SCRIPT_DIR}/satellite-lab/build-and-configure.sh"
 }
 
+_full_demo_lightwell_preflight() {
+  local configuration="${AAP_DEMO_LIGHTWELL_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/aap-demo/lightwell}/config.json"
+
+  # A retained configuration can be checked before mutating the lab.  A fresh
+  # --lightwell profile creates that configuration later, after its managed
+  # Gitea service has started, so it must not be rejected simply for being new.
+  if [ -f "$configuration" ]; then
+    bash "${SCRIPT_DIR}/addons/lightwell/deploy.sh" --preflight
+  else
+    echo "✓ Lightwell prerequisites will be prepared after AAP and Fleet are ready"
+  fi
+}
+
+_full_demo_prompt_rhis_templates() {
+  # The RHIS reports are GPL-3.0 external content. Do not silently download
+  # them into Satellite: interactive users choose explicitly; automation must
+  # set both environment variables deliberately.
+  [ "${FULL_DEMO_SATELLITE:-false}" = true ] || return 0
+  [ -n "${SATELLITE_IMPORT_RHIS_TEMPLATES+x}" ] && return 0
+  [ "${QUIET:-false}" = true ] && return 0
+  [ -t 0 ] || return 0
+
+  echo ""
+  echo "Optional RHIS Satellite report templates"
+  echo "  Imports pinned GPL-3.0 report templates from parmstro/rhis-builder-satellite-templates."
+  printf "  Import them into this Satellite lab? [y/N]: "
+  local choice acceptance
+  read -r choice || true
+  case "$choice" in
+    y | Y | yes | YES)
+      printf "  Type RHIS-GPL to accept the upstream GPL-3.0 license: "
+      read -r acceptance || true
+      if [ "$acceptance" = RHIS-GPL ]; then
+        SATELLITE_IMPORT_RHIS_TEMPLATES=true
+        SATELLITE_RHIS_TEMPLATE_LICENSE_ACCEPTED=true
+        export SATELLITE_IMPORT_RHIS_TEMPLATES SATELLITE_RHIS_TEMPLATE_LICENSE_ACCEPTED
+        echo "  ✓ RHIS report templates will be imported during Satellite setup"
+      else
+        SATELLITE_IMPORT_RHIS_TEMPLATES=false
+        export SATELLITE_IMPORT_RHIS_TEMPLATES
+        echo "  RHIS report-template import skipped (license not accepted)"
+      fi
+      ;;
+    *)
+      SATELLITE_IMPORT_RHIS_TEMPLATES=false
+      export SATELLITE_IMPORT_RHIS_TEMPLATES
+      echo "  RHIS report-template import skipped"
+      ;;
+  esac
+}
+
+_full_demo_lightwell_enable() {
+  local configuration="${AAP_DEMO_LIGHTWELL_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/aap-demo/lightwell}/config.json"
+  local marker='Managed by aap-demo lightwell' index node
+  index=""
+
+  if [ -f "$configuration" ]; then
+    [ "$(jq -er '.owner' "$configuration")" = "$marker" ] || {
+      _err "Refusing to use unowned Lightwell reconstruction state"
+      return 1
+    }
+    index=$(jq -er '.app_index | select(type == "number" and . > 0 and . == floor)' "$configuration" 2>/dev/null || true)
+  fi
+
+  if [ -n "$index" ]; then
+    node="${AAP_DEMO_DIR:-$HOME/.aap-demo}/fleet/node-$index"
+    if [ -e "$node" ]; then
+      [ -f "$node/lightwell-owner" ] && [ "$(cat "$node/lightwell-owner")" = "$marker" ] || {
+        _err "Recorded Lightwell application node is unowned; refusing to reuse it"
+        return 1
+      }
+      cmd_fleet node "$index" start || return 1
+    else
+      # The public configuration is retained, but Fleet state is intentionally
+      # disposable. Reconstruct exactly one marked application host.
+      index=""
+    fi
+  fi
+
+  if [ -z "$index" ]; then
+    FLEET_NODE_MEM=4096 cmd_fleet add 1 --image rhel9 || return 1
+    [ "${#FLEET_CREATED_INDICES[@]}" -eq 1 ] || {
+      _err "Expected exactly one newly created Lightwell application node"
+      return 1
+    }
+    index="${FLEET_CREATED_INDICES[0]}"
+    node="${AAP_DEMO_DIR:-$HOME/.aap-demo}/fleet/node-$index"
+    printf '%s\n' "$marker" >"$node/lightwell-owner"
+    # On a fresh profile prepare-services creates the retained configuration.
+    # It receives this index through LIGHTWELL_APP_NODE and persists it only
+    # after ownership of the Gitea/OpenFlake service has been established.
+    if [ -f "$configuration" ]; then
+      (
+        umask 077
+        jq --argjson index "$index" '.app_index = $index' "$configuration" >"$configuration.tmp" &&
+          mv "$configuration.tmp" "$configuration"
+      ) || return 1
+    fi
+  fi
+  LIGHTWELL_APP_NODE="$index" cmd_enable lightwell --prepare
+}
+
+_full_demo_gitea_preflight() {
+  bash "${SCRIPT_DIR}/addons/gitea/deploy.sh" --preflight
+}
+
 cmd_full_demo() {
-  local caller_quiet="${QUIET:-false}"
-  local ADDONS="mcp-server,setup-pah,product-demos,ollama,ao,fleet"
+  local caller_quiet="${QUIET:-false}" profile='aap-demo create --ansible'
+  local ADDONS="mcp-server,setup-pah,product-demos,ollama,eda,ao,fleet"
   local cluster_state
+  _full_demo_prompt_rhis_templates
+  if [ "${FULL_DEMO_GITEA:-false}" = true ]; then
+    _full_demo_gitea_preflight || return 1
+    ADDONS+=",gitea"
+  fi
+  if [ "${FULL_DEMO_LIGHTWELL:-false}" = true ]; then
+    _full_demo_lightwell_preflight || return 1
+    profile='aap-demo create --lightwell'
+  elif [ "${FULL_DEMO_SATELLITE:-false}" = true ]; then
+    profile='aap-demo create --satellite'
+  elif [ "${FULL_DEMO_LIGHTSPEED:-false}" = true ]; then
+    profile='aap-demo create --lightspeed'
+  fi
 
   # The full demo (AAP + AO + Ollama + Fleet + product demos) does not fit in
   # the 16GB default: AO's UI pod was OOM-starved at 99% memory requests.
@@ -2108,18 +2345,27 @@ cmd_full_demo() {
   fi
 
   echo ""
-  printf "\033[1maap-demo create --full-demo\033[0m - Building complete local demo...\n"
+  printf "\033[1m%s\033[0m - Building complete local demo...\n" "$profile"
   echo ""
   echo "Workflow:"
   echo "  1. Configure Red Hat Customer Portal and CDN credentials"
+  if [ "$FULL_DEMO_GITEA" = true ]; then
+    echo "  1a. Start the retained local Gitea service"
+  fi
   echo "  2. Create OpenShift Local cluster"
   echo "  3. Deploy AAP 2.7"
   echo "  4. Configure Automation Hub and enable offline-token keepalive"
   echo "  5. Enable Ollama and Automation Orchestrator"
+  if [ "$FULL_DEMO_LIGHTSPEED" = true ]; then
+    echo "  5a. Enable Ansible Lightspeed with the local Ollama model"
+  fi
   echo "  6. Enable Fleet, attach the AAP subscription, and register three RHEL 9 nodes"
   echo "  7. Enable Product Demos"
   if [ "$FULL_DEMO_SATELLITE" = true ]; then
     echo "  7a. Reuse/install Satellite, maintain it, import subscriptions, then Satellite Demo"
+  fi
+  if [ "$FULL_DEMO_LIGHTWELL" = true ]; then
+    echo "  7b. Prepare owned Lightwell Gitea/OpenFlake, application host, AAP and AO requirements"
   fi
   echo "  8. Reapply all integrations"
   echo "  9. Install boot recovery (restores CRC settings/state on reboot) and launch dashboard"
@@ -2149,23 +2395,32 @@ cmd_full_demo() {
     }
   fi
 
+  AAP_DEMO_WORKFLOW_ENVIRONMENT="${profile}; cluster=${CRC_PRESET:-auto}" \
+    workflow_begin full-demo || return 1
   local QUIET=true
   export QUIET ADDONS
 
+  if [ "${FULL_DEMO_GITEA:-false}" = true ]; then
+    workflow_phase gitea cmd_enable gitea || return 1
+  fi
   cluster_state=$(infra_get_state 2>/dev/null || echo "not_created")
   if [ "$cluster_state" = running ]; then
     echo "✓ OpenShift Local cluster is already running; reusing it"
   elif aap_demo_service_managed; then
     echo "Resuming the existing managed demo without recreating CRC..."
-    cmd_start || return 1
+    workflow_phase cluster-start cmd_start || return 1
   else
-    cmd_create || return 1
+    workflow_phase cluster-create cmd_create || return 1
   fi
-  AAP_DEMO_SKIP_STANDARD_AO=true cmd_deploy || return 1
-  cmd_enable setup-pah || return 1
-  cmd_credentials keepalive enable || return 1
-  cmd_enable ollama || return 1
-  AO_LLM_PROVIDER=ollama cmd_enable ao || return 1
+  AAP_DEMO_SKIP_STANDARD_AO=true workflow_phase deploy cmd_deploy || return 1
+  workflow_phase setup-pah cmd_enable setup-pah || return 1
+  workflow_phase credential-keepalive cmd_credentials keepalive enable || return 1
+  workflow_phase ollama cmd_enable ollama || return 1
+  workflow_phase eda cmd_enable eda || return 1
+  AO_LLM_PROVIDER=ollama workflow_phase orchestrator cmd_enable ao || return 1
+  if [ "${FULL_DEMO_LIGHTSPEED:-false}" = true ]; then
+    workflow_phase lightspeed cmd_enable lightspeed || return 1
+  fi
 
   # enable fleet creates the managed nodes itself (upstream). Point it at the
   # downloadable rhel9 image and the target count so quiet mode does not
@@ -2174,63 +2429,71 @@ cmd_full_demo() {
   local fleet_nodes missing_nodes
   fleet_nodes=$(fleet_count 2>/dev/null || echo 0)
   if [ "$fleet_nodes" -lt 3 ]; then
-    FLEET_IMAGE=rhel9 FLEET_NODE_COUNT=3 cmd_enable fleet || return 1
+    FLEET_IMAGE=rhel9 FLEET_NODE_COUNT=3 workflow_phase fleet-enable cmd_enable fleet || return 1
     fleet_nodes=$(fleet_count 2>/dev/null || echo 0)
     if [ "$fleet_nodes" -lt 3 ]; then
       missing_nodes=$((3 - fleet_nodes))
-      cmd_fleet add "$missing_nodes" --image rhel9 || return 1
+      workflow_phase fleet-add cmd_fleet add "$missing_nodes" --image rhel9 || return 1
     fi
   else
     echo "✓ Fleet already has ${fleet_nodes} node(s); reusing them"
   fi
-  cmd_fleet start || return 1
-  cmd_fleet register || return 1
+  workflow_phase fleet-start cmd_fleet start || return 1
+  workflow_phase fleet-register cmd_fleet register || return 1
 
   # The OpenShift demo domain provisions Windows/CNV VMs (BSOD Recovery,
   # WinPE, CNV) that cannot run on the all-Linux Fleet nodes, and its
   # upstream workflow content fails on this environment. Skip it by default;
   # override with PRODUCT_DEMOS_DOMAINS to include it.
   PRODUCT_DEMOS_DOMAINS="${PRODUCT_DEMOS_DOMAINS:-linux windows network cloud}" \
-    cmd_enable product-demos || return 1
+    workflow_phase product-demos cmd_enable product-demos || return 1
 
   # The builder distinguishes installed Satellite from a VM awaiting installation.
   if [ "$FULL_DEMO_SATELLITE" = true ]; then
     echo ""
     echo "▸ Reconciling Satellite installation, maintenance, and subscription manifest..."
-    _full_demo_satellite_build || {
+    workflow_phase satellite _full_demo_satellite_build || {
       echo "ERROR: Satellite Build and Configure failed" >&2
       return 1
     }
     echo ""
     echo "▸ Installing Satellite Demo content..."
-    cmd_enable product-demo-satellite || return 1
+    workflow_phase satellite-demo cmd_enable product-demo-satellite || return 1
   fi
 
-  cmd_wire || return 1
-  aap_demo_generate_system_info || return 1
+  workflow_phase wiring cmd_wire || return 1
+  if [ "${FULL_DEMO_LIGHTWELL:-false}" = true ]; then
+    workflow_phase lightwell _full_demo_lightwell_enable || return 1
+  fi
+  workflow_phase system-info aap_demo_generate_system_info redact || return 1
 
   echo ""
   _aap_demo_release_operation_lock
   echo "  Installing boot recovery (requires sudo)..."
-  cmd_service install || {
+  workflow_phase boot-recovery cmd_service install || {
     echo "ERROR: Full demo boot recovery could not be installed. Resolve the error and rerun: aap-demo create --full-demo" >&2
     return 1
   }
   echo ""
   echo "  Launching the aap-demo dashboard..."
-  cmd_dashboard || return 1
+  workflow_phase dashboard cmd_dashboard || return 1
   _aap_demo_auto_console
+  workflow_finish || return 1
   echo ""
   echo "✓ Full demo environment and automatic recovery are ready"
   echo "  AAP, Product Demos, Automation Orchestrator, Ollama, and three Fleet nodes are configured."
 }
 
 cmd_credentials() {
-  if [ "${1:-}" != keepalive ]; then
-    _err "Usage: aap-demo credentials keepalive [setup|enable|status|disable|run]"
-    return 2
-  fi
-  bash "${SCRIPT_DIR}/scripts/aap-demo-token-keepalive.sh" "${2:-status}"
+  case "${1:-}" in
+    keepalive) bash "${SCRIPT_DIR}/scripts/aap-demo-token-keepalive.sh" "${2:-status}" ;;
+    github) cmd_github_credentials "${2:-status}" ;;
+    *)
+      _err "Usage: aap-demo credentials keepalive [setup|enable|status|disable|run]"
+      _err "       aap-demo credentials github [configure|status]"
+      return 2
+      ;;
+  esac
 }
 
 # shellcheck source=includes/galaxy-auth.sh
@@ -2331,7 +2594,7 @@ cmd_deploy() {
       _patch_gateway_capability
       watch_aap || return 1
       _enable_standard_ao || return 1
-      aap_demo_generate_system_info || return 1
+      aap_demo_generate_system_info redact || return 1
       return 0
     fi
   fi
@@ -2359,7 +2622,7 @@ cmd_deploy() {
   # Deploy selected AAP version.
   deploy_latest || return 1
   _enable_standard_ao || return 1
-  aap_demo_generate_system_info
+  aap_demo_generate_system_info redact
 }
 
 # -----------------------------------------------------------------------------
@@ -2655,8 +2918,8 @@ setup_namespace() {
       --from-file=.dockerconfigjson=/dev/fd/3 \
       --type=kubernetes.io/dockerconfigjson \
       -n "$NAMESPACE" \
-      --dry-run=client -o yaml 3< <(printf '%s' "$PULL_SECRET") |
-      kubectl apply -f - >/dev/null
+      --dry-run=client -o yaml 3< <(printf '%s' "$PULL_SECRET") \
+      | kubectl apply -f - >/dev/null
 
     # Add pull secret to default ServiceAccount (merge, don't replace)
     # This ensures pods using the default SA (e.g., postgres, redis) can pull images
@@ -3070,11 +3333,12 @@ cmd_fleet() {
 # ---------------------------------------------------------------------------
 # product-demos installs all APD domains (runs product-demos-base automatically).
 # product-demos-base and individual domain addons are hidden from status; enable directly if needed.
-AVAILABLE_ADDONS="fleet mcp-server portal portal-operator setup-pah ao ao-pr-testing apme-eap local-cache product-demos product-demo-satellite opa ollama keycloak satellite-manifest lightspeed"
+AVAILABLE_ADDONS="fleet gitea mcp-server portal portal-operator setup-pah ao ao-pr-testing apme-eap local-cache eda product-demos product-demo-satellite product-demo-infrastructure product-demo-eda opa ollama keycloak satellite-manifest lightspeed lightwell"
 
 _normalize_addon_name() {
   case "$1" in
     ao-eap) echo "ao" ;;
+    gittea) echo "gitea" ;;
     *) echo "$1" ;;
   esac
 }
@@ -3161,7 +3425,8 @@ _ao_prompt_product_demos() {
   _current=$(_addons_list)
   for _demo_addon in product-demos product-demos-base \
     product-demo-linux product-demo-windows product-demo-network \
-    product-demo-cloud product-demo-openshift product-demo-satellite; do
+    product-demo-cloud product-demo-openshift product-demo-satellite \
+    product-demo-infrastructure product-demo-eda; do
     if echo "$_current" | grep -qw "$_demo_addon"; then
       return 0
     fi
@@ -3214,6 +3479,9 @@ _addon_resource_preflight() {
   case "$1" in
     ao) aap_demo_resource_preflight "Automation Orchestrator" 1500 3072 ;;
     ollama) aap_demo_resource_preflight "Ollama" 200 2048 ;;
+    # The local API uses 200m CPU / 2Gi memory; the chatbot's RAG stack needs
+    # 500m / 5Gi. Check both before a rollout can become unschedulable.
+    lightspeed) aap_demo_resource_preflight "Ansible Lightspeed" 700 7168 ;;
     portal-operator) aap_demo_resource_preflight "Automation Portal Operator" 1600 2048 ;;
     portal) aap_demo_resource_preflight "Automation Portal" 500 1024 ;;
     apme-eap) aap_demo_resource_preflight "APME" 500 1024 ;;
@@ -3291,6 +3559,9 @@ cmd_enable() {
   local subcmd="${1:-}"
   local _skip_addon_save=false
   local _skip_cluster_verify=false
+  if [ "$addon" = gitea ]; then
+    _skip_cluster_verify=true
+  fi
   if [ "$addon" = "local-cache" ]; then
     case "$subcmd" in
       load)
@@ -3317,10 +3588,15 @@ cmd_enable() {
   if [ "$addon" = "ao" ] && [ "$_skip_addon_save" != true ]; then
     aap_demo_ao_llm_prepare || return 1
     _ao_prompt_product_demos || return 1
+    _ensure_addon_dependency eda "$@" || return 1
     _ensure_addon_dependency mcp-server "$@" || return 1
     if [ "${AO_LLM_PROVIDER:-ollama}" = ollama ]; then
       _ensure_addon_dependency ollama "$@" || return 1
     fi
+  fi
+  if [ "$addon" = "lightwell" ] && [ "$_skip_addon_save" != true ]; then
+    # --prepare is a Lightwell-only argument; do not pass it to AO.
+    _ensure_addon_dependency ao || return 1
   fi
   local _addon_was_enabled=false
   if echo "$(_addons_list)" | grep -qw "$addon"; then
@@ -3349,8 +3625,8 @@ cmd_enable() {
   if [ "$_skip_addon_save" != true ]; then
     echo "  Saved to config: ADDONS=$(_addons_list | tr ' ' ',')"
   fi
-  if [ "$addon" = "ao" ]; then
-    # The AO addon performs wiring before provisioning AAP templates and
+  if [ "$addon" = "ao" ] || [ "$addon" = "lightwell" ] || [ "$addon" = gitea ]; then
+    # Gitea is independent of CRC. AO performs wiring before provisioning AAP templates and
     # importing workflows. A second login here can fail when AO's initial
     # password secret is stale after the instance has already been initialized.
     # `aap-demo wire` remains available for an explicit retry.
@@ -3422,7 +3698,9 @@ cmd_disable() {
 
   if [ -f "$addon_dir/deploy.sh" ]; then
     echo "Disabling addon: $addon"
-    setup_kubeconfig
+    if [ "$addon" != gitea ]; then
+      setup_kubeconfig
+    fi
     if ! bash "$addon_dir/deploy.sh" --delete "$@"; then
       if [ "$addon" = "keycloak" ]; then
         echo "ERROR: Keycloak removal failed; leaving addon enabled in config" >&2
@@ -3559,7 +3837,7 @@ if aap_demo_command_requires_lock "$COMMAND" \
 fi
 
 case "$COMMAND" in
-  help | --help | -h | config | update | version | v2 | "" | destroy | status | storage | system-info | dashboard | console | service | credentials)
+  help | --help | -h | config | update | version | v2 | "" | destroy | status | storage | system-info | dashboard | console | service | credentials | gpu)
     # These commands don't need cluster access
     ;;
   enable)
@@ -3588,6 +3866,9 @@ case "$COMMAND" in
       verify_cluster_type || exit 1
     fi
     ;;
+  check-integrations)
+    setup_kubeconfig_read_only
+    ;;
   *)
     setup_kubeconfig
     verify_cluster_type || exit 1
@@ -3608,7 +3889,7 @@ case "$COMMAND" in
     cmd_clean
     ;;
   maintenance)
-    cmd_maintenance "${EXTRA_ARGS[0]:-preview}" "$MAINTENANCE_APPLY" "$MAINTENANCE_RECONFIGURE"
+    cmd_maintenance "${EXTRA_ARGS[0]:-preview}" "$MAINTENANCE_APPLY" "$MAINTENANCE_RECONFIGURE" "$MAINTENANCE_ZERO"
     ;;
   credentials)
     _credentials_rc=0
@@ -3715,6 +3996,9 @@ case "$COMMAND" in
     done
     cmd_diagnose
     ;;
+  check-integrations)
+    cmd_check_integrations || exit $?
+    ;;
   must-gather)
     cmd_must_gather "${EXTRA_ARGS[0]:-}"
     ;;
@@ -3731,6 +4015,14 @@ case "$COMMAND" in
         ;;
     esac
     cmd_enable "${EXTRA_ARGS[@]}"
+    # Cluster-backed add-ons change what the dashboard reports. Reuse/start it
+    # after a successful install so users do not have to open it separately.
+    # Gitea and local-cache can run without a cluster, so neither starts a
+    # dashboard that would have no cluster state to display.
+    case "$(_normalize_addon_name "${EXTRA_ARGS[0]:-}")" in
+      gitea | local-cache) ;;
+      *) _aap_demo_auto_dashboard ;;
+    esac
     ;;
   wire)
     cmd_wire
@@ -3742,8 +4034,12 @@ case "$COMMAND" in
   keycloak)
     cmd_keycloak "${EXTRA_ARGS[@]}"
     ;;
+  gpu)
+    cmd_gpu "${EXTRA_ARGS[0]:-status}" "$MAINTENANCE_APPLY"
+    ;;
   deploy | deploy-all)
     cmd_deploy
+    _aap_demo_auto_dashboard
     ;;
   *)
     # Default: show welcome if no command specified, or error for unknown commands

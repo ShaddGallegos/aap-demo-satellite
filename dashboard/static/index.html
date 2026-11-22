@@ -25,6 +25,18 @@
       <main>
         <section id="alert" class="alert hidden" aria-live="polite"></section>
 
+        <nav id="view-menu" class="category-filter view-menu" aria-label="Dashboard sections">
+          <button class="filter-button active" type="button" data-view="overview"
+            aria-controls="overview-view" aria-pressed="true">Overview</button>
+          <button class="filter-button" type="button" data-view="demos"
+            aria-controls="demos-view" aria-pressed="false">Demos</button>
+          <button class="filter-button" type="button" data-view="addons"
+            aria-controls="addons-view" aria-pressed="false">Add-ons</button>
+          <button class="filter-button" type="button" data-view="access"
+            aria-controls="access-view" aria-pressed="false">Services and Fleet</button>
+        </nav>
+
+        <div id="overview-view" data-view-panel="overview">
         <section class="hero">
           <div>
             <div class="status-line">
@@ -51,6 +63,7 @@
           <div id="capacity-grid" class="capacity-grid"></div>
           <p id="capacity-message" class="capacity-message muted" role="status"></p>
         </section>
+        </div>
 
         <section id="operation-panel" class="operation-panel hidden" aria-live="polite">
           <div class="operation-heading">
@@ -70,6 +83,19 @@
           </details>
         </section>
 
+        <section id="demos-view" data-view-panel="demos" hidden aria-labelledby="demos-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">DEMO WORKSPACE</p>
+              <h2 id="demos-heading">Choose a demo</h2>
+              <p class="muted">Configure a demo, check integrations, or open its native run and approval controls.</p>
+            </div>
+          </div>
+          <nav id="demo-menu" class="category-filter" aria-label="Demo selection"></nav>
+          <article id="demo-content" class="panel" aria-live="polite"></article>
+        </section>
+
+        <div id="addons-view" data-view-panel="addons" hidden>
         <section class="section-heading">
           <div>
             <p class="eyebrow">FEATURE MANAGEMENT</p>
@@ -86,13 +112,14 @@
 
         <nav id="category-filter" class="category-filter" aria-label="Add-on categories"></nav>
         <section id="addon-grid" class="addon-grid" aria-live="polite"></section>
+        </div>
 
-        <section class="details-grid">
+        <section id="access-view" data-view-panel="access" class="details-grid" hidden>
           <article class="panel">
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">APPLICATION ACCESS</p>
-                <h2>Routes</h2>
+                <h2>Services and Fleet</h2>
               </div>
             </div>
             <div id="routes-list" class="routes-list"></div>

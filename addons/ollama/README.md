@@ -73,8 +73,16 @@ OLLAMA_GPU=nvidia aap-demo enable ollama  # Require a GPU; fail if unavailable
 ```
 
 Host hardware alone is insufficient: the Kubernetes node must advertise
-`nvidia.com/gpu`, normally through the NVIDIA GPU Operator or device plugin. Standard CRC
-MicroShift VMs do not pass the host GPU through, so they use the CPU fallback.
+`nvidia.com/gpu`, normally through the NVIDIA GPU Operator or device plugin. On a
+Linux/libvirt MicroShift installation, a discrete NVIDIA GPU in its own IOMMU group can
+be prepared with `aap-demo gpu enable --apply`. This explicitly stops and restarts CRC,
+assigns the complete isolated PCI group, installs the NVIDIA guest runtime/device plugin,
+and verifies the advertised resource. It is reversible with
+`aap-demo gpu disable --apply`.
+
+The GPU must be unused by the host. The command safely stops `nvidia-powerd`, but refuses
+to detach a device owned by a graphical desktop or another application; run it from a text
+console/SSH session after ending those GPU users.
 
 ## Resource usage
 

@@ -73,7 +73,10 @@ _recover() {
   _log "watchdog: daemon restart did not recover; rebooting the CRC VM"
   crc stop -f >/dev/null 2>&1 || true
   sleep 5
-  crc start >/dev/null 2>&1 || { _log "watchdog: crc start failed"; return 1; }
+  crc start >/dev/null 2>&1 || {
+    _log "watchdog: crc start failed"
+    return 1
+  }
   for attempt in $(seq 1 "$reboot_retries"); do
     if _ssh_forward_up; then
       _log "watchdog: recovered after VM reboot"
@@ -142,9 +145,14 @@ EOF
 }
 
 cmd_uninstall() {
-  systemctl --user disable --now "$TIMER_NAME" 2>/dev/null || true
-  rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$TIMER_NAME" \
-        "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$SERVICE_NAME"
+  local unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+  if [ -f "$unit_dir/$TIMER_NAME" ]; then
+    systemctl --user disable --now "$TIMER_NAME" || return 1
+  fi
+  if [ -f "$unit_dir/$SERVICE_NAME" ]; then
+    systemctl --user stop "$SERVICE_NAME" || return 1
+  fi
+  rm -f "$unit_dir/$TIMER_NAME" "$unit_dir/$SERVICE_NAME"
   systemctl --user daemon-reload
   _log "watchdog: uninstalled"
 }
@@ -160,5 +168,8 @@ case "${1:-check}" in
   install) cmd_install ;;
   uninstall) cmd_uninstall ;;
   status) cmd_status ;;
-  *) echo "Usage: $0 {check|install|uninstall|status}" >&2; exit 2 ;;
+  *)
+    echo "Usage: $0 {check|install|uninstall|status}" >&2
+    exit 2
+    ;;
 esac

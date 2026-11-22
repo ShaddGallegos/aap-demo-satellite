@@ -73,6 +73,13 @@ NVIDIA fails before applying the manifest when the resource is unavailable. The 
 uses the `Recreate` strategy so an update does not deadlock while the old pod holds the
 cluster's only GPU.
 
+For a Linux/libvirt MicroShift deployment with a discrete NVIDIA controller in an isolated
+IOMMU group, `aap-demo gpu enable --apply` is the explicit opt-in provisioning path. It
+persists the group in the CRC libvirt domain, configures the guest driver, CRI-O runtime,
+and NVIDIA device plugin, then waits for `nvidia.com/gpu`. It never attempts passthrough
+as an incidental side effect of deploying Ollama, and `aap-demo gpu disable --apply`
+removes the persistent assignments.
+
 ### Cluster domain detection
 
 `deploy.sh` reads the existing AAP route host to derive the cluster apps domain, then

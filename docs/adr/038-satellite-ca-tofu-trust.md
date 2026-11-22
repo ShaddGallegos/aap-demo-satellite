@@ -49,8 +49,8 @@ source:
 - `satellite-lab/build-and-configure.sh` pulls it and passes it to
   `02-satellite-installer.sh` over the SSH environment (stdin), never on the
   command line or in the repo.
-- `02-satellite-installer.sh` reads `SATELLITE_ADMIN_PASSWORD`; the literal
-  fallback remains only for a standalone manual run.
+- `02-satellite-installer.sh` requires `SATELLITE_ADMIN_PASSWORD`; there is no
+  committed fallback, including for standalone execution.
 - `includes/cmd-status.sh` (`status --show-secrets`) and
   `addons/product-demo-satellite/deploy.sh` (APD credential wiring) read it from
   the Vault, with `SATELLITE_PASSWORD` as an env override for an external

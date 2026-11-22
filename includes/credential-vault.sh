@@ -71,9 +71,12 @@ _aap_demo_vault_require_tools() {
   return 1
 }
 
-_aap_demo_vault_migrate_legacy() {
+_aap_demo_vault_migrate_legacy() (
   [ "$_AAP_DEMO_VAULT_PATHS_EXPLICIT" = false ] || return 0
-  local config_dir source_file source_password plain_target plain_source merged encrypted
+  local config_dir source_file source_password plain_target="" plain_source="" merged="" encrypted="" path
+  trap 'for path in "${plain_target:-}" "${plain_source:-}" "${merged:-}" "${encrypted:-}"; do [[ -z "$path" ]] || rm -f -- "$path"; done' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   local -a source_files source_passwords
   source_files=("$AAP_DEMO_PREVIOUS_VAULT_FILE" "$AAP_DEMO_LEGACY_VAULT_FILE")
   source_passwords=("$AAP_DEMO_PREVIOUS_VAULT_PASSWORD_FILE" "$AAP_DEMO_LEGACY_VAULT_PASSWORD_FILE")
@@ -136,7 +139,7 @@ _aap_demo_vault_migrate_legacy() {
       return 1
     fi
 
-    if ! "$AAP_DEMO_VAULT_PYTHON" - "$plain_target" "$plain_source" >"$merged" <<'PY'
+    if ! "$AAP_DEMO_VAULT_PYTHON" - "$plain_target" "$plain_source" >"$merged" <<'PY'; then
 import sys
 import yaml
 
@@ -162,7 +165,6 @@ if isinstance(legacy, dict):
     merge_missing(current, legacy)
 yaml.safe_dump(target, sys.stdout, default_flow_style=False, sort_keys=True)
 PY
-    then
       rm -f "$plain_target" "$plain_source" "$merged" "$encrypted"
       _err "Unable to merge legacy Vault data"
       return 1
@@ -180,7 +182,7 @@ PY
     rm -f "$source_file" "$source_password"
     echo "✓ Migrated credentials into $AAP_DEMO_VAULT_FILE" >&2
   done
-}
+)
 
 _aap_demo_vault_ensure_password_file() {
   _aap_demo_vault_migrate_legacy || return 1
@@ -202,7 +204,7 @@ _aap_demo_vault_ensure_password_file() {
     return 1
   fi
   # Exclusive creation protects a shared password created concurrently by another product.
-  if ! "$AAP_DEMO_VAULT_PYTHON" - "$AAP_DEMO_VAULT_PASSWORD_FILE" <<'PY'
+  if ! "$AAP_DEMO_VAULT_PYTHON" - "$AAP_DEMO_VAULT_PASSWORD_FILE" <<'PY'; then
 import os
 import secrets
 import sys
@@ -211,7 +213,6 @@ fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
 with os.fdopen(fd, "w", encoding="utf-8") as stream:
     stream.write(secrets.token_urlsafe(48) + "\n")
 PY
-  then
     _err "Unable to generate the Ansible Vault password file"
     return 1
   fi
@@ -267,9 +268,9 @@ aap_demo_vault_get() {
   plain=$("$AAP_DEMO_ANSIBLE_VAULT" view \
     --vault-password-file "$AAP_DEMO_VAULT_PASSWORD_FILE" \
     "$AAP_DEMO_VAULT_FILE" 2>/dev/null) || {
-      _err "Unable to decrypt $AAP_DEMO_VAULT_FILE; check its Vault password file"
-      return 2
-    }
+    _err "Unable to decrypt $AAP_DEMO_VAULT_FILE; check its Vault password file"
+    return 2
+  }
   AAP_DEMO_SECRET_KEY="$key" "$AAP_DEMO_VAULT_PYTHON" -c '
 import os
 import sys
@@ -296,6 +297,42 @@ sys.stdout.write(value)
 ' <<<"$plain"
 }
 
+aap_demo_vault_get_file() (
+  local key="$1" destination="$2" directory temp=""
+  directory=$(dirname "$destination")
+  [ -d "$directory" ] || {
+    _err "Secret destination directory does not exist: $directory"
+    return 1
+  }
+  umask 077
+  trap 'if [[ -n "${temp:-}" ]]; then rm -f -- "$temp"; fi' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  temp=$(mktemp "${directory}/.aap-demo-secret.XXXXXX") || return 1
+  aap_demo_vault_get "$key" >"$temp" || return $?
+  [ -s "$temp" ] || {
+    _err "Credential Vault entry is empty: $key"
+    return 1
+  }
+  chmod 600 "$temp" || return 1
+  mv -f -- "$temp" "$destination"
+)
+
+aap_demo_vault_with_file() (
+  local key="$1" callback="$2" directory temp=""
+  shift 2
+  directory=$(dirname "$AAP_DEMO_VAULT_FILE")
+  mkdir -p "$directory" || return 1
+  chmod 700 "$directory" || return 1
+  umask 077
+  trap 'if [[ -n "${temp:-}" ]]; then rm -f -- "$temp"; fi' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  temp=$(mktemp "${directory}/.aap-demo-secret.XXXXXX") || return 1
+  aap_demo_vault_get_file "$key" "$temp" || return $?
+  "$callback" "$temp" "$@"
+)
+
 aap_demo_vault_import_file() {
   local key="$1" path="$2" value
   [ -s "$path" ] || return 1
@@ -303,6 +340,21 @@ aap_demo_vault_import_file() {
   [ -n "$value" ] || return 1
   aap_demo_vault_set "$key" "$value" || return 1
   rm -f "$path"
+}
+
+aap_demo_vault_set_file() {
+  local key="$1" path="$2" value
+  [ -s "$path" ] || return 1
+  value=$({
+    cat "$path" || exit
+    printf '\001'
+  }) || return 1
+  value=${value%$'\001'}
+  [ -n "$value" ] || return 1
+  local rc=0
+  aap_demo_vault_set "$key" "$value" || rc=$?
+  unset value
+  return "$rc"
 }
 
 aap_demo_pull_secret_get() {
@@ -355,10 +407,10 @@ aap_demo_pull_secret_fetch_redhat() {
     --data-urlencode "client_id=rhsm-api" \
     --data-urlencode "refresh_token@-" \
     "$token_url") || {
-      unset offline_token token_response
-      _err "Could not exchange the Red Hat offline token for pull-secret access"
-      return 1
-    }
+    unset offline_token token_response
+    _err "Could not exchange the Red Hat offline token for pull-secret access"
+    return 1
+  }
   unset offline_token
 
   access_token=$("$AAP_DEMO_VAULT_PYTHON" -c '
@@ -382,10 +434,10 @@ sys.stdout.write(value)
     -H "Accept: application/json" \
     -H "Authorization: Bearer $access_token" \
     "$pull_secret_url") || {
-      unset access_token pull_secret
-      _err "Could not retrieve the OpenShift pull secret from Red Hat"
-      return 1
-    }
+    unset access_token pull_secret
+    _err "Could not retrieve the OpenShift pull secret from Red Hat"
+    return 1
+  }
   unset access_token
 
   pull_secret=$("$AAP_DEMO_VAULT_PYTHON" -c '
@@ -410,11 +462,8 @@ sys.stdout.write(json.dumps(value, separators=(",", ":")))
   unset pull_secret
 }
 
-# Return the Satellite lab admin password, generating and storing it in the
-# encrypted Vault on first use so it is never hardcoded in the repo. Every
-# caller (installer, content, status, APD wiring) reads from this single source.
-aap_demo_satellite_admin_password() {
-  local key="aap_demo.satellite.admin_password" value
+_aap_demo_satellite_password() {
+  local key="$1" value
   value=$(aap_demo_vault_get "$key" 2>/dev/null || true)
   if [ -n "$value" ]; then
     printf '%s' "$value"
@@ -426,16 +475,38 @@ aap_demo_satellite_admin_password() {
   printf '%s' "$value"
 }
 
+# Generate distinct Satellite credentials on first use. They are retained in
+# the encrypted Vault so a resumed install and the resulting demo hosts remain
+# recoverable without committing a shared lab default.
+aap_demo_satellite_admin_password() {
+  _aap_demo_satellite_password "aap_demo.satellite.admin_password"
+}
+
+aap_demo_satellite_root_password() {
+  _aap_demo_satellite_password "aap_demo.satellite.root_password"
+}
+
+aap_demo_satellite_provisioning_root_password() {
+  _aap_demo_satellite_password "aap_demo.satellite.provisioning_root_password"
+}
+
 aap_demo_vault_set() {
+  _aap_demo_vault_ensure_file || return 1
+  _aap_demo_vault_set_impl "$@"
+}
+
+_aap_demo_vault_set_impl() (
   local key="$1"
   local value="$2"
   [ "$key" != "aap_demo.galaxy.offline_token" ] || key=ah_offline_token
-  _aap_demo_vault_ensure_file || return 1
 
-  local vault_dir plain encrypted
+  local vault_dir plain="" encrypted="" path
+  trap 'for path in "${plain:-}" "${encrypted:-}"; do [[ -z "$path" ]] || rm -f -- "$path"; done' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   vault_dir=$(dirname "$AAP_DEMO_VAULT_FILE")
-  plain=$(mktemp "${vault_dir}/.env-aap-demo.plain.XXXXXX")
-  encrypted=$(mktemp "${vault_dir}/.env-aap-demo.vault.XXXXXX")
+  plain=$(mktemp "${vault_dir}/.env-aap-demo.plain.XXXXXX") || return 1
+  encrypted=$(mktemp "${vault_dir}/.env-aap-demo.vault.XXXXXX") || return 1
   chmod 600 "$plain" "$encrypted"
 
   if ! "$AAP_DEMO_ANSIBLE_VAULT" view \
@@ -446,7 +517,7 @@ aap_demo_vault_set() {
     return 1
   fi
 
-  if ! AAP_DEMO_SECRET_KEY="$key" "$AAP_DEMO_VAULT_PYTHON" - "$plain" 3< <(printf '%s' "$value") <<'PY'
+  if ! AAP_DEMO_SECRET_KEY="$key" "$AAP_DEMO_VAULT_PYTHON" - "$plain" 3< <(printf '%s' "$value") <<'PY'; then
 import os
 import sys
 import yaml
@@ -472,7 +543,6 @@ if parts == ["ah_offline_token"]:
 with open(path, "w", encoding="utf-8") as stream:
     yaml.safe_dump(data, stream, default_flow_style=False, sort_keys=True)
 PY
-  then
     rm -f "$plain" "$encrypted"
     _err "Unable to update encrypted credentials"
     return 1
@@ -486,18 +556,30 @@ PY
     return 1
   fi
   rm -f "$plain"
-  mv "$encrypted" "$AAP_DEMO_VAULT_FILE"
+  plain=""
+  if ! mv "$encrypted" "$AAP_DEMO_VAULT_FILE"; then
+    _err "Unable to install updated credentials"
+    return 1
+  fi
+  encrypted=""
   _aap_demo_private_mode "$AAP_DEMO_VAULT_FILE"
-}
+)
 
 aap_demo_vault_delete() {
+  _aap_demo_vault_require_tools || return 1
+  _aap_demo_vault_delete_impl "$@"
+}
+
+_aap_demo_vault_delete_impl() (
   local key="$1"
   [ "$key" != "aap_demo.galaxy.offline_token" ] || key=ah_offline_token
   [ -s "$AAP_DEMO_VAULT_FILE" ] || return 0
   [ -s "$AAP_DEMO_VAULT_PASSWORD_FILE" ] || return 1
-  _aap_demo_vault_require_tools || return 1
 
-  local vault_dir plain encrypted
+  local vault_dir plain="" encrypted="" path
+  trap 'for path in "${plain:-}" "${encrypted:-}"; do [[ -z "$path" ]] || rm -f -- "$path"; done' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   vault_dir=$(dirname "$AAP_DEMO_VAULT_FILE")
   plain=$(mktemp "${vault_dir}/.env-aap-demo.plain.XXXXXX")
   encrypted=$(mktemp "${vault_dir}/.env-aap-demo.vault.XXXXXX")
@@ -511,7 +593,7 @@ aap_demo_vault_delete() {
     return 1
   fi
 
-  if ! AAP_DEMO_SECRET_KEY="$key" "$AAP_DEMO_VAULT_PYTHON" - "$plain" <<'PY'
+  if ! AAP_DEMO_SECRET_KEY="$key" "$AAP_DEMO_VAULT_PYTHON" - "$plain" <<'PY'; then
 import os
 import sys
 import yaml
@@ -535,7 +617,6 @@ if parts == ["ah_offline_token"]:
 with open(path, "w", encoding="utf-8") as stream:
     yaml.safe_dump(data, stream, default_flow_style=False, sort_keys=True)
 PY
-  then
     rm -f "$plain" "$encrypted"
     _err "Unable to update encrypted credentials"
     return 1
@@ -549,9 +630,14 @@ PY
     return 1
   fi
   rm -f "$plain"
-  mv "$encrypted" "$AAP_DEMO_VAULT_FILE"
+  plain=""
+  if ! mv "$encrypted" "$AAP_DEMO_VAULT_FILE"; then
+    _err "Unable to install updated credentials"
+    return 1
+  fi
+  encrypted=""
   _aap_demo_private_mode "$AAP_DEMO_VAULT_FILE"
-}
+)
 
 # Removes only the aap-demo-managed entries from the shared Vault. The Vault
 # file ($AAP_DEMO_VAULT_FILE) and its password file

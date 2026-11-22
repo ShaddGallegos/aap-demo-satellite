@@ -32,7 +32,7 @@ if [ -z "${_INFRA_CRC_LOADED:-}" ]; then
 
   refresh_crc_ssh_config() {
     if CRC_SSH_KEY="$(_detect_crc_ssh_key 2>/dev/null)"; then
-      CRC_SSH_OPTS=(-i "${CRC_SSH_KEY}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 -o BatchMode=yes)
+      CRC_SSH_OPTS=(-i "${CRC_SSH_KEY}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -o ConnectTimeout=10 -o BatchMode=yes)
       return 0
     fi
     CRC_SSH_KEY=""

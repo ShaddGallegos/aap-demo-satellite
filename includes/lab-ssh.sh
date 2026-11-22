@@ -7,7 +7,14 @@ LAB_SSH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$LAB_SSH_DIR/fleet-stack-remote.sh"
 
 lab_ssh_satellite() {
-  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  local state_dir="${AAP_DEMO_DIR:-$HOME/.aap-demo}/satellite"
+  local known_hosts="${state_dir}/known_hosts"
+  mkdir -p "$state_dir" || return 1
+  chmod 700 "$state_dir" || return 1
+  touch "$known_hosts" || return 1
+  chmod 600 "$known_hosts" || return 1
+  ssh -o UserKnownHostsFile="$known_hosts" -o GlobalKnownHostsFile=/dev/null \
+    -o StrictHostKeyChecking=accept-new \
     -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=10 "root@${SATELLITE_LAB_IP:-192.168.122.20}" "$@"
 }
 
@@ -23,7 +30,10 @@ lab_ssh_inventory() {
     fi
   fi
   if [ "${INFRA:-}" = crc ]; then
-    _crc_exec true </dev/null || { _err "CRC SSH is unavailable"; return 1; }
+    _crc_exec true </dev/null || {
+      _err "CRC SSH is unavailable"
+      return 1
+    }
     inventory=$(jq -c '. + [{kind:"crc",name:"aap-demo-crc",port:2222}]' <<<"$inventory") || return 1
   fi
   printf '%s\n' "$inventory"
@@ -36,7 +46,10 @@ lab_ssh_connect() {
     fleet) fleet_stack_ssh "$port" "$@" ;;
     satellite) lab_ssh_satellite "$@" ;;
     crc) _crc_exec "$@" ;;
-    *) _err "Unknown managed SSH peer: $kind"; return 1 ;;
+    *)
+      _err "Unknown managed SSH peer: $kind"
+      return 1
+      ;;
   esac
 }
 
@@ -47,11 +60,17 @@ lab_ssh_open_satellite_forwards() {
     printf '  No active firewalld; leaving host firewall configuration unchanged.\n'
     return 0
   fi
-  interface=$(ip -4 route get "${SATELLITE_LAB_IP:-192.168.122.20}" |
-    awk '{for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}') || return 1
-  [ -n "$interface" ] || { _err "Cannot discover the Satellite-facing interface"; return 1; }
+  interface=$(ip -4 route get "${SATELLITE_LAB_IP:-192.168.122.20}" \
+    | awk '{for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}') || return 1
+  [ -n "$interface" ] || {
+    _err "Cannot discover the Satellite-facing interface"
+    return 1
+  }
   zone=$(sudo firewall-cmd --get-zone-of-interface="$interface") || return 1
-  [ -n "$zone" ] || { _err "No firewalld zone for the Satellite-facing interface"; return 1; }
+  [ -n "$zone" ] || {
+    _err "No firewalld zone for the Satellite-facing interface"
+    return 1
+  }
   while IFS= read -r port; do
     rule="rule family=\"ipv4\" source address=\"${SATELLITE_LAB_IP:-192.168.122.20}/32\" destination address=\"$gateway/32\" port port=\"$port\" protocol=\"tcp\" accept"
     for permanent in true false; do
@@ -62,14 +81,22 @@ lab_ssh_open_satellite_forwards() {
       case "$rc" in
         0) ;;
         1) sudo firewall-cmd "${options[@]}" --add-rich-rule="$rule" >/dev/null || return 1 ;;
-        *) _err "Cannot query Satellite-to-Fleet firewall access"; return 1 ;;
+        *)
+          _err "Cannot query Satellite-to-Fleet firewall access"
+          return 1
+          ;;
       esac
     done
   done < <(jq -r '.[] | select(.kind=="fleet") | .port' <<<"$inventory")
 }
 
 lab_reconcile_ssh() {
-  local gateway="$1" inventory key_path private_key public_key config="" bridge
+  fleet_ssh_key_ready || return 1
+  aap_demo_vault_with_file "$FLEET_SSH_VAULT_KEY" _lab_reconcile_ssh_with_key "$1"
+}
+
+_lab_reconcile_ssh_with_key() {
+  local key_path="$1" gateway="$2" inventory private_key public_key config="" bridge
   local row kind name port target user aliases domain="${FLEET_DOMAIN:-fleet.aap-demo.test}"
   if [ "${INFRA:-}" = crc ]; then
     # Load in the caller, not the discovery subshell: connections reuse these helpers.
@@ -78,11 +105,6 @@ lab_reconcile_ssh() {
   fi
   inventory=$(lab_ssh_inventory) || return 1
   [ "$inventory" != '[]' ] || return 0
-  key_path="${AAP_DEMO_DIR:-$HOME/.aap-demo}/fleet/ssh_key"
-  if [ ! -s "$key_path" ]; then
-    _err "Shared lab SSH key is missing; create the Fleet nodes first"
-    return 1
-  fi
   public_key=$(ssh-keygen -y -P '' -f "$key_path") || return 1
   private_key=$(cat "$key_path") || return 1
   bridge=$(jq -r '[.[] | select(.kind=="fleet")][0].name // empty' <<<"$inventory") || return 1
@@ -93,8 +115,14 @@ lab_reconcile_ssh() {
     user="admin"
     aliases="$name"
     case "$kind" in
-      fleet) target="$gateway"; aliases+=" $name.$domain" ;;
-      satellite) target="${SATELLITE_LAB_IP:-192.168.122.20}"; aliases+=" ${SATELLITE_LAB_HOST:-satellite.demo.lab}" ;;
+      fleet)
+        target="$gateway"
+        aliases+=" $name.$domain"
+        ;;
+      satellite)
+        target="${SATELLITE_LAB_IP:-192.168.122.20}"
+        aliases+=" ${SATELLITE_LAB_HOST:-satellite.demo.lab}"
+        ;;
       crc)
         user=core
         aliases+=" crc"
@@ -110,16 +138,17 @@ lab_reconcile_ssh() {
         fi
         ;;
     esac
-    [[ "$target" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ && "$aliases" != *$'\n'* ]] &&
-      [[ "$aliases" =~ ^[a-zA-Z0-9.\ -]+$ && "$port" =~ ^[0-9]+$ ]] || {
-      _err "Invalid managed lab SSH endpoint"; return 1;
+    [[ "$target" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ && "$aliases" != *$'\n'* ]] \
+      && [[ "$aliases" =~ ^[a-zA-Z0-9.\ -]+$ && "$port" =~ ^[0-9]+$ ]] || {
+      _err "Invalid managed lab SSH endpoint"
+      return 1
     }
     config+="Host $aliases"$'\n'
     config+="    HostName $target"$'\n'
     config+="    Port $port"$'\n'
     config+="    User $user"$'\n'
     config+=$'    IdentityFile ~/.ssh/aap-demo-shared-key\n    IdentitiesOnly yes\n'
-    config+=$'    StrictHostKeyChecking no\n    UserKnownHostsFile /dev/null\n'
+    config+=$'    StrictHostKeyChecking accept-new\n    UserKnownHostsFile ~/.ssh/aap-demo-lab-known_hosts\n'
     if [ "$kind" = crc ] && [ -n "$bridge" ]; then
       config+="    ProxyJump admin@$bridge"$'\n'
     fi

@@ -95,9 +95,69 @@ def fixture_inventory() -> dict[str, Any]:
 
 
 class DashboardUnitTests(unittest.TestCase):
+    def test_gitea_link_is_allowlisted_and_exposes_no_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            document = {"domain": "aap-demo-gitea", "provisioned": True,
+                        "url": "https://192.168.122.55:3000", "password": "omitted"}  # pragma: allowlist secret
+            with patch.dict(os.environ, {"AAP_DEMO_GITEA_DIR": directory}):
+                path.write_text(json.dumps(document))
+                services = dashboard.gitea_services()
+                self.assertEqual(services[0]["url"], document["url"])
+                self.assertNotIn("password", services[0])
+                for url in (
+                    "javascript:alert(1)", "https://user:secret@192.168.122.55:3000",
+                    "http://192.168.122.55:3000", "https://192.168.122.55:3000/arbitrary",
+                ):
+                    document["url"] = url
+                    path.write_text(json.dumps(document))
+                    with self.assertRaises(RuntimeError):
+                        dashboard.gitea_services()
+
+    def test_lightwell_service_links_are_whitelisted_without_claiming_runtime_health(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "lightwell/services.json"
+            path.parent.mkdir()
+            path.write_text(json.dumps({"services": [
+                {"name": "Gitea CI", "url": "https://git.example.test", "token": "not-returned"},
+            ]}))
+            with patch.dict(os.environ, {"AAP_DEMO_DIR": directory}):
+                self.assertEqual(dashboard.lightwell_services(), [
+                    {"name": "Gitea CI", "url": "https://git.example.test"},
+                ])
+                for url in ("javascript:alert(1)", "https://user:secret@git.example.test"):
+                    path.write_text(json.dumps({"services": [{"name": "Gitea", "url": url}]}))
+                    with self.assertRaises(RuntimeError):
+                        dashboard.lightwell_services()
+
     def setUp(self) -> None:
         self.catalog = dashboard.load_catalog(REPO_ROOT)
         self.addons = {addon["id"]: addon for addon in self.catalog["addons"]}
+
+    @unittest.skipIf(os.name == "nt", "POSIX desktop PATH handling")
+    def test_cli_finds_user_crc_with_desktop_path(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            bindir = Path(home) / ".local/bin"
+            bindir.mkdir(parents=True)
+            crc = bindir / "crc"
+            crc.write_text("#!/bin/sh\nprintf 'fixture CRC\\n'\n", encoding="utf-8")
+            crc.chmod(0o700)
+            cli = Path(home) / "aap-demo.sh"
+            cli.write_text("#!/bin/sh\nexec crc version\n", encoding="utf-8")
+            cli.chmod(0o700)
+            app = dashboard.DashboardApp(REPO_ROOT, 0)
+            app.cli = cli
+            with patch.dict(os.environ, {"HOME": home, "PATH": "/usr/bin:/bin"}, clear=True):
+                result = app.run_cli("version")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "fixture CRC")
+
+    @unittest.skipIf(os.name == "nt", "POSIX desktop PATH handling")
+    def test_cli_preserves_existing_path_priority(self) -> None:
+        with patch.dict(os.environ, {"PATH": "/opt/custom/bin:/usr/bin"}, clear=True):
+            environment = dashboard.DashboardApp.command_environment()
+        self.assertEqual(environment["PATH"].split(os.pathsep)[:2],
+                         ["/opt/custom/bin", "/usr/bin"])
 
     def test_windows_cli_uses_native_powershell_with_separate_arguments(self) -> None:
         app = dashboard.DashboardApp(REPO_ROOT, 0)
@@ -149,46 +209,181 @@ class DashboardUnitTests(unittest.TestCase):
     def test_fleet_terminal_runs_fixed_ssh_command_and_cleans_up(self) -> None:
         popen = subprocess.Popen
         commands: list[list[str]] = []
+        fixture_material = "fleet-identity-fixture\n"
 
         def spawn(command: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
             commands.append(command)
+            key_path = Path(command[command.index("-i") + 1])
             return popen(
                 [sys.executable, "-u", "-c",
-                 "import sys; print('shell-ready'); print('received:' + sys.stdin.readline().strip())"],
+                 "import pathlib,sys; p=pathlib.Path(sys.argv[1]); "
+                 "print('shell-ready'); "
+                 "print('private-key-available:' + str(p.read_text() == "
+                 + repr(fixture_material)
+                 + ")); print('received:' + sys.stdin.readline().strip())",
+                 str(key_path)],
                 **kwargs,
             )
 
-        with patch.object(dashboard.subprocess, "Popen", side_effect=spawn):
-            terminal = dashboard.FleetTerminal(Path("/tmp/fleet fixture"), 2201)
-        try:
-            self.assertEqual(commands[0][-1], "admin@127.0.0.1")
-            self.assertIn("StrictHostKeyChecking=yes", commands[0])
-            self.assertNotIn("password", " ".join(commands[0]).lower())
-            output = bytearray()
-            deadline = time.monotonic() + 3
-            data = "hello-fleet\n"
-            while time.monotonic() < deadline:
-                result = terminal.exchange(data, 100, 30)
-                data = ""
+        def vault_get_file(command: list[str], timeout: float) -> None:
+            self.assertNotIn(fixture_material, " ".join(command))
+            self.assertIn("fleet_ssh_key_ensure false", command[2])
+            self.assertIn("aap_demo_vault_get_file", command[2])
+            self.assertEqual(timeout, dashboard.VAULT_HELPER_TIMEOUT_SECONDS)
+            key_path = Path(command[-1])
+            key_path.write_text(fixture_material, encoding="utf-8")
+            os.chmod(key_path, 0o600)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.object(dashboard, "_run_bounded_process", side_effect=vault_get_file), \
+                    patch.object(dashboard.subprocess, "Popen", side_effect=spawn):
+                terminal = dashboard.FleetTerminal(Path(temp_dir) / "fleet", 2201)
+            key_path = terminal._ssh_key_path
+            self.assertIsNotNone(key_path)
+            try:
+                self.assertEqual(commands[0][-1], "admin@127.0.0.1")
+                self.assertIn("StrictHostKeyChecking=yes", commands[0])
+                self.assertNotIn("password", " ".join(commands[0]).lower())
+                self.assertNotIn(fixture_material, " ".join(commands[0]))
+                self.assertTrue(key_path.is_file())
+                self.assertEqual(key_path.stat().st_mode & 0o777, 0o600)
+                output = bytearray()
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    result = terminal.exchange("", 100, 30)
+                    output.extend(base64.b64decode(result["output"]))
+                    if b"private-key-available:True" in output:
+                        break
+                    time.sleep(0.02)
+                self.assertIn(b"private-key-available:True", output)
+                self.assertTrue(key_path.is_file())
+
+                result = terminal.exchange("hello-fleet\n", 100, 30)
                 output.extend(base64.b64decode(result["output"]))
-                if b"received:hello-fleet" in output:
-                    break
-                time.sleep(0.02)
-            self.assertIn(b"received:hello-fleet", output)
-        finally:
-            terminal.close()
-        self.assertIsNotNone(terminal.process.poll())
-        terminal.close()
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline and b"received:hello-fleet" not in output:
+                    result = terminal.exchange("", 100, 30)
+                    output.extend(base64.b64decode(result["output"]))
+                    time.sleep(0.02)
+                self.assertIn(b"received:hello-fleet", output)
+                self.assertNotIn(fixture_material.encode(), output)
+                terminal.process.wait(timeout=2)
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline and key_path.exists():
+                    time.sleep(0.02)
+                self.assertFalse(key_path.exists())
+            finally:
+                terminal.close()
+            self.assertIsNotNone(terminal.process.poll())
+            self.assertFalse(key_path.exists())
+
+    def test_fleet_terminal_cleans_key_when_vault_or_ssh_start_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "fleet"
+            materialized: list[Path] = []
+
+            def vault_failure(command: list[str], timeout: float) -> None:
+                del timeout
+                key_path = Path(command[-1])
+                materialized.append(key_path)
+                raise subprocess.CalledProcessError(1, command)
+
+            with patch.object(dashboard, "_run_bounded_process", side_effect=vault_failure):
+                with self.assertRaisesRegex(RuntimeError, "Vault"):
+                    dashboard.FleetTerminal(root, 2201)
+            self.assertEqual(len(materialized), 1)
+            self.assertFalse(materialized[0].exists())
+
+            def vault_success(command: list[str], timeout: float) -> None:
+                del timeout
+                key_path = Path(command[-1])
+                materialized.append(key_path)
+                key_path.write_text("synthetic-key\n", encoding="utf-8")
+                os.chmod(key_path, 0o600)
+
+            with patch.object(dashboard, "_run_bounded_process", side_effect=vault_success), \
+                    patch.object(dashboard.subprocess, "Popen", side_effect=OSError("ssh unavailable")):
+                with self.assertRaisesRegex(OSError, "ssh unavailable"):
+                    dashboard.FleetTerminal(root, 2201)
+            self.assertEqual(len(materialized), 2)
+            self.assertFalse(materialized[1].exists())
+
+    def test_vault_helper_timeout_kills_descendants_and_cleans_temps(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "fleet"
+            helper = Path(temp_dir) / "slow-vault-helper.sh"
+            plaintext = Path(temp_dir) / "vault-plaintext"
+            late_mutation = Path(temp_dir) / "late-vault-mutation"
+            group_file = Path(temp_dir) / "process-group"
+            helper.write_text(
+                "#!/usr/bin/env bash\n"
+                "plain=$1; mutation=$2; group_file=$3\n"
+                "trap 'rm -f \"$plain\"; exit 0' TERM\n"
+                "printf '%s\\n' \"$$\" >\"$group_file\"\n"
+                "printf 'synthetic fixture' >\"$plain\"\n"
+                "(\n"
+                "  trap '' TERM\n"
+                "  sleep 30\n"
+                "  printf late >\"$mutation\"\n"
+                ") &\n"
+                "wait\n",
+                encoding="utf-8",
+            )
+            helper.chmod(0o700)
+            real_bounded_process = dashboard._run_bounded_process
+            processes: list[subprocess.Popen[Any]] = []
+            real_popen = subprocess.Popen
+
+            def capture_popen(*args: Any, **kwargs: Any) -> subprocess.Popen[Any]:
+                process = real_popen(*args, **kwargs)
+                processes.append(process)
+                return process
+
+            def run_slow_helper(_command: list[str], timeout: float) -> None:
+                del timeout
+                real_bounded_process(
+                    [str(helper), str(plaintext), str(late_mutation), str(group_file)],
+                    timeout=0.1,
+                )
+
+            try:
+                with patch.object(dashboard.subprocess, "Popen", side_effect=capture_popen), \
+                        patch.object(dashboard, "_run_bounded_process", side_effect=run_slow_helper):
+                    with self.assertRaisesRegex(RuntimeError, "Vault"):
+                        dashboard.FleetTerminal._materialize_ssh_key(root)
+                self.assertEqual(len(processes), 1)
+                self.assertIsNotNone(processes[0].poll())
+                self.assertFalse(plaintext.exists())
+                self.assertFalse(late_mutation.exists())
+                self.assertEqual(list(root.glob(".dashboard-ssh-key.*")), [])
+                group_id = int(group_file.read_text(encoding="utf-8"))
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline:
+                    try:
+                        os.killpg(group_id, 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.02)
+                else:
+                    self.fail("Vault helper process group remained after timeout")
+            finally:
+                for process in processes:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait()
 
     def test_fleet_sessions_restrict_nodes_and_input(self) -> None:
         app = dashboard.DashboardApp(REPO_ROOT, 0)
         app.inventory = fixture_inventory
         with self.assertRaisesRegex(RuntimeError, "missing or stopped"):
             app.start_terminal(99)
-        with patch.object(Path, "is_file", return_value=True), \
+        with patch.object(Path, "is_file", return_value=True) as is_file, \
                 patch.object(dashboard, "FleetTerminal") as factory:
             factory.return_value.last_used = time.monotonic()
             session_id = app.start_terminal(1)
+            self.assertEqual(is_file.call_count, 2)
             self.assertEqual(factory.call_args.args[1], 2201)
             with self.assertRaisesRegex(ValueError, "dimensions"):
                 app.terminal_io(session_id, {"cols": "100"})
@@ -251,25 +446,27 @@ class DashboardUnitTests(unittest.TestCase):
         self.assertEqual(dashboard.addon_state(self.addons["portal"], inventory), "disabled")
         self.assertEqual(
             dashboard.active_dependencies(self.addons["ao"], inventory),
-            ["mcp-server", "ollama"],
+            ["mcp-server", "eda", "ollama"],
         )
         inventory["api_keys"]["ao_llm"]["provider"] = "external"
         self.assertEqual(
             dashboard.active_dependencies(self.addons["ao"], inventory),
-            ["mcp-server"],
+            ["mcp-server", "eda"],
         )
 
     def test_operation_output_redacts_credentials(self) -> None:
         output = (
-            "Authorization: Bearer secret-token\n"
+            "\x1b[0;31mAuthorization: Bearer secret-token\x1b[0m\n"
             "Password: secret-password\n"
             "token=another-token\n"
-            "aap-operator: admin / final-secret"
+            "aap-operator: admin / final-secret\x1b]0;terminal-title\x07"
         )
         redacted = dashboard.redact_output(output)
         for secret in ("secret-token", "secret-password", "another-token", "final-secret"):
             self.assertNotIn(secret, redacted)
         self.assertGreaterEqual(redacted.count("******"), 4)
+        self.assertNotIn("\x1b", redacted)
+        self.assertNotIn("terminal-title", redacted)
 
     def test_operation_output_streams_before_completion(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -340,6 +537,32 @@ class DashboardUnitTests(unittest.TestCase):
             app.request_restart()
         with self.assertRaisesRegex(RuntimeError, "restarting"):
             app.start_operation("portal", "enable")
+
+    @unittest.skipIf(os.name == "nt", "POSIX fixture CLI")
+    def test_demo_check_uses_only_read_only_cli_and_rejects_unconfigured_demos(self) -> None:
+        app = dashboard.DashboardApp(REPO_ROOT, 0)
+        with patch.object(app, "inventory", return_value=fixture_inventory()):
+            with self.assertRaisesRegex(RuntimeError, "Configure the demo"):
+                app.start_operation("lightwell", "check")
+            with self.assertRaisesRegex(ValueError, "known demo"):
+                app.start_operation("portal", "check")
+            with self.assertRaises(ValueError):
+                app.start_operation("lightwell", "launch")
+        with tempfile.TemporaryDirectory() as directory:
+            cli = Path(directory) / "aap-demo.sh"
+            cli.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n', encoding="utf-8")
+            cli.chmod(0o700)
+            app.cli = cli
+            inventory = fixture_inventory()
+            inventory["addons"].append("lightwell")
+            with patch.object(app, "inventory", return_value=inventory):
+                app.start_operation("lightwell", "check")
+            deadline = time.monotonic() + 2
+            while app.operation.snapshot()["status"] == "running" and time.monotonic() < deadline:
+                time.sleep(0.02)
+            snapshot = app.operation.snapshot()
+            self.assertEqual(snapshot["status"], "succeeded", snapshot)
+            self.assertEqual(snapshot["output"].strip(), "check-integrations")
 
 
 class DashboardHttpTests(unittest.TestCase):
@@ -424,6 +647,21 @@ class DashboardHttpTests(unittest.TestCase):
         )
         self.assertEqual(status, 409)
 
+    def test_demo_checks_require_session_origin_and_a_configured_demo(self) -> None:
+        status, _ = self.request("/api/demos/lightwell/check", method="POST")
+        self.assertEqual(status, 403)
+        status, _ = self.request(
+            "/api/demos/lightwell/check", method="POST",
+            token=self.app.session_token, origin="http://attacker.invalid",
+        )
+        self.assertEqual(status, 403)
+        for demo_id, expected in (("lightwell", 409), ("portal", 400), ("unknown", 400)):
+            status, _ = self.request(
+                f"/api/demos/{demo_id}/check", method="POST",
+                token=self.app.session_token, origin=self.app.origin,
+            )
+            self.assertEqual(status, expected)
+
     def test_mutation_requires_origin_and_session_token(self) -> None:
         status, _ = self.request(
             "/api/addons/portal/enable",
@@ -459,7 +697,7 @@ class DashboardHttpTests(unittest.TestCase):
 
     def test_allowlisted_enable_operation_is_accepted(self) -> None:
         original = self.app.start_operation
-        self.app.start_operation = lambda addon, action: {
+        self.app.start_operation = lambda addon, action, **_kwargs: {
             "id": "fixture",
             "addon": addon,
             "action": action,
@@ -477,6 +715,39 @@ class DashboardHttpTests(unittest.TestCase):
             self.app.start_operation = original
         self.assertEqual(status, 202)
         self.assertEqual(payload["addon"], "portal")
+
+    def test_guarded_eda_demo_requires_and_accepts_explicit_acknowledgement(self) -> None:
+        status, payload = self.request(
+            "/api/addons/product-demo-eda/enable",
+            method="POST",
+            body={},
+            token=self.app.session_token,
+            origin=self.app.origin,
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("Confirm EDA prerequisites", payload["error"])
+
+        original = self.app.start_operation
+        captured: dict[str, object] = {}
+
+        def start_operation(addon: str, action: str, **kwargs: object) -> dict[str, object]:
+            captured.update(kwargs)
+            return {"id": "fixture", "addon": addon, "action": action, "status": "running"}
+
+        self.app.start_operation = start_operation
+        try:
+            status, payload = self.request(
+                "/api/addons/product-demo-eda/enable",
+                method="POST",
+                body={"confirm_eda_prerequisites": True},
+                token=self.app.session_token,
+                origin=self.app.origin,
+            )
+        finally:
+            self.app.start_operation = original
+        self.assertEqual(status, 202)
+        self.assertEqual(payload["addon"], "product-demo-eda")
+        self.assertEqual(captured, {"eda_demo_opt_in": True})
 
     def test_invalid_host_is_rejected(self) -> None:
         request = urllib.request.Request(

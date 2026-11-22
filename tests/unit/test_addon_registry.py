@@ -30,7 +30,14 @@ def test_every_registered_addon_meets_the_protocol() -> None:
 def test_kinds_and_listed_names() -> None:
     assert get("fleet").kind == "native"
     assert get("product-demos").kind == "legacy"
-    assert names() == ["fleet", "product-demo-satellite", "product-demos"]
+    assert names() == [
+        "eda",
+        "fleet",
+        "product-demo-eda",
+        "product-demo-infrastructure",
+        "product-demo-satellite",
+        "product-demos",
+    ]
     # A domain installer is enabled by name but not listed.
     assert get("product-demo-linux").public is False
 
@@ -45,7 +52,7 @@ def test_needs_cluster_is_false_for_no_name_or_an_unknown_one(name) -> None:
 
 
 def test_unknown_addon_lists_what_is_implemented() -> None:
-    with pytest.raises(AddonError, match="implemented addons: fleet, product-demo-satellite"):
+    with pytest.raises(AddonError, match="implemented addons: eda, fleet, product-demo-eda"):
         get("portal")
 
 

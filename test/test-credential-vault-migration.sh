@@ -133,4 +133,47 @@ fi
 EOF
 rm -rf -- "$ONLY_HOME"
 
+mkdir -p "$TEST_HOME/transaction-home"
+HOME="$TEST_HOME/transaction-home" REPO_ROOT="$REPO_ROOT" bash <<'EOF'
+set -euo pipefail
+_err() { printf 'ERROR: %s\n' "$*" >&2; }
+source "${REPO_ROOT}/includes/credential-vault.sh"
+aap_demo_vault_set "aap_demo.transaction.secret" "original"
+cp "$AAP_DEMO_VAULT_FILE" "$HOME/vault-before-failures"
+
+mv() {
+  if [ "${2:-}" = "$AAP_DEMO_VAULT_FILE" ]; then
+    printf '%s\n' "$1" >"$HOME/failed-mv-source"
+    return 73
+  fi
+  command mv "$@"
+}
+
+if aap_demo_vault_set "aap_demo.transaction.secret" "replacement"; then
+  echo "FAIL: Vault set ignored a failed install" >&2
+  exit 1
+fi
+cmp "$HOME/vault-before-failures" "$AAP_DEMO_VAULT_FILE"
+[ "$(aap_demo_vault_get "aap_demo.transaction.secret")" = original ]
+[ ! -e "$(cat "$HOME/failed-mv-source")" ]
+if compgen -G "$HOME/.ansible/conf/.env-aap-demo.vault.*" >/dev/null \
+  || compgen -G "$HOME/.ansible/conf/.env-aap-demo.plain.*" >/dev/null; then
+  echo "FAIL: failed Vault set left a temporary file" >&2
+  exit 1
+fi
+
+if aap_demo_vault_delete "aap_demo.transaction.secret"; then
+  echo "FAIL: Vault delete ignored a failed install" >&2
+  exit 1
+fi
+cmp "$HOME/vault-before-failures" "$AAP_DEMO_VAULT_FILE"
+[ "$(aap_demo_vault_get "aap_demo.transaction.secret")" = original ]
+[ ! -e "$(cat "$HOME/failed-mv-source")" ]
+if compgen -G "$HOME/.ansible/conf/.env-aap-demo.vault.*" >/dev/null \
+  || compgen -G "$HOME/.ansible/conf/.env-aap-demo.plain.*" >/dev/null; then
+  echo "FAIL: failed Vault delete left a temporary file" >&2
+  exit 1
+fi
+EOF
+
 echo "PASS: merges and removes managed credentials without changing unrelated Vault data"

@@ -81,15 +81,8 @@ prepare_galaxy_credentials() {
   return 1
 }
 
-ensure_galaxy_credentials() {
+prompt_galaxy_credentials() {
   local rc
-  if prepare_galaxy_credentials; then
-    return 0
-  else
-    rc=$?
-  fi
-  [ "$rc" -ne 2 ] || return 2
-
   printf 'Generate an Automation Hub offline token at:\n  https://console.redhat.com/ansible/automation-hub/token\n'
   if command -v xdg-open >/dev/null 2>&1; then
     xdg-open "https://console.redhat.com/ansible/automation-hub/token" >/dev/null 2>&1 \
@@ -132,6 +125,25 @@ ensure_galaxy_credentials() {
     fi
     _err "Red Hat SSO rejected the Automation Hub offline token (expired or revoked); please try again"
   done
+}
+
+ensure_galaxy_credentials() {
+  local rc
+  if prepare_galaxy_credentials; then
+    return 0
+  else
+    rc=$?
+  fi
+  [ "$rc" -ne 2 ] || return 2
+  prompt_galaxy_credentials
+}
+
+refresh_galaxy_credentials_after_remote_failure() {
+  local label="$1"
+  printf '  ⚠ Automation Hub token was rejected while accessing %s. Enter a replacement token to retry once.\n' "$label" >&2
+  # Do not delete the stored token first. A cancelled prompt, rejected
+  # replacement, or SSO outage must leave the encrypted Vault unchanged.
+  prompt_galaxy_credentials
 }
 
 protect_galaxy_credential_file() {
@@ -234,6 +246,14 @@ PY
 }
 
 configure_pah_remotes() {
+  local auth_retry_attempt="${1:-0}"
+  case "$auth_retry_attempt" in
+    0|1) ;;
+    *)
+      _err "Invalid PAH remote authorization retry state"
+      return 1
+      ;;
+  esac
   echo "Configuring Private Automation Hub remotes..."
   # Requires AAP 2.7+ (uses Pulp v3 API)
 
@@ -262,9 +282,144 @@ configure_pah_remotes() {
   fi
 
   local api_base="https://${aap_route}/api/galaxy/pulp/api/v3"
+  local aap_base="https://${aap_route}"
   # Build Basic auth header to avoid curl misparse when password contains ':'
   local auth_header
   auth_header="Authorization: Basic $(printf 'admin:%s' "${admin_pass}" | base64)"
+
+  # Pulp returns resource references as absolute paths rooted at the AAP
+  # route (for example, /api/galaxy/pulp/api/v3/remotes/...).  Do not append
+  # those references to api_base: doing so duplicates the Pulp path and makes
+  # every idempotent update fail with a 404 after the first successful run.
+  pah_resource_url() {
+    local resource_href="$1"
+    case "$resource_href" in
+      /api/galaxy/pulp/api/v3/*)
+        printf '%s%s' "$aap_base" "$resource_href"
+        ;;
+      "${aap_base}"/api/galaxy/pulp/api/v3/*)
+        printf '%s' "$resource_href"
+        ;;
+      *)
+        _err "AAP returned an unexpected Pulp resource reference"
+        return 1
+        ;;
+    esac
+  }
+
+  # Pulp accepts a sync request asynchronously.  Do not report setup as
+  # complete until the task finishes: a stale remote token otherwise fails
+  # later in the UI with an opaque SSO 400 response.
+  pah_wait_sync_task() {
+    local task_href="$1" label="$2" task state error attempt elapsed
+    local timeout_seconds="${PAH_SYNC_TIMEOUT_SECONDS:-1800}"
+    local poll_seconds="${PAH_SYNC_POLL_SECONDS:-5}"
+    local max_attempts next_report=0
+    case "$timeout_seconds" in
+      ''|*[!0-9]*)
+        _err "PAH_SYNC_TIMEOUT_SECONDS must be a positive number of seconds"
+        return 1
+        ;;
+    esac
+    case "$poll_seconds" in
+      ''|*[!0-9]*)
+        _err "PAH_SYNC_POLL_SECONDS must be a positive number of seconds"
+        return 1
+        ;;
+    esac
+    if [ "$timeout_seconds" -lt 60 ] || [ "$poll_seconds" -lt 1 ] || [ "$poll_seconds" -gt 30 ]; then
+      _err "PAH sync timeout must be at least 60 seconds and its poll interval must be 1-30 seconds"
+      return 1
+    fi
+    max_attempts=$(( (timeout_seconds + poll_seconds - 1) / poll_seconds ))
+    case "$task_href" in
+      /api/galaxy/*) task_href="${aap_base}${task_href}" ;;
+      https://*|http://*) ;;
+      *)
+        _err "${label} sync did not return a usable Pulp task URL"
+        return 1
+        ;;
+    esac
+    for attempt in $(seq 1 "$max_attempts"); do
+      task=$(curl -sk --fail --connect-timeout 10 --max-time 30 -H "${auth_header}" "$task_href" 2>/dev/null) || {
+        _err "Could not read ${label} sync task status"
+        return 1
+      }
+      state=$(jq -r '.state // empty' <<<"$task" 2>/dev/null)
+      case "$state" in
+        completed) echo "✓"; return 0 ;;
+        failed|canceled)
+          error=$(jq -r '.error.description // .error.traceback // "Pulp reported no error detail"' <<<"$task" 2>/dev/null | head -c 400)
+          # A valid Hub token can still lack the optional Validated Content
+          # entitlement.  Let the caller distinguish that authorization case
+          # from a broken Pulp task or network failure.
+          if printf '%s' "$error" | grep -Eqi '(^|[^0-9])(401|403)([^0-9]|$)|unauthorized|forbidden'; then
+            if [ "$label" != "rh-validated" ]; then
+              _err "${label} sync ${state}: ${error}"
+            fi
+            return 3
+          fi
+          _err "${label} sync ${state}: ${error}"
+          return 1
+          ;;
+      esac
+      elapsed=$(( (attempt - 1) * poll_seconds ))
+      if [ "$elapsed" -ge "$next_report" ]; then
+        printf '  %s sync still running (%dm%02ds; waiting up to %dm; task: %s)\n' \
+          "$label" "$((elapsed / 60))" "$((elapsed % 60))" "$((timeout_seconds / 60))" "$task_href"
+        next_report=$((elapsed + 30))
+      fi
+      sleep "$poll_seconds"
+    done
+    _err "Timed out waiting for ${label} sync after $((timeout_seconds / 60)) minutes; the Pulp task may still be running"
+    return 1
+  }
+
+  pah_sync_repository() {
+    local repo_href="$1" label="$2" response task_href repo_url
+    repo_url=$(pah_resource_url "$repo_href") || return 1
+    response=$(curl -sk --fail --connect-timeout 10 --max-time 30 -H "${auth_header}" \
+      -X POST -H "Content-Type: application/json" -d '{"mirror": false}' \
+      "${repo_url}sync/" 2>/dev/null) || {
+        _err "Could not start ${label} sync"
+        return 1
+      }
+    task_href=$(jq -r '.task // .pulp_href // empty' <<<"$response" 2>/dev/null)
+    [ -n "$task_href" ] || {
+      _err "${label} sync did not return a Pulp task"
+      return 1
+    }
+    pah_wait_sync_task "$task_href" "$label"
+  }
+
+  pah_update_remote_token() {
+    local remote_url="$1" label="$2" response task_href detail
+    response=$(curl -sk --fail --connect-timeout 10 --max-time 30 -H "${auth_header}" \
+      -X PATCH \
+      -H "Content-Type: application/json" \
+      -d "$(jq -n --arg token "${GALAXY_TOKEN}" '{token: $token}')" \
+      "${remote_url}" 2>/dev/null) || {
+        _err "Could not update the ${label} remote token"
+        return 1
+      }
+
+    # Pulp can return the updated remote directly, a task for an asynchronous
+    # update, or a successful empty response depending on the component
+    # version and whether the token value actually changed.
+    [ -z "$response" ] && return 0
+    if jq -e '.pulp_href' >/dev/null 2>&1 <<<"$response"; then
+      return 0
+    fi
+    task_href=$(jq -r '.task // empty' <<<"$response" 2>/dev/null)
+    if [ -n "$task_href" ]; then
+      printf '  Applying %s remote token update... ' "$label"
+      pah_wait_sync_task "$task_href" "${label} remote update"
+      return $?
+    fi
+    detail=$(jq -r '.detail // .errors[0].detail // "no Pulp resource or task was returned"' <<<"$response" 2>/dev/null | head -c 400)
+    _err "${label} remote update returned an invalid response: ${detail}"
+    return 1
+  }
 
   # Configure console.redhat.com remotes if token present
   if [ -n "$GALAXY_TOKEN" ]; then
@@ -278,11 +433,9 @@ configure_pah_remotes() {
 
     if [ -n "$remote_href" ]; then
       # Update existing token
-      curl -sk --max-time 10 -H "${auth_header}" \
-        -X PATCH \
-        -H "Content-Type: application/json" \
-        -d "$(jq -n --arg token "${GALAXY_TOKEN}" '{token: $token}')" \
-        "${api_base}${remote_href}" >/dev/null 2>&1
+      local remote_url
+      remote_url=$(pah_resource_url "$remote_href") || return 1
+      pah_update_remote_token "$remote_url" "rh-certified" || return 1
       echo "✓"
     else
       # Create rh-certified remote
@@ -290,12 +443,7 @@ configure_pah_remotes() {
       create_result=$(curl -sk --max-time 10 -H "${auth_header}" \
         -X POST \
         -H "Content-Type: application/json" \
-        -d "{
-          \"name\": \"rh-certified\",
-          \"url\": \"https://console.redhat.com/api/automation-hub/content/published/\",
-          \"token\": \"${GALAXY_TOKEN}\",
-          \"tls_validation\": true
-        }" \
+        -d "$(jq -n --arg token "${GALAXY_TOKEN}" '{name:"rh-certified", url:"https://console.redhat.com/api/automation-hub/content/published/", token:$token, tls_validation:true}')" \
         "${api_base}/remotes/ansible/collection/" 2>/dev/null)
 
       remote_href=$(echo "$create_result" | python3 -c "import sys, json; print(json.loads(sys.stdin.read() or '{}').get('pulp_href', ''))" 2>/dev/null)
@@ -309,13 +457,20 @@ configure_pah_remotes() {
           "${api_base}/repositories/ansible/ansible/?name=rh-certified" 2>/dev/null \
           | python3 -c "import sys, json; data=json.loads(sys.stdin.read() or '{}'); print(data['results'][0]['pulp_href'] if data.get('results') else '')" 2>/dev/null)
 
-        if [ -n "$repo_href" ]; then
-          curl -sk --max-time 10 -H "${auth_header}" \
-            -X PATCH \
-            -H "Content-Type: application/json" \
-            -d "{\"remote\": \"${remote_href}\"}" \
-            "${api_base}${repo_href}" >/dev/null 2>&1
-        fi
+        [ -n "$repo_href" ] || {
+          _err "rh-certified repository was not found"
+          return 1
+        }
+        local repo_url
+        repo_url=$(pah_resource_url "$repo_href") || return 1
+        curl -sk --fail --connect-timeout 10 --max-time 30 -H "${auth_header}" \
+          -X PATCH \
+          -H "Content-Type: application/json" \
+          -d "{\"remote\": \"${remote_href}\"}" \
+          "${repo_url}" >/dev/null || {
+            _err "Could not link the rh-certified remote to its repository"
+            return 1
+          }
       fi
     fi
 
@@ -326,13 +481,23 @@ configure_pah_remotes() {
       "${api_base}/repositories/ansible/ansible/?name=rh-certified" 2>/dev/null \
       | python3 -c "import sys, json; data=json.loads(sys.stdin.read() or '{}'); print(data['results'][0]['pulp_href'] if data.get('results') else '')" 2>/dev/null)
 
-    if [ -n "$repo_href" ]; then
-      curl -sk --max-time 10 -H "${auth_header}" \
-        -X POST \
-        -H "Content-Type: application/json" \
-        -d '{"mirror": false}' \
-        "${api_base}${repo_href}sync/" >/dev/null 2>&1
-      echo "✓ (background)"
+    [ -n "$repo_href" ] || {
+      _err "rh-certified repository was not found"
+      return 1
+    }
+    local certified_sync_rc=0
+    if pah_sync_repository "$repo_href" "rh-certified"; then
+      :
+    else
+      certified_sync_rc=$?
+      if [ "$certified_sync_rc" -eq 3 ] && [ "$auth_retry_attempt" -eq 0 ]; then
+        if refresh_galaxy_credentials_after_remote_failure "Certified Content"; then
+          printf '  Retrying Automation Hub remote configuration with the replacement token...\n'
+          configure_pah_remotes 1
+          return $?
+        fi
+      fi
+      return "$certified_sync_rc"
     fi
 
     # Configure rh-validated remote
@@ -348,47 +513,62 @@ configure_pah_remotes() {
       create_result=$(curl -sk --max-time 10 -H "${auth_header}" \
         -X POST \
         -H "Content-Type: application/json" \
-        -d "{
-          \"name\": \"rh-validated\",
-          \"url\": \"https://console.redhat.com/api/automation-hub/content/validated/\",
-          \"token\": \"${GALAXY_TOKEN}\",
-          \"tls_validation\": true
-        }" \
+        -d "$(jq -n --arg token "${GALAXY_TOKEN}" '{name:"rh-validated", url:"https://console.redhat.com/api/automation-hub/content/validated/", token:$token, tls_validation:true}')" \
         "${api_base}/remotes/ansible/collection/" 2>/dev/null)
 
       validated_remote=$(echo "$create_result" | python3 -c "import sys, json; print(json.loads(sys.stdin.read() or '{}').get('pulp_href', ''))" 2>/dev/null)
     else
-      curl -sk --max-time 10 -H "${auth_header}" \
-        -X PATCH \
-        -H "Content-Type: application/json" \
-        -d "$(jq -n --arg token "${GALAXY_TOKEN}" '{token: $token}')" \
-        "${api_base}${validated_remote}" >/dev/null 2>&1
+      local validated_remote_url
+      validated_remote_url=$(pah_resource_url "$validated_remote") || return 1
+      pah_update_remote_token "$validated_remote_url" "rh-validated" || return 1
     fi
 
-    if [ -n "$validated_remote" ]; then
-      echo "✓"
+    [ -n "$validated_remote" ] || {
+      _err "Could not create the rh-validated remote"
+      return 1
+    }
+    echo "✓"
 
-      printf "  Linking validated remote to repository... "
-      local validated_repo
-      validated_repo=$(curl -sk --max-time 10 -H "${auth_header}" \
-        "${api_base}/repositories/ansible/ansible/?name=validated" 2>/dev/null \
-        | python3 -c "import sys, json; data=json.loads(sys.stdin.read() or '{}'); print(data['results'][0]['pulp_href'] if data.get('results') else '')" 2>/dev/null)
+    printf "  Linking validated remote to repository... "
+    local validated_repo
+    validated_repo=$(curl -sk --max-time 10 -H "${auth_header}" \
+      "${api_base}/repositories/ansible/ansible/?name=validated" 2>/dev/null \
+      | python3 -c "import sys, json; data=json.loads(sys.stdin.read() or '{}'); print(data['results'][0]['pulp_href'] if data.get('results') else '')" 2>/dev/null)
+    [ -n "$validated_repo" ] || {
+      _err "rh-validated repository was not found"
+      return 1
+    }
+    local validated_repo_url
+    validated_repo_url=$(pah_resource_url "$validated_repo") || return 1
+    curl -sk --fail --connect-timeout 10 --max-time 30 -H "${auth_header}" \
+      -X PATCH \
+      -H "Content-Type: application/json" \
+      -d "{\"remote\": \"${validated_remote}\"}" \
+      "${validated_repo_url}" >/dev/null || {
+        _err "Could not link the rh-validated remote to its repository"
+        return 1
+      }
+    echo "✓"
 
-      if [ -n "$validated_repo" ]; then
-        curl -sk --max-time 10 -H "${auth_header}" \
-          -X PATCH \
-          -H "Content-Type: application/json" \
-          -d "{\"remote\": \"${validated_remote}\"}" \
-          "${api_base}${validated_repo}" >/dev/null 2>&1
-        echo "✓"
-
-        printf "  Syncing validated... "
-        curl -sk --max-time 10 -H "${auth_header}" \
-          -X POST \
-          -H "Content-Type: application/json" \
-          -d '{"mirror": false}' \
-          "${api_base}${validated_repo}sync/" >/dev/null 2>&1
-        echo "✓ (background)"
+    printf "  Syncing validated... "
+    local validated_sync_rc=0
+    if pah_sync_repository "$validated_repo" "rh-validated"; then
+      :
+    else
+      validated_sync_rc=$?
+      if [ "$validated_sync_rc" -eq 3 ] && [ "$auth_retry_attempt" -eq 0 ]; then
+        if refresh_galaxy_credentials_after_remote_failure "Validated Content"; then
+          printf '  Retrying Automation Hub remote configuration with the replacement token...\n'
+          configure_pah_remotes 1
+          return $?
+        fi
+        printf '  %s⚠ Validated Content token replacement was not completed; continuing with Certified Content only.%s\n' \
+          "${_YELLOW}" "${_NC}" >&2
+      elif [ "$validated_sync_rc" -eq 3 ]; then
+        printf '  %s⚠ Validated Content is unavailable to this Automation Hub token; continuing with Certified Content only.%s\n' \
+          "${_YELLOW}" "${_NC}" >&2
+      else
+        return "$validated_sync_rc"
       fi
     fi
   else

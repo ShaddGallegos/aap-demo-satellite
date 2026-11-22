@@ -1,6 +1,6 @@
 # Portal Addon - Ansible Automation Portal (Helm)
 
-Production-ready deployment of Ansible Automation Portal via OpenShift Helm chart.
+Local demo deployment of Ansible Automation Portal via OpenShift Helm chart.
 
 ## Overview
 
@@ -102,6 +102,31 @@ aap-demo enable portal
    - Updates OAuth redirect URI with real portal route
    - On MicroShift: AAP route host alias for OAuth token exchange
    - On ARM clusters: disables broken quay plugin, resets dynamic-plugins PVC
+
+### Local AI assistant
+
+On x86, opt into the chart's built-in Red Hat Developer Lightspeed with local
+Ollama:
+
+```bash
+aap-demo enable ollama
+PORTAL_LIGHTSPEED=true aap-demo enable portal
+```
+
+This uses the tested chart `2.2.11`, its Lightspeed plugins and sidecar, and an
+in-cluster Ollama endpoint. Select the installed `qwen2.5:3b` model in the assistant.
+It is a separate assistant from Ansible Lightspeed in the AAP console.
+AI remains off for ordinary Portal installs; use the same opt-in when re-enabling.
+The experimental ARM profile is not validated for this feature and rejects it.
+
+`PORTAL_OLLAMA_URL` overrides the default
+`http://ollama.aap-demo-ollama.svc.cluster.local:11434/v1`. The addon creates the
+namespace-scoped `aap-demo-portal-lightspeed` Secret without embedding credentials
+in Helm values. It does not connect to a paid external model.
+
+The Portal execution-environment builder supports MCP content selection. That is
+not proof that the chat assistant can execute MCP tools; verify its authenticated
+MCP endpoint and tools separately. See the [AI integration guide](../../docs/guides/ai-integrations.md).
 
 ### Manual Registry Credentials Setup
 

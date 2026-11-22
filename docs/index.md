@@ -21,6 +21,18 @@ The [project home page](../README.md) is the short start. These pages are the re
 - [Daily use](guides/daily-use.md) - Start, stop, pause, and check the cluster.
 - [Add-ons](guides/addons.md) - Practice machines, product demos, and extras that still use the older command.
 - [The older command](guides/older-command.md) - Keep using the bash command for work that has not moved over.
+- [Pause and resume the full lab](guides/older-command.md#pause-for-travel-without-deleting-data) -
+  Shut down Fleet, CRC, and Satellite without deleting data.
+- [Assistant skills](guides/assistant-skills.md) - Task-focused validation, recovery, and publication workflows.
+- [Local AI integrations](guides/ai-integrations.md) - MCP, Ollama, and supported product integration paths.
+- [Collection authentication](collection-authentication.md) - Keep the separate
+  Automation Hub token in the encrypted Vault and diagnose Pulp sync failures.
+- [Lightwell CI/CD simulation](../addons/lightwell/README.md) -
+  Prepared-service integration, human approvals, and dashboard links.
+- [Local Gitea VM](../addons/gitea/README.md) -
+  Fedora 45 outside CRC, host-backed NFS, trusted Git access and dashboard controls.
+- [Satellite lab](../satellite-lab/README.md) -
+  Local Satellite lifecycle, image-based general VM provisioning, and Virt-Manager visibility.
 
 ## Concepts
 
@@ -31,6 +43,7 @@ The [project home page](../README.md) is the short start. These pages are the re
 
 - [Commands](reference/commands.md) - What each command does.
 - [Settings](reference/settings.md) - Memory, disk, channels, and file locations.
+- [Roadmap and agent prompt](ROADMAP.md) - Selectable tasks, priorities, safeguards, and acceptance criteria.
 
 ## Examples
 

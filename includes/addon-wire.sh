@@ -462,8 +462,8 @@ wire_ao_login_token() {
     return 1
   fi
 
-  login_json=$(jq -n --arg user admin --arg pass "$pass" \
-    '{username: $user, password: $pass}')
+  login_json=$(jq -n --arg user admin --rawfile pass /dev/fd/3 \
+    '{username: $user, password: $pass}' 3< <(printf '%s' "$pass")) || return 1
 
   curl -sk -X POST "${api_base}/auth/login" \
     -H "Content-Type: application/json" \

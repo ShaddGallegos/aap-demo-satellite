@@ -173,6 +173,18 @@ else
   fail "init_connection_waits_and_requires_subscription"
 fi
 
+if grep -Fq 'kind: RoleBinding' "$LIB_SH" \
+  && grep -Fq -- '--duration=1h' "$LIB_SH" \
+  && ! grep -Fq -- '--clusterrole=cluster-admin' "$LIB_SH" \
+  && ! grep -Fq 'kubectl config view --minify --raw' "$LIB_SH" \
+  && ! grep -Fq 'oc whoami -t' "$LIB_SH" \
+  && grep -Fq 'apd_reconcile_default_execution_credential || return 1' \
+    "${REPO_ROOT}/addons/product-demo-satellite/lib.sh"; then
+  pass "execution_credential_is_namespaced_short_lived_and_refreshed_before_satellite_job"
+else
+  fail "execution_credential_is_namespaced_short_lived_and_refreshed_before_satellite_job"
+fi
+
 saved_home="${HOME:-}"
 record_home=$(mktemp -d)
 export HOME="$record_home"

@@ -105,7 +105,8 @@ for command in deploy status watch clean redeploy redeploy-all idle preflight di
   fi
 done
 for addon in fleet mcp-server ao ollama setup-pah portal portal-operator apme-eap \
-  product-demos product-demo-satellite opa local-cache; do
+  eda product-demos product-demo-satellite product-demo-infrastructure product-demo-eda \
+  opa local-cache; do
   if ! grep -Eq "^[[:space:]]+${addon}[[:space:]]" <<<"$help_output"; then
     echo "FAIL: --help is missing addon: $addon"
     exit 1
@@ -130,6 +131,10 @@ for text in \
   "system-info [--redact] [--json] [--output FILE]" \
   "dashboard [--no-open]" \
   "create --full-demo" \
+  "create --lightwell" \
+  "SATELLITE_RHIS_TEMPLATE_LICENSE_ACCEPTED=true" \
+  "PRODUCT_DEMOS_ENABLE_EDA=true aap-demo enable product-demo-eda" \
+  "aap-demo gpu enable --apply" \
   "AO_LLM_PROVIDER=ollama|external|none" \
   "aap-demo fleet add 3 --image rhel9" \
   "aap-demo redeploy-all"; do

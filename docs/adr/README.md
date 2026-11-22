@@ -84,6 +84,7 @@ We use a simplified ADR format based on [Michael Nygard's template](https://cogn
 | [038](038-satellite-ca-tofu-trust.md) | Satellite CA Trust-on-First-Use and Vault-Backed Admin Password | Accepted |
 | [039](039-product-demos-on-v2-enable.md) | Product Demos Run from the New Enable Command | Accepted |
 | [040](040-addon-framework-and-bash-fallback.md) | Shared Addon Framework and Bash Fallback for the Python Command | Accepted |
+| [041](041-guarded-eda-and-pinned-apd.md) | Guarded EDA Integration and Pinned APD Revision | Accepted |
 
 ## Creating a New ADR
 

@@ -29,13 +29,19 @@ LAB_NET=satlab                                 # from 00-network-setup.sh
 MAC_HOST="52:54:00:5a:7e:01"                   # must match satellite-vm.ks
 MAC_LAB="52:54:00:5a:7e:02"
 
-# Secrets rendered into the kickstart (prefer env vars over editing this file)
-ROOTPW="${ROOTPW:-RedHat123!}"
+# Secrets rendered into the kickstart. The orchestrator obtains ROOTPW from
+# aap_demo.satellite.root_password in the encrypted host Vault.
+ROOTPW="${ROOTPW:-}"
 RHSM_ORG="${RHSM_ORG:-}"                       # activation-key org id (preferred)
 RHSM_AK="${RHSM_AK:-}"                         # activation key name
 RHSM_USER="${RHSM_USER:-}"                     # fallback: username/password
 RHSM_PASS="${RHSM_PASS:-}"
 # ---------------------------------------------------------------------------
+
+if [ -z "$ROOTPW" ]; then
+  echo "ERROR: ROOTPW must be supplied from the encrypted aap-demo Vault" >&2
+  exit 1
+fi
 
 VIRSH="virsh -c qemu:///system"
 

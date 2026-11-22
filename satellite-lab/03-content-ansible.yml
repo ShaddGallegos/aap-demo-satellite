@@ -11,9 +11,9 @@
     # Password resolution order: -e satellite_password=... (CLI), then the
     # aap_demo.satellite.admin_password key in the encrypted env.yml Vault, then
     # the vault_satellite_password var. No hardcoded default.
-    satellite_password: "{{ satellite_password | default(vault_satellite_password) }}"
+    satellite_password: "{{ aap_demo.satellite.admin_password | default(vault_satellite_password) }}"
     satellite_validate_certs: false
-    org: Demo Org
+    org: Default Organization
     manifest_path: /root/manifest.zip
     rhel_product: Red Hat Enterprise Linux for x86_64
     client_product: Red Hat Satellite Client 6

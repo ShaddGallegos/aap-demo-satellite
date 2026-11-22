@@ -4,14 +4,14 @@ if [ -n "${_AAP_DEMO_MAINTENANCE_LOADED:-}" ]; then return 0; fi
 _AAP_DEMO_MAINTENANCE_LOADED=1
 
 cmd_maintenance() {
-  local action="${1:-preview}" apply="${2:-false}" reconfigure="${3:-false}"
+  local action="${1:-preview}" apply="${2:-false}" reconfigure="${3:-false}" zero="${4:-false}"
 
   if [ "$action" = "uninstall" ]; then
-    _maintenance_uninstall "$apply" "$reconfigure"
+    _maintenance_uninstall "$apply" "$reconfigure" "$zero"
     return
   fi
-  if [ "$reconfigure" = true ]; then
-    echo "ERROR: --reconfigure is supported only by maintenance uninstall" >&2
+  if [ "$reconfigure" = true ] || [ "$zero" = true ]; then
+    echo "ERROR: --reconfigure and --zero are supported only by maintenance uninstall" >&2
     return 1
   fi
   if [ "$action" != "preview" ]; then
@@ -104,7 +104,7 @@ EOF
 }
 
 _maintenance_uninstall_preview() {
-  local reconfigure="${1:-false}"
+  local reconfigure="${1:-false}" zero="${2:-false}"
   local data_dir="${AAP_DEMO_DIR:-$HOME/.aap-demo}"
   local crc_dir="${AAP_DEMO_CRC_DIR:-$HOME/.crc}"
 
@@ -117,7 +117,11 @@ _maintenance_uninstall_preview() {
   echo "  • Managed Satellite lab VM and /var/lib/libvirt/images/satellite.qcow2"
   echo "  • Downloaded CRC bundle and cache: ${crc_dir}"
   echo "  • Generated credentials, kubeconfig, addon state, caches, and virtualenvs"
-  if [ "$reconfigure" = true ]; then
+  if [ "$zero" = true ]; then
+    echo "  • The complete encrypted credential Vault: $HOME/.ansible/conf/env.yml and .vaultpass.txt"
+    echo "    (including credentials unrelated to aap-demo)"
+    echo "  • The aap-demo Satellite Discovery-image cache and off-VM recovery checkpoints"
+  elif [ "$reconfigure" = true ]; then
     echo "  • The aap_demo entries in the encrypted credential Vault (Vault files are kept)"
   fi
   echo "  • Persistent CRI-O image disk and local OCI image cache"
@@ -125,23 +129,29 @@ _maintenance_uninstall_preview() {
   echo "  • Ingress CA entries from system and browser trust stores"
   echo "  • Claude Code aap-demo MCP registration and shell CA export"
   echo "  • Dashboard process and logs"
-  echo "  • Linux/macOS recovery services, configuration, and retained backups"
+  echo "  • Linux/macOS recovery services and configuration"
   echo "  • aap-demo CLI symlink and shell completion files"
   echo "  • Generated private system-information document and temporary logs"
   echo ""
   echo "Preserved:"
   echo "  • Source repository: ${SCRIPT_DIR}"
-  if [ "$reconfigure" = true ]; then
+  echo "  • Independent Gitea VM, OS disk, host NFS exports/data, local CA and service state"
+  if [ "$zero" = true ]; then
+    echo "  • No credential Vault files or aap-demo recovery/cache state"
+  elif [ "$reconfigure" = true ]; then
     echo "  • Vault files env.yml and .vaultpass.txt (shared with other products/projects;"
     echo "    only the aap_demo entries are stripped)"
   else
     echo "  • Encrypted credential Vault env.yml and .vaultpass.txt, including the"
     echo "    aap_demo credentials, so rebuilds do not re-prompt (use --reconfigure to strip them)"
   fi
-  echo "  • Unrelated keys in $HOME/.ansible/conf/env.yml"
+  if [ "$zero" != true ]; then
+    echo "  • Unrelated keys in $HOME/.ansible/conf/env.yml"
+  fi
   echo "  • Shared OS packages, command-line tools, and libvirt group membership"
   echo "  • External Satellite servers, additional VM disks, shared libvirt networks,"
-  echo "    ISO files, and host-side Satellite NFS content/backups"
+  echo "    ISO files, cached Satellite Discovery image, and host-side Satellite NFS content/backups"
+  echo "  • Off-VM recovery checkpoints: ${AAP_DEMO_STATE_BACKUP_DIR:-/var/lib/aap-demo/$(id -un)}"
   echo ""
   du -sh "$data_dir" "$crc_dir" 2>/dev/null | sed 's/^/  /' || true
 }
@@ -255,8 +265,22 @@ _maintenance_remove_state_service() {
         echo "ERROR: Refusing to remove another user's aap-demo recovery service" >&2
         return 1
       fi
+      local user_units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+      if [ -f "$user_units/aap-demo-crc-watchdog.timer" ] \
+        || [ -f "$user_units/aap-demo-crc-watchdog.service" ]; then
+        bash "${SCRIPT_DIR}/scripts/aap-demo-crc-watchdog.sh" uninstall || {
+          echo "ERROR: Failed to remove the aap-demo CRC watchdog" >&2
+          return 1
+        }
+      fi
       if [ -e "$system_unit" ] || [ -d "$system_config" ]; then
-        sudo systemctl disable --now aap-demo.service >/dev/null 2>&1 || {
+        # Do not stop the service here: its ExecStop deliberately makes a
+        # graceful cold checkpoint, while this already-confirmed uninstall is
+        # about to remove the managed CRC/Fleet resources itself. Retrying an
+        # unavailable graceful shutdown would block teardown without producing
+        # a checkpoint. Disabling prevents a later boot recovery attempt;
+        # completed checkpoints remain under the preserved state root.
+        sudo systemctl disable aap-demo.service >/dev/null 2>&1 || {
           echo "ERROR: Failed to disable the aap-demo recovery service" >&2
           return 1
         }
@@ -265,8 +289,11 @@ _maintenance_remove_state_service() {
         "$system_unit" \
         "$system_libexec/aap-demo-state" \
         "$system_libexec/aap-demo-operation-lock.sh"
-      sudo rm -rf -- "$system_config" "$system_backups"
-      sudo rmdir "$(dirname "$system_backups")" 2>/dev/null || true
+      # Recovery checkpoints are deliberately outside the disposable
+      # configuration.  A managed rebuild may need them after the CRC and
+      # state-service configuration are gone, so only remove the service
+      # configuration here.
+      sudo rm -rf -- "$system_config"
       if command -v systemctl >/dev/null 2>&1; then
         sudo systemctl daemon-reload >/dev/null
       fi
@@ -280,6 +307,57 @@ _maintenance_remove_managed_credentials() {
     source "${SCRIPT_DIR}/includes/credential-vault.sh"
   fi
   aap_demo_vault_remove_managed
+}
+
+_maintenance_remove_zero_vault() {
+  # A zero reset intentionally deletes the shared Vault itself. Do not permit
+  # environment overrides here: this protects callers from turning a hidden
+  # reset switch into an arbitrary-file deletion primitive.
+  local vault_dir="$HOME/.ansible/conf"
+  local vault_file="${AAP_DEMO_VAULT_FILE:-$vault_dir/env.yml}"
+  local password_file="${AAP_DEMO_VAULT_PASSWORD_FILE:-$vault_dir/.vaultpass.txt}"
+  local prior_file="${AAP_DEMO_PREVIOUS_VAULT_FILE:-$vault_dir/env-aap-demo.yml}"
+  local prior_password="${AAP_DEMO_PREVIOUS_VAULT_PASSWORD_FILE:-$vault_dir/.vaultpass-aap-demo.txt}"
+  local legacy_file="${AAP_DEMO_LEGACY_VAULT_FILE:-$vault_dir/env_microshift.yml}"
+  local legacy_password="${AAP_DEMO_LEGACY_VAULT_PASSWORD_FILE:-$vault_dir/.vaultpass_microshift.txt}"
+
+  [ "$vault_file" = "$vault_dir/env.yml" ] \
+    && [ "$password_file" = "$vault_dir/.vaultpass.txt" ] \
+    && [ "$prior_file" = "$vault_dir/env-aap-demo.yml" ] \
+    && [ "$prior_password" = "$vault_dir/.vaultpass-aap-demo.txt" ] \
+    && [ "$legacy_file" = "$vault_dir/env_microshift.yml" ] \
+    && [ "$legacy_password" = "$vault_dir/.vaultpass_microshift.txt" ] || {
+      echo "ERROR: --zero only removes the standard Vault paths under $vault_dir; unset Vault path overrides first." >&2
+      return 1
+    }
+
+  rm -f -- "$vault_file" "$password_file" "$prior_file" "$prior_password" \
+    "$legacy_file" "$legacy_password" || return 1
+  rmdir "$vault_dir" 2>/dev/null || true
+  rmdir "$(dirname "$vault_dir")" 2>/dev/null || true
+  echo "  Removed the complete encrypted credential Vault"
+}
+
+_maintenance_remove_zero_state_and_cache() {
+  local checkpoints="${AAP_DEMO_STATE_BACKUP_DIR:-/var/lib/aap-demo/$(id -un)}"
+  local discovery_cache="/var/lib/libvirt/images/aap-demo-fdi-image-latest.tar"
+
+  [ "$(basename "$(dirname "$checkpoints")")" = aap-demo ] || {
+    echo "ERROR: Refusing unsafe aap-demo recovery checkpoint path: $checkpoints" >&2
+    return 1
+  }
+  case "$(uname -s)" in
+    Linux)
+      sudo rm -rf -- "$checkpoints" || return 1
+      # This is the sole Satellite Discovery cache created by aap-demo. ISO
+      # images and other libvirt content remain outside a zero reset.
+      sudo rm -f -- "$discovery_cache" || return 1
+      ;;
+    Darwin)
+      rm -rf -- "$checkpoints" || return 1
+      ;;
+  esac
+  echo "  Removed aap-demo recovery checkpoints and Satellite Discovery cache"
 }
 
 _maintenance_remove_satellite() {
@@ -338,7 +416,7 @@ _maintenance_remove_satellite() {
 }
 
 _maintenance_uninstall_apply() {
-  local reconfigure="${1:-false}"
+  local reconfigure="${1:-false}" zero="${2:-false}"
   local data_dir="${AAP_DEMO_DIR:-$HOME/.aap-demo}"
   local crc_dir="${AAP_DEMO_CRC_DIR:-$HOME/.crc}"
   local image_disk cli_path
@@ -409,7 +487,9 @@ _maintenance_uninstall_apply() {
     }
   fi
 
-  if [ "$reconfigure" = true ]; then
+  if [ "$zero" = true ]; then
+    _maintenance_remove_zero_vault || return 1
+  elif [ "$reconfigure" = true ]; then
     _maintenance_remove_managed_credentials || {
       echo "ERROR: Failed to remove aap-demo credentials from the encrypted Vault" >&2
       return 1
@@ -419,6 +499,9 @@ _maintenance_uninstall_apply() {
   fi
   _maintenance_remove_data_dir "$data_dir"
   rm -rf -- "$crc_dir"
+  if [ "$zero" = true ]; then
+    _maintenance_remove_zero_state_and_cache || return 1
+  fi
   cli_path="$HOME/.local/bin/aap-demo"
   if [ -L "$cli_path" ] \
     && [ "$(readlink "$cli_path")" = "${SCRIPT_DIR}/aap-demo.sh" ]; then
@@ -436,23 +519,43 @@ _maintenance_uninstall_apply() {
 
   echo ""
   echo "✓ aap-demo environment uninstalled"
-  if [ "$reconfigure" = true ]; then
+  if [ "$zero" = true ]; then
+    echo "  Removed all aap-demo settings, caches, recovery state, and Vault files"
+  elif [ "$reconfigure" = true ]; then
     echo "  Removed all aap-demo settings and managed credentials"
   else
     echo "  Removed all aap-demo settings; kept the credential Vault for rebuilds"
   fi
   echo "  Preserved source repository: ${SCRIPT_DIR}"
-  echo "  Preserved shared tools and unrelated Vault content"
+  if [ "$zero" != true ]; then
+    echo "  Preserved shared tools and unrelated Vault content"
+  else
+    echo "  Preserved source repository and shared OS packages/tools"
+  fi
 }
 
 _maintenance_uninstall() {
-  local apply="${1:-false}" reconfigure="${2:-false}" confirmation=""
-  _maintenance_uninstall_preview "$reconfigure"
+  local apply="${1:-false}" reconfigure="${2:-false}" zero="${3:-false}" confirmation=""
+  _maintenance_uninstall_preview "$reconfigure" "$zero"
 
   if [ "$apply" != true ]; then
     echo ""
     echo "Preview only. Run 'aap-demo maintenance uninstall --apply' to continue."
     return 0
+  fi
+
+  if { [ "$reconfigure" = true ] || [ "$zero" = true ]; } \
+    && command -v virsh >/dev/null 2>&1; then
+    local domains
+    domains=$(virsh -c qemu:///system list --all --name) || {
+      echo "ERROR: Cannot check retained Gitea before stripping shared Vault credentials" >&2
+      return 1
+    }
+    if grep -Fxq aap-demo-gitea <<<"$domains"; then
+      echo "ERROR: --reconfigure/--zero would remove credentials for the retained Gitea VM." >&2
+      echo "Use default uninstall to preserve its encrypted administrator/SSH credentials." >&2
+      return 1
+    fi
   fi
 
   if [ "${QUIET:-false}" = "true" ] || [ ! -t 0 ]; then
@@ -470,9 +573,25 @@ _maintenance_uninstall() {
     fi
   fi
 
+  if [ "$zero" = true ]; then
+    if [ "${QUIET:-false}" = "true" ] || [ ! -t 0 ]; then
+      if [ "${AAP_DEMO_ZERO_CONFIRM:-}" != "ZERO" ]; then
+        echo "ERROR: Noninteractive --zero requires AAP_DEMO_ZERO_CONFIRM=ZERO" >&2
+        return 1
+      fi
+    else
+      echo "Type ZERO to also permanently delete the complete credential Vault and aap-demo caches:"
+      read -r confirmation </dev/tty
+      if [ "$confirmation" != "ZERO" ]; then
+        echo "Zero reset cancelled."
+        return 1
+      fi
+    fi
+  fi
+
   _maintenance_remove_state_service || return 1
   if declare -F aap_demo_acquire_operation_lock >/dev/null; then
     aap_demo_acquire_operation_lock "maintenance-uninstall" || return 1
   fi
-  _maintenance_uninstall_apply "$reconfigure"
+  _maintenance_uninstall_apply "$reconfigure" "$zero"
 }

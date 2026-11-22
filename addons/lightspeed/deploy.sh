@@ -2,9 +2,8 @@
 # Deploy Ansible Lightspeed (intelligent assistant) for aap-demo, backed by the
 # local Ollama LLM (qwen2.5:3b) instead of a cloud model.
 #
-# Creates the model configuration Secret pointing at the in-cluster Ollama
-# OpenAI-compatible endpoint, then an AnsibleLightspeed CR that the
-# ansible-lightspeed operator reconciles into the Lightspeed API + chatbot.
+# Configures the AAP-managed intelligent assistant and its native MCP sidecars.
+# Code-generation providers are separate from the chatbot's OpenAI-compatible LLM.
 #
 # Prerequisites:
 #   - aap-demo enable ollama   (provides the model endpoint)
@@ -18,180 +17,176 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 NAMESPACE="${LIGHTSPEED_NAMESPACE:-aap-operator}"
-CR_NAME="${LIGHTSPEED_CR_NAME:-aap-lightspeed}"
-MODEL_SECRET="${LIGHTSPEED_MODEL_SECRET:-aap-lightspeed-model-config}"
+AAP_NAME="${AAP_CR_NAME:-aap}"
+CR_NAME="${LIGHTSPEED_CR_NAME:-${AAP_NAME}-lightspeed}"
+CHATBOT_SECRET="${LIGHTSPEED_CHATBOT_SECRET:-${CR_NAME}-chatbot-config}"
 # In-cluster Ollama OpenAI-compatible endpoint (no TLS, no auth on the svc).
 MODEL_URL="${LIGHTSPEED_MODEL_URL:-http://ollama.aap-demo-ollama.svc.cluster.local:11434/v1}"
 MODEL_ID="${LIGHTSPEED_MODEL_ID:-qwen2.5:3b}"
 # Ollama ignores the key but the operator requires a non-empty value.
 MODEL_API_KEY="${LIGHTSPEED_MODEL_API_KEY:-ollama}"
-MODEL_TYPE="${LIGHTSPEED_MODEL_TYPE:-wca-onprem}"
+ROLLOUT_TIMEOUT="${LIGHTSPEED_ROLLOUT_TIMEOUT:-600s}"
+# The operator defaults allocate 500m CPU / 5Gi memory to both services. The
+# local model API only needs 200m / 2Gi, while the chatbot's RAG stack retains
+# its proven 500m / 5Gi request. This matters on a one-node AAP/Ollama demo.
+API_CPU_REQUEST="${LIGHTSPEED_API_CPU_REQUEST:-200m}"
+API_MEMORY_REQUEST="${LIGHTSPEED_API_MEMORY_REQUEST:-2Gi}"
+API_CPU_LIMIT="${LIGHTSPEED_API_CPU_LIMIT:-1000m}"
+API_MEMORY_LIMIT="${LIGHTSPEED_API_MEMORY_LIMIT:-4Gi}"
+CHATBOT_CPU_REQUEST="${LIGHTSPEED_CHATBOT_CPU_REQUEST:-500m}"
+CHATBOT_MEMORY_REQUEST="${LIGHTSPEED_CHATBOT_MEMORY_REQUEST:-5Gi}"
+CHATBOT_CPU_LIMIT="${LIGHTSPEED_CHATBOT_CPU_LIMIT:-1500m}"
+CHATBOT_MEMORY_LIMIT="${LIGHTSPEED_CHATBOT_MEMORY_LIMIT:-8Gi}"
 
 _err() { printf 'ERROR: %s\n' "$*" >&2; }
 _log() { printf '  %s\n' "$*"; }
 
 ACTION="${1:-deploy}"
 
+if [ "$CR_NAME" != "${AAP_NAME}-lightspeed" ]; then
+  _err "LIGHTSPEED_CR_NAME must match the AAP-managed name ${AAP_NAME}-lightspeed."
+  exit 1
+fi
+
 if [ "$ACTION" = "--delete" ] || [ "$ACTION" = "delete" ]; then
   echo "Removing Ansible Lightspeed..."
-  kubectl delete ansiblelightspeed "$CR_NAME" -n "$NAMESPACE" 2>/dev/null || true
-  kubectl delete secret "$MODEL_SECRET" -n "$NAMESPACE" 2>/dev/null || true
+  kubectl patch ansibleautomationplatform "$AAP_NAME" -n "$NAMESPACE" --type=merge \
+    -p '{"spec":{"lightspeed":{"disabled":true}}}'
+  kubectl delete secret "$CHATBOT_SECRET" -n "$NAMESPACE" --ignore-not-found
   echo "✓ Ansible Lightspeed removed"
   exit 0
 fi
 
 # --- preflight ---------------------------------------------------------------
 command -v kubectl >/dev/null 2>&1 || { _err "kubectl not found"; exit 1; }
+command -v jq >/dev/null 2>&1 || { _err "jq not found"; exit 1; }
 
 if ! kubectl get crd ansiblelightspeeds.lightspeed.ansible.com >/dev/null 2>&1; then
   _err "AnsibleLightspeed CRD not found — is the ansible-lightspeed operator installed?"
   exit 1
 fi
 
-if ! kubectl get svc ollama -n aap-demo-ollama >/dev/null 2>&1; then
+if ! kubectl get ansibleautomationplatform "$AAP_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+  _err "AAP instance ${AAP_NAME} not found in ${NAMESPACE}."
+  exit 1
+fi
+
+if [[ "$MODEL_URL" == http://ollama.aap-demo-ollama.svc.cluster.local:11434/* ]] \
+  && ! kubectl get svc ollama -n aap-demo-ollama >/dev/null 2>&1; then
   _err "Ollama service not found. Run: aap-demo enable ollama"
   exit 1
 fi
 
-# --- model configuration secret ----------------------------------------------
-_log "▸ Creating model configuration secret ($MODEL_SECRET)"
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: Secret
-metadata:
-  name: ${MODEL_SECRET}
-  namespace: ${NAMESPACE}
-  labels:
-    app.kubernetes.io/managed-by: aap-demo
-type: Opaque
-stringData:
-  model_url: "${MODEL_URL}"
-  model_api_key: "${MODEL_API_KEY}"
-  model_id: "${MODEL_ID}"
-  model_type: "${MODEL_TYPE}"
-  # wca-onprem (on-prem OpenAI-compatible, e.g. Ollama) requires a username;
-  # Ollama ignores it but the operator validates its presence.
-  username: "ollama"
-  model_verify_ssl: "false"
-  model_enable_anonymization: "false"
-EOF
+# --- intelligent assistant configuration -------------------------------------
+_log "▸ Creating chatbot configuration secret ($CHATBOT_SECRET)"
+jq -n --arg name "$CHATBOT_SECRET" --arg ns "$NAMESPACE" \
+  --arg url "$MODEL_URL" --arg model "$MODEL_ID" --arg aap "$AAP_NAME" \
+  --rawfile key /dev/fd/3 '{
+    apiVersion: "v1", kind: "Secret",
+    metadata: {name: $name, namespace: $ns,
+      labels: {"app.kubernetes.io/managed-by": "aap-demo"}},
+    type: "Opaque",
+    stringData: {
+      chatbot_llm_provider_type: "openai", chatbot_url: $url,
+      chatbot_model: $model, chatbot_token: $key,
+      aap_gateway_url: ("http://" + $aap),
+      aap_controller_url: ("http://" + $aap + "-controller-service")
+    }
+  }' 3< <(printf '%s' "$MODEL_API_KEY") | kubectl apply -f -
 
-# --- AnsibleLightspeed CR ------------------------------------------------------
-_log "▸ Creating AnsibleLightspeed CR ($CR_NAME)"
-kubectl apply -f - <<EOF
-apiVersion: lightspeed.ansible.com/v1alpha1
-kind: AnsibleLightspeed
-metadata:
-  name: ${CR_NAME}
-  namespace: ${NAMESPACE}
-  labels:
-    app.kubernetes.io/managed-by: aap-demo
-spec:
-  admin_user: admin
-  model_config_secret_name: ${MODEL_SECRET}
-  api:
-    replicas: 1
-  chatbot_api:
-    replicas: 1
-EOF
+# The platform operator owns authentication, gateway registration and the child
+# CR. Patching that child alone either loses these settings or is reconciled away.
+_log "▸ Enabling the AAP-managed intelligent assistant ($CR_NAME)"
+patch=$(jq -n --arg secret "$CHATBOT_SECRET" '{
+  spec: {lightspeed: {
+    disabled: false, chatbot_config_secret_name: $secret,
+    api: {replicas: 1}, chatbot_api: {replicas: 1}
+  }}
+}')
+kubectl patch ansibleautomationplatform "$AAP_NAME" -n "$NAMESPACE" --type=merge -p "$patch"
 
-# On SNO/full OpenShift the postgres PVC is provisioned root-owned and the
-# anyuid SCC alone does not make it writable — the postgres container fails with
-# "mkdir: cannot create directory '/var/lib/pgsql/data/userdata': Permission
-# denied". The operator's postgres_data_volume_init init container is gated to
-# non-OpenShift, so fix the volume ownership directly with a one-off privileged
-# pod, then restart postgres so it starts clean.
-_fix_postgres_pvc() {
-  local pvc="postgres-15-${CR_NAME}-postgres-15-0" fixpod="${CR_NAME}-pgdata-fix"
-  # Only needed when the postgres pod exists and is crash-looping on permissions.
-  if ! kubectl get pod -n "$NAMESPACE" "${CR_NAME}-postgres-15-0" >/dev/null 2>&1; then
-    return 0
-  fi
-  # The postgres pod needs a moment to start and crash before the permission
-  # error appears in its log. Poll briefly for it instead of checking once.
-  local _attempt
-  for _attempt in $(seq 1 24); do
-    if kubectl logs -n "$NAMESPACE" "${CR_NAME}-postgres-15-0" --tail=5 2>/dev/null \
-        | grep -q "Permission denied"; then
-      break
-    fi
-    # If the pod is already Running and past the crash, no fix is needed.
-    if kubectl get pod -n "$NAMESPACE" "${CR_NAME}-postgres-15-0" \
-        -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null | grep -q true; then
-      return 0
-    fi
-    sleep 5
-  done
-  if ! kubectl logs -n "$NAMESPACE" "${CR_NAME}-postgres-15-0" --tail=5 2>/dev/null \
-      | grep -q "Permission denied"; then
-    return 0
-  fi
-  _log "▸ Fixing postgres PVC ownership (SNO root-owned volume)"
-  kubectl delete pod -n "$NAMESPACE" "$fixpod" >/dev/null 2>&1 || true
-  kubectl apply -f - <<EOF
-apiVersion: v1
-kind: Pod
-metadata:
-  name: ${fixpod}
-  namespace: ${NAMESPACE}
-  labels:
-    app.kubernetes.io/managed-by: aap-demo
-spec:
-  securityContext:
-    runAsUser: 0
-  containers:
-  - name: fix
-    image: registry.redhat.io/rhel9/postgresql-15:1
-    securityContext:
-      runAsUser: 0
-    command: ["/bin/sh","-c"]
-    args:
-      - mkdir -p /var/lib/pgsql/data/userdata &&
-        chown -R 26:26 /var/lib/pgsql/data &&
-        chmod 700 /var/lib/pgsql/data/userdata
-    volumeMounts:
-    - name: data
-      mountPath: /var/lib/pgsql/data
-  volumes:
-  - name: data
-    persistentVolumeClaim:
-      claimName: ${pvc}
-  restartPolicy: Never
-EOF
-  kubectl wait --for=jsonpath='{.status.phase}'=Succeeded \
-    "pod/${fixpod}" -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
-  kubectl delete pod -n "$NAMESPACE" "$fixpod" >/dev/null 2>&1 || true
-  kubectl delete pod -n "$NAMESPACE" "${CR_NAME}-postgres-15-0" >/dev/null 2>&1 || true
-}
-
-_fix_postgres_pvc
+# AAP owns creation of this child, but the resource requirements belong to the
+# AnsibleLightspeed API. The parent AAP CR only forwards replicas/config-secret
+# fields, so setting resource_requirements there is silently ignored.
+_log "▸ Applying local-demo resource profile to $CR_NAME"
+if ! kubectl wait --for=create "ansiblelightspeed/${CR_NAME}" -n "$NAMESPACE" --timeout="$ROLLOUT_TIMEOUT"; then
+  _err "Lightspeed resource ${CR_NAME} never appeared in namespace ${NAMESPACE}"
+  exit 1
+fi
+child_patch=$(jq -n \
+  --arg api_cpu_request "$API_CPU_REQUEST" \
+  --arg api_memory_request "$API_MEMORY_REQUEST" \
+  --arg api_cpu_limit "$API_CPU_LIMIT" \
+  --arg api_memory_limit "$API_MEMORY_LIMIT" \
+  --arg chatbot_cpu_request "$CHATBOT_CPU_REQUEST" \
+  --arg chatbot_memory_request "$CHATBOT_MEMORY_REQUEST" \
+  --arg chatbot_cpu_limit "$CHATBOT_CPU_LIMIT" \
+  --arg chatbot_memory_limit "$CHATBOT_MEMORY_LIMIT" '{
+  spec: {
+    api: {resource_requirements: {
+      requests: {cpu: $api_cpu_request, memory: $api_memory_request},
+      limits: {cpu: $api_cpu_limit, memory: $api_memory_limit}
+    }, strategy: {type: "Recreate"}},
+    chatbot_api: {resource_requirements: {
+      requests: {cpu: $chatbot_cpu_request, memory: $chatbot_memory_request},
+      limits: {cpu: $chatbot_cpu_limit, memory: $chatbot_memory_limit}
+    }, strategy: {type: "Recreate"}}
+  }
+}')
+kubectl patch ansiblelightspeed "$CR_NAME" -n "$NAMESPACE" --type=merge -p "$child_patch"
 
 _log "▸ Waiting for Lightspeed API deployment..."
-_deploy_found=false
-_rollout_ok=false
-for _ in $(seq 1 60); do
-  if kubectl get deploy -n "$NAMESPACE" "${CR_NAME}-api" >/dev/null 2>&1; then
-    _deploy_found=true
-    if kubectl rollout status "deploy/${CR_NAME}-api" -n "$NAMESPACE" --timeout=5m; then
-      _rollout_ok=true
-    fi
-    break
-  fi
-  sleep 5
-done
-
-if [ "$_deploy_found" != true ]; then
+if ! kubectl wait --for=create "deploy/${CR_NAME}-api" -n "$NAMESPACE" --timeout="$ROLLOUT_TIMEOUT"; then
   _err "Lightspeed API deployment ${CR_NAME}-api never appeared in namespace ${NAMESPACE}"
   exit 1
 fi
-if [ "$_rollout_ok" != true ]; then
+# A child reconciliation already blocked on the operator defaults will not
+# observe its new resource requirements until that Pending pod can run. Update
+# the generated Deployments too: this unblocks the current reconciliation, and
+# the child CR above makes the setting durable on its next pass.
+api_deployment_patch=$(jq -n \
+  --arg cpu_request "$API_CPU_REQUEST" --arg memory_request "$API_MEMORY_REQUEST" \
+  --arg cpu_limit "$API_CPU_LIMIT" --arg memory_limit "$API_MEMORY_LIMIT" '{
+  spec: {template: {spec: {
+    containers: [{name: "model-api", resources: {
+      requests: {cpu: $cpu_request, memory: $memory_request},
+      limits: {cpu: $cpu_limit, memory: $memory_limit}
+    }}],
+    initContainers: [{name: "configure-combined-ca-bundle", resources: {
+      requests: {cpu: $cpu_request, memory: $memory_request},
+      limits: {cpu: $cpu_limit, memory: $memory_limit}
+    }}]
+  }}, strategy: {type: "Recreate", rollingUpdate: null}}
+}')
+kubectl patch deployment "${CR_NAME}-api" -n "$NAMESPACE" --type=strategic -p "$api_deployment_patch"
+if ! kubectl rollout status "deploy/${CR_NAME}-api" -n "$NAMESPACE" --timeout="$ROLLOUT_TIMEOUT"; then
   _err "Lightspeed API deployment ${CR_NAME}-api failed to roll out"
-  kubectl rollout status "deploy/${CR_NAME}-api" -n "$NAMESPACE" --timeout=10s 2>&1 >&2 || true
   exit 1
 fi
+
+_log "▸ Waiting for Lightspeed chatbot deployment..."
+if ! kubectl wait --for=create "deploy/${CR_NAME}-chatbot-api" -n "$NAMESPACE" --timeout="$ROLLOUT_TIMEOUT"; then
+  _err "Lightspeed chatbot deployment ${CR_NAME}-chatbot-api never appeared."
+  exit 1
+fi
+chatbot_deployment_patch=$(jq -n \
+  --arg cpu_request "$CHATBOT_CPU_REQUEST" --arg memory_request "$CHATBOT_MEMORY_REQUEST" \
+  --arg cpu_limit "$CHATBOT_CPU_LIMIT" --arg memory_limit "$CHATBOT_MEMORY_LIMIT" '{
+  spec: {template: {spec: {containers: [{name: "ansible-chatbot", resources: {
+    requests: {cpu: $cpu_request, memory: $memory_request},
+    limits: {cpu: $cpu_limit, memory: $memory_limit}
+  }}]}}, strategy: {type: "Recreate", rollingUpdate: null}}
+}')
+kubectl patch deployment "${CR_NAME}-chatbot-api" -n "$NAMESPACE" --type=strategic -p "$chatbot_deployment_patch"
+kubectl rollout status "deploy/${CR_NAME}-chatbot-api" -n "$NAMESPACE" \
+  --timeout="$ROLLOUT_TIMEOUT" || {
+  _err "Lightspeed chatbot failed to roll out; the assistant is not ready."
+  exit 1
+}
 
 echo ""
 echo "✓ Ansible Lightspeed deployed"
 echo "  Model:    ${MODEL_ID} via ${MODEL_URL}"
+echo "  MCP:      native AAP gateway and controller sidecars (Technology Preview)"
 echo "  CR:       ${CR_NAME} (namespace ${NAMESPACE})"
 echo "  Access:   AAP console → Lightspeed intelligent assistant"

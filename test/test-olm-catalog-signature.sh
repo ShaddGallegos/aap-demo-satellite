@@ -12,18 +12,39 @@ PRESET=openshift
 kubectl() {
   printf '%s\n' "$*" >>"$TEST_DIR/kubectl.log"
   case "$*" in
-    'get ingresses.config/cluster --ignore-not-found --request-timeout=5s -o name')
+    'api-resources -o name --request-timeout=5s')
       case "$PRESET" in
-        openshift) printf 'ingress.config.openshift.io/cluster\n' ;;
-        microshift) ;;
-        unavailable) return 1 ;;
+        openshift) printf 'nodes\nroutes.route.openshift.io\ningresses.config.openshift.io\n' ;;
+        microshift | wrong_guest | ssh_failure) printf 'nodes\nroutes.route.openshift.io\n' ;;
+        incomplete) printf 'nodes\n' ;;
+        unavailable)
+          echo 'API discovery failed' >&2
+          return 1
+          ;;
       esac
       ;;
-    *) echo "Unexpected kubectl call: $*" >&2; return 1 ;;
+    *)
+      echo "Unexpected kubectl call: $*" >&2
+      return 1
+      ;;
   esac
 }
 needs_signature_policy_relaxation() { return 0; }
-_ensure_crc_ssh_ready() { echo ssh >>"$TEST_DIR/actions"; return 1; }
+CRC_SSH_PORT=2222
+CRC_SSH_OPTS=()
+_ensure_crc_ssh_ready() { [ "$PRESET" != ssh_failure ]; }
+ssh() {
+  case "${*: -1}" in
+    'systemctl is-active --quiet microshift')
+      [ "$PRESET" != wrong_guest ]
+      ;;
+    *)
+      echo policy >>"$TEST_DIR/actions"
+      printf 'CHANGED\n'
+      ;;
+  esac
+}
+_reload_crio_on_crc_vm() { echo reload >>"$TEST_DIR/actions"; }
 
 maybe_relax_redhat_registry_signature_policy >"$TEST_DIR/output"
 grep -q 'MCO-managed; leaving it unchanged' "$TEST_DIR/output"
@@ -34,12 +55,28 @@ if maybe_relax_redhat_registry_signature_policy >"$TEST_DIR/output" 2>&1; then
   exit 1
 fi
 [ ! -e "$TEST_DIR/actions" ]
-PRESET=microshift
+PRESET=incomplete
+if maybe_relax_redhat_registry_signature_policy >"$TEST_DIR/output" 2>&1; then
+  echo "FAIL: incomplete API discovery was ignored" >&2
+  exit 1
+fi
+[ ! -e "$TEST_DIR/actions" ]
+PRESET=wrong_guest
+if maybe_relax_redhat_registry_signature_policy >"$TEST_DIR/output" 2>&1; then
+  echo "FAIL: non-MicroShift guest was accepted" >&2
+  exit 1
+fi
+[ ! -e "$TEST_DIR/actions" ]
+PRESET=ssh_failure
 if maybe_relax_redhat_registry_signature_policy >"$TEST_DIR/output" 2>&1; then
   echo "FAIL: missing MicroShift SSH access was ignored" >&2
   exit 1
 fi
-[ "$(cat "$TEST_DIR/actions")" = ssh ]
+[ ! -e "$TEST_DIR/actions" ]
+PRESET=microshift
+maybe_relax_redhat_registry_signature_policy >"$TEST_DIR/output"
+[ "$(cat "$TEST_DIR/actions")" = "$(printf 'policy\nreload')" ]
+grep -q 'Relaxed container signature policy' "$TEST_DIR/output"
 
 (
   export AAP_DEMO_CONFIGURE_COREDNS_ONLY=1

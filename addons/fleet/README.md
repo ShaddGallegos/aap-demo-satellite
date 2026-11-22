@@ -20,6 +20,25 @@ QCOW2 cloud image:
 aap-demo fleet add 1 --image ~/rhel9.qcow2
 ```
 
+For package-heavy application setup, allocate enough memory up front:
+
+```bash
+FLEET_NODE_MEM=4096 aap-demo fleet add 1 --image rhel9
+```
+
+Each node retains its memory allocation across ordinary start/restart.
+An explicit `FLEET_NODE_MEM` overrides the retained allocation when starting
+a stopped node or restarting one. For example, to resize only node 4:
+
+```bash
+FLEET_NODE_MEM=4096 aap-demo fleet node 4 restart
+```
+
+Fleet defaults to 2048 MiB. Nodes created by older releases with the former
+1024 MiB default are automatically restarted at the 2048 MiB reliability
+minimum before access reconciliation. An explicitly requested lower value is
+not overridden; the command instead explains how to resize the node.
+
 ## Registering nodes to the Satellite lab
 
 When the Satellite lab is built (`aap-demo create --full-demo --satellite`),

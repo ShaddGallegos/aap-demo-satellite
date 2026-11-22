@@ -8,7 +8,8 @@
 #
 # Environment variables:
 #   PRODUCT_DEMOS_REPO   - Git repository URL (default: https://github.com/ansible/product-demos)
-#   PRODUCT_DEMOS_BRANCH - Git branch to use (default: main)
+#   PRODUCT_DEMOS_REF    - Immutable Git revision to use (default: tested APD commit)
+#   PRODUCT_DEMOS_BRANCH - Legacy alias for PRODUCT_DEMOS_REF
 #   PRODUCT_DEMOS_EE     - Product Demos EE image (default: quay.io/.../apd-ee-27:latest)
 #   APD_AAP_VERSION      - Pinned AAP version for installer (default: 2.7, skips version ping)
 #
@@ -26,7 +27,8 @@ ACTION="${1:-deploy}"
 
 # Product demos configuration
 PRODUCT_DEMOS_REPO="${PRODUCT_DEMOS_REPO:-https://github.com/ansible/product-demos}"
-PRODUCT_DEMOS_BRANCH="${PRODUCT_DEMOS_BRANCH:-main}"
+PRODUCT_DEMOS_REF="${PRODUCT_DEMOS_REF:-${PRODUCT_DEMOS_BRANCH:-90dea07d34d9bf5bf59acd7b6927ab576c0cddf4}}"
+PRODUCT_DEMOS_BRANCH="$PRODUCT_DEMOS_REF"
 PRODUCT_DEMOS_EE="${PRODUCT_DEMOS_EE:-quay.io/ansible-product-demos/apd-ee-27:latest}"
 APD_BOOTSTRAP_PROJECT_NAME="${APD_BOOTSTRAP_PROJECT_NAME:-APD Bootstrap Project}"
 PRODUCT_DEMOS_EE_NAME="${PRODUCT_DEMOS_EE_NAME:-Product Demos EE}"
@@ -40,7 +42,7 @@ if [ "$ACTION" = "--delete" ] || [ "$ACTION" = "delete" ]; then
   echo "Checking if base APD resources can be removed..."
 
   # Check if any domain addons are still enabled
-  DOMAIN_ADDONS=("product-demos" "product-demo-linux" "product-demo-windows" "product-demo-network" "product-demo-cloud" "product-demo-openshift" "product-demo-satellite")
+  DOMAIN_ADDONS=("product-demos" "product-demo-linux" "product-demo-windows" "product-demo-network" "product-demo-cloud" "product-demo-openshift" "product-demo-satellite" "product-demo-infrastructure" "product-demo-eda")
   ENABLED_DOMAINS=()
 
   for domain in "${DOMAIN_ADDONS[@]}"; do
@@ -91,7 +93,7 @@ fi
 
 echo "Deploying Ansible Product Demos base resources..."
 echo "Repository: $PRODUCT_DEMOS_REPO"
-echo "Branch: $PRODUCT_DEMOS_BRANCH"
+echo "Revision: $PRODUCT_DEMOS_REF"
 echo ""
 echo "Strategy: Create AAP project and run ${APD_INSTALL_PLAYBOOK} (AAP 2.7 pinned, no version ping)"
 echo "          (uses AAP's execution environment which has ansible.platform pre-installed)"
@@ -175,6 +177,11 @@ configure_microshift_job_networking() {
   echo "  ✓ Job pod hostAlias configured: ${AAP_ROUTE} → ${aap_ip}"
 }
 
+configure_microshift_execution_credential() {
+  echo "Configuring the default execution container-group credential..."
+  apd_reconcile_default_execution_credential
+}
+
 apd_credential_type_injectors_json() {
   # Only inject env vars; AAP 2.7 often drops extra_vars on credential type PATCH.
   # Job template extra_vars carry async + aap_validate_certs settings instead.
@@ -249,6 +256,7 @@ fi
 export DEFAULT_ORG_ID APD_BOOTSTRAP_PROJECT_NAME
 
 configure_microshift_job_networking
+configure_microshift_execution_credential
 
 # ==============================================================================
 # CREATE CREDENTIAL TYPE AND CREDENTIAL

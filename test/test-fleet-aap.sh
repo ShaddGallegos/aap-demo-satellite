@@ -48,11 +48,22 @@ _fleet_aap_get_host_gateway_ip() {
   printf '192.0.2.1'
 }
 
-_fleet_ssh_private_key_path() {
-  printf '%s' "${TEST_DIR}/ssh_key"
+FLEET_SSH_VAULT_KEY=aap_demo.fleet.ssh_private_key
+fleet_ssh_key_ensure() { :; }
+fleet_ssh_key_ready() { :; }
+printf 'synthetic private key\n' >"$TEST_DIR/ssh_key"
+aap_demo_vault_with_file() {
+  local key="$1" callback="$2"
+  shift 2
+  "$callback" "$TEST_DIR/ssh_key" "$@"
 }
 
 _fleet_aap_create_credential() {
+  printf '%s\n' "$@" >"$TEST_DIR/credential-arguments"
+  if [ "$1" != "1" ] || [ "$2" != "1" ] || [ "$3" != "$TEST_DIR/ssh_key" ]; then
+    _err "Credential callback received arguments in the wrong order"
+    return 1
+  fi
   printf '3'
 }
 
@@ -92,8 +103,31 @@ if ! grep -q "One or more Fleet nodes could not be registered" <<<"$output" \
   printf '%s\n' "$output" >&2
   exit 1
 fi
+printf '1\n1\n%s\n' "$TEST_DIR/ssh_key" >"$TEST_DIR/expected-credential-arguments"
+if ! cmp -s "$TEST_DIR/expected-credential-arguments" "$TEST_DIR/credential-arguments"; then
+  echo "FAIL: Vault callback did not preserve the credential function argument order" >&2
+  cat "$TEST_DIR/credential-arguments" >&2
+  exit 1
+fi
 
 echo "PASS: host creation failure stops Fleet registration"
+
+inventory_marker="${TEST_DIR}/inventory-created-after-vault-failure"
+_fleet_aap_create_inventory() {
+  touch "$inventory_marker"
+  printf '2'
+}
+aap_demo_vault_with_file() {
+  return 42
+}
+output=$(fleet_register_aap 2>&1)
+status=$?
+if [ "$status" -eq 0 ] || [ -e "$inventory_marker" ]; then
+  echo "FAIL: AAP inventory creation continued after the Vault callback failed" >&2
+  printf '%s\n' "$output" >&2
+  exit 1
+fi
+echo "PASS: Vault credential callback failure stops before inventory creation"
 
 deleted_hosts="${TEST_DIR}/deleted-hosts"
 _fleet_aap_api() {

@@ -11,6 +11,80 @@
 if [ -n "${_AAP_DEMO_CMD_STATUS_LOADED:-}" ]; then return 0; fi
 _AAP_DEMO_CMD_STATUS_LOADED=1
 
+_diagnose_aap_pods() {
+  local pods jobs summary total ready unready completed_jobs='[]'
+  if ! pods=$(kubectl get pods -n "$NAMESPACE" -o json --request-timeout=10s 2>/dev/null); then
+    _check_warn "Unable to inspect AAP pod readiness"
+    return
+  fi
+  if jq -e 'any(.items[]; .status.phase == "Failed" and
+    any(.metadata.ownerReferences[]?; .kind == "Job" and .controller == true))' <<<"$pods" >/dev/null; then
+    if ! jobs=$(kubectl get jobs -n "$NAMESPACE" -o json --request-timeout=10s 2>/dev/null) \
+      || ! completed_jobs=$(jq -ce '[.items[] |
+        select(any(.status.conditions[]?; .type == "Complete" and .status == "True")) |
+        .metadata.uid | select(type == "string" and length > 0)]' <<<"$jobs"); then
+      _check_warn "Unable to inspect AAP migration job completion"
+      return
+    fi
+  fi
+  if ! summary=$(jq -er --argjson completed_jobs "$completed_jobs" '
+      [.items[] | select(.status.phase != "Succeeded") |
+        select((.status.phase == "Failed" and any(.metadata.ownerReferences[]?;
+          .kind == "Job" and .controller == true and
+          (.uid as $uid | $completed_jobs | index($uid) != null))) | not)] as $pods |
+      [($pods | length),
+       ([$pods[] | select(.status.phase == "Running" and
+         any(.status.conditions[]?; .type == "Ready" and .status == "True"))] | length),
+       ([$pods[] | select(.status.phase != "Running" or
+         (any(.status.conditions[]?; .type == "Ready" and .status == "True") | not))
+         | .metadata.name] | join(", "))] | @tsv
+    ' <<<"$pods"); then
+    _check_warn "Unable to inspect AAP pod readiness"
+    return
+  fi
+  IFS=$'\t' read -r total ready unready <<<"$summary"
+  if [ "$total" -eq 0 ]; then
+    _check_warn "No active AAP pods found in $NAMESPACE"
+  elif [ "$ready" -ne "$total" ]; then
+    _check_fail "AAP pods not ready ($ready/$total ready): $unready"
+  else
+    _check_pass "All AAP pods ready ($ready/$total)"
+  fi
+}
+
+_diagnose_hpa_metrics() {
+  local hpas cpu_hpas unknown api metrics
+  echo "Autoscaling:"
+  if ! hpas=$(kubectl get hpa -A -o json --request-timeout=10s 2>/dev/null) \
+    || ! cpu_hpas=$(jq -er '[.items[] | select(any(.spec.metrics[]?;
+      .type == "Resource" and .resource.name == "cpu")) |
+      "\(.metadata.namespace)/\(.metadata.name)"] | join(", ")' <<<"$hpas"); then
+    _check_warn "Unable to inspect horizontal pod autoscalers"
+  elif [ -z "$cpu_hpas" ]; then
+    _check_info "No CPU-based horizontal pod autoscalers found"
+  elif ! api=$(kubectl get apiservice v1beta1.metrics.k8s.io -o json --request-timeout=10s 2>/dev/null); then
+    _check_warn "CPU metrics API unavailable; autoscaling cannot use CPU metrics: $cpu_hpas"
+  elif ! jq -e 'any(.status.conditions[]?; .type == "Available" and .status == "True")' <<<"$api" >/dev/null; then
+    _check_warn "CPU metrics API is not available: $cpu_hpas"
+  elif ! metrics=$(kubectl get --raw /apis/metrics.k8s.io/v1beta1/pods --request-timeout=10s 2>/dev/null) \
+    || ! jq -e '.items | type == "array"' <<<"$metrics" >/dev/null; then
+    _check_warn "CPU metrics API cannot return pod metrics: $cpu_hpas"
+  else
+    _check_pass "CPU metrics API available for horizontal pod autoscalers"
+    unknown=$(jq -r '[.items[] | select(any(.spec.metrics[]?;
+      .type == "Resource" and .resource.name == "cpu")) |
+      select((any(.status.currentMetrics[]?;
+        .type == "Resource" and .resource.name == "cpu" and
+        (.resource.current.averageUtilization != null or
+         .resource.current.averageValue != null or .resource.current.value != null))) | not) |
+      "\(.metadata.namespace)/\(.metadata.name)"] | join(", ")' <<<"$hpas")
+    if [ -n "$unknown" ]; then
+      _check_warn "HPA CPU samples are unknown: $unknown; inspect HPA conditions and CPU requests"
+    fi
+  fi
+  echo ""
+}
+
 cmd_diagnose() {
   echo ""
   printf "\033[1maap-demo diagnose\033[0m - Checking environment health...\n"
@@ -202,25 +276,7 @@ cmd_diagnose() {
       fi
     fi
 
-    # Check pods
-    local total_pods running_pods problem_pods
-    total_pods=$(kubectl get pods -n "$NAMESPACE" --no-headers 2>/dev/null | grep -cv "Completed" || true)
-    running_pods=$(kubectl get pods -n "$NAMESPACE" --no-headers 2>/dev/null | grep -c "Running" || true)
-    problem_pods=$(kubectl get pods -n "$NAMESPACE" --no-headers 2>/dev/null | grep -cE "CrashLoopBackOff|Error|ImagePullBackOff|Pending" || true)
-
-    if [ "${problem_pods:-0}" -gt 0 ]; then
-      _check_fail "$problem_pods pod(s) in error state ($running_pods/${total_pods:-0} running)"
-      local problem_list
-      problem_list=$(kubectl get pods -n "$NAMESPACE" --no-headers 2>/dev/null | grep -E "CrashLoopBackOff|Error|ImagePullBackOff|Pending" || true)
-      if [ -n "$problem_list" ]; then
-        while IFS= read -r line; do
-          _check_info "  $line"
-        done <<<"$problem_list"
-      fi
-
-    elif [ "${total_pods:-0}" -gt 0 ]; then
-      _check_pass "All pods healthy ($running_pods/$total_pods running)"
-    fi
+    _diagnose_aap_pods
 
     # Check PVCs
     local pending_pvcs
@@ -243,6 +299,8 @@ cmd_diagnose() {
     fi
   fi
   echo ""
+
+  _diagnose_hpa_metrics
 
   # =========================================================================
   # DNS
@@ -590,6 +648,21 @@ cmd_status() {
       _cred_found=true
       echo ""
     fi
+  fi
+
+  if [ "$SHOW_SECRETS" = true ] && _addons_list | grep -qw gitea; then
+    local _gitea_password
+    _gitea_password=$(aap_demo_vault_get aap_demo.gitea.admin_password) || {
+      _err "Cannot read the Gitea administrator password from encrypted Vault"
+      return 1
+    }
+    if [ "$_cred_found" = false ]; then
+      echo "Credentials:"
+      echo "------------"
+      _cred_found=true
+    fi
+    printf '  %-20s aap-demo / %s\n\n' "gitea:" "$_gitea_password"
+    unset _gitea_password
   fi
 
   # Show credentials for the Satellite lab (separate libvirt VM, not in-cluster).

@@ -96,8 +96,7 @@ install_olm_via_crc_vm() {
   echo "Installing OLM using operator-sdk inside the CRC VM..."
   ssh -p 2222 -i "$ssh_key" \
     -o IdentitiesOnly=yes \
-    -o StrictHostKeyChecking=no \
-    -o UserKnownHostsFile=/dev/null \
+    -o StrictHostKeyChecking=accept-new \
     -o LogLevel=ERROR \
     -o ConnectTimeout=10 \
     -o BatchMode=yes \

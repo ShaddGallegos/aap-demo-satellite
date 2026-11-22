@@ -69,14 +69,61 @@ PRODUCT_DEMOS_DOMAINS="linux cloud" aap-demo enable product-demos
 
 One domain uses the same installer under its own name, for example `aap-demo enable product-demo-linux`.
 
+The default upstream revision is pinned to a tested immutable APD commit. To use a
+different revision deliberately, set `PRODUCT_DEMOS_REF`; the older
+`PRODUCT_DEMOS_BRANCH` spelling remains a compatible alias:
+
+```bash
+PRODUCT_DEMOS_REF=<commit-or-tag> aap-demo enable product-demos
+```
+
+Infrastructure demos are intentionally separate from the normal demo set:
+
+```bash
+aap-demo enable product-demo-infrastructure
+```
+
+This creates the upstream Infrastructure setup template in AAP. It does not
+launch it, so any cloud, broker, or managed-host resources remain under your
+control. The Event-Driven Ansible (EDA) service is enabled automatically for
+Automation Orchestrator and Lightwell profiles; enabling it alone also does not
+create event sources or activate rulebooks:
+
+```bash
+aap-demo enable eda
+```
+
+The APD EDA scenario is additionally guarded because its upstream workflow
+expects external event-source prerequisites. Review and supply those
+prerequisites first, then explicitly opt in:
+
+```bash
+PRODUCT_DEMOS_ENABLE_EDA=true aap-demo enable product-demo-eda
+```
+
+That command imports the required Infrastructure scenario. It does not create
+Kafka, cloud resources, credentials, event sources, or a rulebook activation.
+
 `aap-demo disable product-demos` drops the addon from this computer's settings. The job templates stay
 in AAP until you delete them in the UI.
 
 The cluster still wants about 8 processors and 24 GB of memory. Demo jobs add work on top of AAP.
 
+## Automation Hub content synchronization
+
+`aap-demo enable setup-pah` reads the separate Automation Hub offline token from
+the encrypted `ah_offline_token` value in `~/.ansible/conf/env.yml`. It validates
+the token, configures both supported collection remotes, and waits for their
+Pulp synchronization tasks to finish. A failed Pulp task stops setup with its
+error instead of leaving a later APD job to fail during collection resolution.
+
+The Automation Hub token is not the Customer Portal/CDN username, password, or
+offline token. Use the interactive `setup-pah` flow to save the Automation Hub
+token in the Vault; never put it in a command line or repository file.
+
 ## Satellite subscriptions in the full demo
 
-When using the [older command](older-command.md), `aap-demo create --full-demo --satellite`
+When using the [older command](older-command.md), `aap-demo create --satellite`
 also prepares and imports the Satellite subscription manifest. There is no separate
 `fleet auth` or `enable satellite-manifest` step for an interactive full-demo run:
 it checks Red Hat credentials first and prompts securely if they need configuration.
@@ -84,7 +131,10 @@ With `QUIET=true`, configure credentials before starting.
 
 The manifest addon reuses the `aap-demo-satellite` allocation and its existing
 subscriptions. For each missing category, Satellite Infrastructure and RHEL server,
-it attaches one entitlement only if there is exactly one eligible pool. It never
+it attaches one entitlement only if there is exactly one eligible pool. The exact
+`Red Hat Developer Subscription for Individuals` pool is recognized as the RHEL
+content source for a personal lab; other developer or employee SKUs are not selected.
+It never
 buys subscriptions. Missing or ambiguous choices stop the command with guidance
 to select subscriptions in Red Hat Console, rather than importing an empty manifest.
 This minimum enables content setup; it does not determine your host licensing requirements.
@@ -124,6 +174,49 @@ OpenSCAP still needs version-appropriate policy
 content; the local profile does not import the upstream RHEL7/RHEL8 tailoring files.
 See the [Satellite demo guide](../../addons/product-demo-satellite/README.md)
 for local versus external Satellite behavior.
+
+### Optional image-provisioned general nodes
+
+For a local Satellite lab, a deliberate opt-in can provision three minimal
+general-purpose VMs from a Satellite image. On the local KVM compute resource,
+they are persistent libvirt domains and are visible in Virt-Manager. Each uses
+two vCPUs, 4096 MiB RAM, and a 15 GiB qcow2 disk. The command never guesses an
+image or falls back to PXE:
+
+```bash
+SATELLITE_GENERAL_NODE_COUNT=3 \
+SATELLITE_GENERAL_NODE_IMAGE=<Satellite-image-name> \
+aap-demo create --satellite
+```
+
+Use `SATELLITE_COMPUTE_RESOURCE` and the provider-specific
+`SATELLITE_GENERAL_NODE_COMPUTE_ATTRIBUTES`,
+`SATELLITE_GENERAL_NODE_VOLUME`, and
+`SATELLITE_GENERAL_NODE_INTERFACE` variables for a selected external
+compute platform. See the [Satellite lab guide](../../satellite-lab/README.md#general-satellite-provisioned-vms)
+for safety checks and the full variable list.
+
+The same reconciliation creates or reuses the daily `aap-demo-all-content`
+Satellite sync plan and attaches it to every managed content product. It also
+mirrors the Red Hat Flatpak remote and creates a Satellite Ansible Collections
+repository backed by `console.redhat.com`. Collections require the separate
+Vault-backed `ah_offline_token`; they appear under **Content → Ansible
+Collections** after the initial synchronization completes.
+
+Satellite reconciliation also creates owned RHEL 9.5 and RHEL 10.0 installation
+media entries using the local published Kickstart trees. It enables the OpenSCAP
+proxy and uploads Satellite's default SCAP content, but leaves policy/profile
+assignment explicit because the policy must match the target RHEL minor version.
+It also reconciles the local `KVM-Host` compute resource and its
+`aap-demo-general-small` profile (2 vCPU, 4096 MiB, 15 GiB), assigns the local
+Capsule to DNS, DHCP, and Remote Execution where appropriate, imports available
+Satellite Ansible roles, and applies a limited provisioning/facts/Remote
+Execution/Red Hat Lightspeed settings baseline. Organization-wide authentication,
+mail, and privacy policy remain unchanged.
+
+Red Hat Inventory upload needs a direct RHSM identity on the Satellite VM. The
+installer reads the existing encrypted CDN credential pair from the Vault; it
+does not treat host entitlement certificates as a Cloud Connector identity.
 
 ## Everything else
 

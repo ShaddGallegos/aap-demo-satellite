@@ -61,8 +61,8 @@ _crc_start_with_pull_secret() (
   printf '%s' "$PULL_SECRET_VALUE" >"$pull_secret_file"
   chmod 600 "$pull_secret_file"
 
-  crc start --pull-secret-file "$pull_secret_file" 2>&1 |
-    tee "${1:-/tmp/crc-start.log}"
+  crc start --pull-secret-file "$pull_secret_file" 2>&1 \
+    | tee "${1:-/tmp/crc-start.log}"
 )
 
 _save_config_key() {
@@ -157,7 +157,7 @@ configure_coredns() {
 
   # Re-detect SSH key now that cluster is running
   if crc_ssh_key="$(_detect_crc_ssh_key 2>/dev/null)"; then
-    crc_ssh_opts="-i ${crc_ssh_key} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+    crc_ssh_opts="-i ${crc_ssh_key} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR"
   else
     echo "ERROR: No CRC SSH key found. Cannot configure CoreDNS." >&2
     return 1
@@ -664,8 +664,8 @@ printf "${_GREEN}▸${_NC} Resources: ${CRC_CPUS} CPUs, $((CRC_MEMORY / 1024))GB
 if _crc_needs_setup; then
   crc_setup_rc=0
   printf "${_GREEN}▸${_NC} Running CRC setup...\n"
-  if crc setup --show-progressbars 2>&1 |
-    { grep -E "^level=info|^  " | sed 's/level=info msg="/  /' | sed 's/"$//' || true; }; then
+  if crc setup --show-progressbars 2>&1 \
+    | { grep -E "^level=info|^  " | sed 's/level=info msg="/  /' | sed 's/"$//' || true; }; then
     crc_setup_rc=${PIPESTATUS[0]}
   else
     crc_setup_rc=${PIPESTATUS[0]}
@@ -732,85 +732,85 @@ fi
 # Re-detect SSH key now that cluster is running
 # ---------------------------------------------------------------------------
 if CRC_SSH_KEY="$(_detect_crc_ssh_key 2>/dev/null)"; then
-  CRC_SSH_OPTS=(-i "${CRC_SSH_KEY}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
+  CRC_SSH_OPTS=(-i "${CRC_SSH_KEY}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR)
 else
   echo "ERROR: No CRC SSH key found. Cannot configure nip.io baseDomain." >&2
   exit 1
 fi
 
 if [ "$CURRENT_PRESET" = "microshift" ]; then
-# ---------------------------------------------------------------------------
-# Configure nip.io baseDomain
-# ---------------------------------------------------------------------------
-# Wait for SSH to become available (CRC VM may still be booting)
-printf "${_GREEN}▸${_NC} Waiting for CRC SSH..."
-_ssh_ready=false
-for _ssh_try in $(seq 1 60); do
-  if ssh -p 2222 "${CRC_SSH_OPTS[@]}" core@127.0.0.1 'true' &>/dev/null; then
-    echo " ready"
-    _ssh_ready=true
-    break
+  # ---------------------------------------------------------------------------
+  # Configure nip.io baseDomain
+  # ---------------------------------------------------------------------------
+  # Wait for SSH to become available (CRC VM may still be booting)
+  printf "${_GREEN}▸${_NC} Waiting for CRC SSH..."
+  _ssh_ready=false
+  for _ssh_try in $(seq 1 60); do
+    if ssh -p 2222 "${CRC_SSH_OPTS[@]}" core@127.0.0.1 'true' &>/dev/null; then
+      echo " ready"
+      _ssh_ready=true
+      break
+    fi
+    printf "."
+    sleep 3
+  done
+
+  if [ "$_ssh_ready" = false ]; then
+    echo " timeout"
+    printf "${_RED}▸${_NC} CRC SSH not available after 3 minutes\n"
+    echo "  Check CRC status: crc status"
+    echo "  Check CRC logs:   cat /tmp/crc-start.log"
+    exit 1
   fi
-  printf "."
-  sleep 3
-done
 
-if [ "$_ssh_ready" = false ]; then
-  echo " timeout"
-  printf "${_RED}▸${_NC} CRC SSH not available after 3 minutes\n"
-  echo "  Check CRC status: crc status"
-  echo "  Check CRC logs:   cat /tmp/crc-start.log"
-  exit 1
-fi
+  printf "${_GREEN}▸${_NC} Configuring nip.io baseDomain...\n"
 
-printf "${_GREEN}▸${_NC} Configuring nip.io baseDomain...\n"
-
-# Write config drop-in (overrides CRC's 00-microshift-dns.yaml)
-if ! ssh -p 2222 "${CRC_SSH_OPTS[@]}" core@127.0.0.1 "sudo mkdir -p /etc/microshift/config.d && sudo tee /etc/microshift/config.d/99-aap-demo-dns.yaml > /dev/null <<EOF
+  # Write config drop-in (overrides CRC's 00-microshift-dns.yaml)
+  if ! ssh -p 2222 "${CRC_SSH_OPTS[@]}" core@127.0.0.1 "sudo mkdir -p /etc/microshift/config.d && sudo tee /etc/microshift/config.d/99-aap-demo-dns.yaml > /dev/null <<EOF
 dns:
   baseDomain: 127.0.0.1.nip.io
 EOF" 2>/dev/null; then
-  printf "${_RED}▸${_NC} Failed to write nip.io config via SSH\n"
-  echo "  Try manually: aap-demo ssh"
-  exit 1
-fi
-
-# Always wipe and restart on create — ensures nip.io is applied cleanly.
-# CRC starts MicroShift with crc.testing before we can write the dropin,
-# so we must wipe the data generated with the wrong domain.
-printf "${_GREEN}▸${_NC} Restarting MicroShift with nip.io domain (clean start, ~2 min)...\n"
-# Fall back to the literal path when preset.sh is stale and does not define the
-# helper (mixed-version checkout); the path is stable across MicroShift versions.
-if command -v aap_demo_microshift_kubeconfig_vm_path >/dev/null 2>&1; then
-  _ms_kubeconfig="$(aap_demo_microshift_kubeconfig_vm_path)"
-else
-  _ms_kubeconfig="/var/lib/microshift/resources/kubeadmin/kubeconfig"
-fi
-ssh -p 2222 "${CRC_SSH_OPTS[@]}" core@127.0.0.1 'sudo systemctl stop microshift 2>/dev/null; sudo rm -rf /var/lib/microshift; sudo systemctl start microshift' 2>/dev/null || true
-
-# Wait for API
-printf "${_GREEN}▸${_NC} Waiting for MicroShift API..."
-_api_ready=false
-for i in $(seq 1 60); do
-  if ssh -p 2222 "${CRC_SSH_OPTS[@]}" core@127.0.0.1 "sudo kubectl --kubeconfig ${_ms_kubeconfig} cluster-info" &>/dev/null; then
-    echo " ready"
-    _api_ready=true
-    break
+    printf "${_RED}▸${_NC} Failed to write nip.io config via SSH\n"
+    echo "  Try manually: aap-demo ssh"
+    exit 1
   fi
-  printf "."
-  sleep 5
-done
 
-if [ "$_api_ready" = false ]; then
-  echo " timeout"
-  printf "${_YELLOW}▸${_NC} MicroShift API not ready after 5 minutes — continuing anyway\n"
-fi
+  # Always wipe and restart on create — ensures nip.io is applied cleanly.
+  # CRC starts MicroShift with crc.testing before we can write the dropin,
+  # so we must wipe the data generated with the wrong domain.
+  printf "${_GREEN}▸${_NC} Restarting MicroShift with nip.io domain (clean start, ~2 min)...\n"
+  # Fall back to the literal path when preset.sh is stale and does not define the
+  # helper (mixed-version checkout); the path is stable across MicroShift versions.
+  if command -v aap_demo_microshift_kubeconfig_vm_path >/dev/null 2>&1; then
+    _ms_kubeconfig="$(aap_demo_microshift_kubeconfig_vm_path)"
+  else
+    _ms_kubeconfig="/var/lib/microshift/resources/kubeadmin/kubeconfig"
+  fi
+  ssh -p 2222 "${CRC_SSH_OPTS[@]}" core@127.0.0.1 'sudo systemctl stop microshift 2>/dev/null; sudo rm -rf /var/lib/microshift; sudo systemctl start microshift' 2>/dev/null || true
 
-# Refresh kubeconfig
-mkdir -p "$AAP_DEMO_DIR"
-ssh -p 2222 "${CRC_SSH_OPTS[@]}" core@127.0.0.1 "sudo cat ${_ms_kubeconfig}" >"$AAP_DEMO_KUBECONFIG" 2>/dev/null || true
-chmod 600 "$AAP_DEMO_KUBECONFIG" 2>/dev/null || true
-echo "  ✓ nip.io baseDomain configured (data wiped)"
+  # Wait for API
+  printf "${_GREEN}▸${_NC} Waiting for MicroShift API..."
+  _api_ready=false
+  for i in $(seq 1 60); do
+    if ssh -p 2222 "${CRC_SSH_OPTS[@]}" core@127.0.0.1 "sudo kubectl --kubeconfig ${_ms_kubeconfig} cluster-info" &>/dev/null; then
+      echo " ready"
+      _api_ready=true
+      break
+    fi
+    printf "."
+    sleep 5
+  done
+
+  if [ "$_api_ready" = false ]; then
+    echo " timeout"
+    printf "${_YELLOW}▸${_NC} MicroShift API not ready after 5 minutes — continuing anyway\n"
+  fi
+
+  # Refresh kubeconfig
+  mkdir -p "$AAP_DEMO_DIR"
+  ssh -p 2222 "${CRC_SSH_OPTS[@]}" core@127.0.0.1 "sudo cat ${_ms_kubeconfig}" >"$AAP_DEMO_KUBECONFIG" 2>/dev/null || true
+  chmod 600 "$AAP_DEMO_KUBECONFIG" 2>/dev/null || true
+  echo "  ✓ nip.io baseDomain configured (data wiped)"
 else
   # Full OpenShift keeps the CRC apps-crc.testing domain and the kubeconfig CRC generates.
   mkdir -p "$AAP_DEMO_DIR"

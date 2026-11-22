@@ -10,6 +10,353 @@ attempts are omitted unless they explain a requirement of the final fix.
 
 ## Unreleased - cumulative changes since `39564b5`
 
+### Automation Hub sync visibility and guarded demo services
+
+`setup-pah` now validates the Vault-backed Automation Hub token, updates the
+Certified and Validated Content remotes, and waits for each Pulp task. A Pulp
+task failure, including an SSO `400` from an invalid token, stops the workflow
+at the actual failure instead of surfacing later as a Product Demos job error.
+The dashboard catalog, quick start, settings reference, and add-on guides now
+explain that `ah_offline_token` in `~/.ansible/conf/env.yml` is distinct from
+Customer Portal/CDN credentials.
+
+Remote and repository Pulp references are now resolved against the AAP route
+exactly once, so an idempotent rerun updates existing `rh-certified` and
+`rh-validated` remotes instead of requesting a duplicated API path. Initial
+content synchronization reports its live Pulp task and elapsed time every 30
+seconds and waits for 30 minutes by default; operators can adjust the bounded
+timeout with `PAH_SYNC_TIMEOUT_SECONDS`.
+
+Certified Content remains required. If a valid Automation Hub token lacks the
+separate Validated Content entitlement, its `401`/`403` is now a visible
+warning and the demo proceeds with Certified Content instead of failing its
+entire installation. Before making that distinction, a remote `401`/`403`
+securely reprompts once for a replacement token, validates it against Red Hat
+SSO, saves it only when valid, and retries the remote configuration.
+
+The dashboard also presents Event-Driven Ansible as an explicit dependency for
+Automation Orchestrator and Lightwell, explains its non-destructive default,
+and describes the Satellite image-provisioned general-node option. The APD job
+monitor reads controller job events before its legacy pod fallback so a failed
+base install reports the failing task instead of only framework noise.
+
+### Satellite content synchronization
+
+Satellite reconciliation now creates or reuses the daily `aap-demo-all-content`
+sync plan and attaches it to every content product in the selected organization.
+The same stage configures and synchronizes the Red Hat Flatpak remote and a
+Satellite Ansible Collections repository backed by Automation Hub. The
+collection remote uses the encrypted `ah_offline_token`, rather than a Customer
+Portal/CDN credential, so Collections no longer remain empty after content
+synchronization.
+
+Satellite provisioning now creates local RHEL 9.5 and RHEL 10.0 Kickstart
+installation media from the published Pulp paths. The OpenSCAP proxy and
+default SCAP content are reconciled automatically; policy assignment remains a
+deliberate host-version-specific action. Fleet registration posts refreshed
+package and enabled-repository facts so Satellite Errata reporting can populate.
+
+Every Satellite reconciliation now also repairs owned provisioning primitives
+on an existing server: the `demo.lab` DNS Capsule, `satlab` DNS/DHCP/TFTP/
+HTTPBoot associations, Remote Execution Capsule selection, the local
+`aap-demo-general-small` libvirt compute profile, and Satellite Ansible role
+imports. The limited settings baseline keeps Lab and Default Organization fact
+defaults, private-IP Remote Execution, supported synced-content templates, Red
+Hat Inventory upload, and Lightspeed recommendation synchronization enabled.
+It deliberately leaves authentication, email, root-password, automatic
+discovery, and privacy policy choices untouched.
+
+### Vault-only retained credentials
+
+The subscription attachment add-on now reads Red Hat CDN credentials from
+`aap_demo.redhat.cdn_username` and `aap_demo.redhat.cdn_password` in the
+encrypted shared Vault. Interactive entry writes those keys directly; the
+former plaintext `~/.aap-demo/redhat-subscription-credentials` fallback is
+removed. The request body is supplied to curl on stdin rather than as a command
+argument.
+
+Satellite no longer contains shared password defaults. Separate generated,
+retained Vault values cover the Satellite administrator, the Satellite VM root
+account, and demo hosts provisioned by Satellite. The build supplies them only
+at runtime, and installer output no longer prints a password. Focused Vault and
+Satellite lifecycle tests verify the no-default contract.
+
+Full-demo, deploy, and redeploy reports now use redacted system-information
+mode. The default report generator is redacted as well, preventing automatic
+workflows from retaining credentials in `docs/`.
+
+### Local Lightwell prerequisite preparation
+
+Added explicit `enable lightwell --prepare`: retained OpenFlake/PostgreSQL,
+an unprivileged repository-scoped runner, original private metadata-only CI,
+owned AAP inventory/credentials, strict SSH and supported CA trust, and a
+dedicated AO caller using short-lived tokens. Explicit preparation validates
+and activates the guarded native AO version instead of leaving a disabled
+draft; publication uses an expected-version check and launches no workflow.
+The VM-only HTTPS firewall rule
+preserves unrelated host rules. Full-demo can reconstruct a missing dedicated
+4 GiB Fleet node without adopting unmarked nodes; application setup remains
+deliberate. Fleet now retains per-node memory across restart.
+
+Live checks passed two real CI runs, authenticated OpenFlake, trusted
+runner-to-AO HTTPS, native AO token exchange/read access, and isolated
+application setup job 83 after entitlement and RHC enrollment. Kernel evidence
+identified the original package-manager OOM; scoped expansion to 4 GiB and an
+ordinary restart verified the repair. Repeated preparation reused identities.
+Corrected the dashboard/guide: upstream opens a PR for manual merge, not
+automatic merge. No PR simulation, production approval, full lab reinstall,
+commit, push, or publication is implied.
+
+The AO importer now refuses ambiguous or incomplete project, service-account,
+and workflow selections before mutation. The read-only integration inspection
+uses strict TLS for login and API reads and does not refresh or write a
+kubeconfig. On 2026-11-18 it passed AO/AAP/MCP/Ollama and Fleet-ping inspection;
+Satellite inventory sync remained disabled because its addon was not enabled.
+It launched no job, PR, merge, promotion, or remediation.
+
+Long-running journaled workflows now print a phase start and completion line
+with elapsed time. Interactive terminals also show a spinner for the current
+phase; non-interactive output remains stable and line-oriented. Set
+`AAP_DEMO_PROGRESS=off` to suppress the spinner.
+
+`create --ansible` names the original AAP/AO/MCP/Fleet demonstration profile;
+`--full-demo` remains its compatibility alias. Create profiles now resolve
+dependencies: `--satellite` and `--lightspeed` include `--ansible`, while
+`--lightwell` includes Ansible, Satellite, Lightspeed, and retained Gitea. It
+creates or reuses exactly one marked 4 GiB Fleet application host, then prepares
+the local Gitea/OpenFlake/AAP/AO requirements. It does not install a real Red
+Hat Lightwell product or launch a CI/CD job.
+
+Managed lifecycle qualification now preserves off-VM state-service recovery
+checkpoints when uninstalling the service configuration. A new Satellite VM is
+assigned a unique host Pulp export under `/var/lib/satlab/instances`; the build
+refuses to use an existing export when its managed VM is absent, preventing an
+old Pulp tree from being combined with a new Satellite database. Focused mocked
+uninstall and Satellite lifecycle tests cover both safeguards. Managed uninstall
+also disables recovery without invoking its checkpoint-on-stop hook; the
+explicit uninstall then owns removal of the managed CRC/Fleet resources. The destructive
+two-profile rebuild qualification remains pending live prerequisite checks.
+
+### Independent Fedora Gitea with host NFS
+
+Added [local Gitea](../addons/gitea/README.md), available through `--gittea`,
+`--gitea`, `enable gitea`, and dashboard install/start/retaining-stop controls.
+The optional full-demo phase starts its independent Fedora 45 VM before CRC.
+Pinned artifacts, guest-agent public-key verification, strict HTTPS, encrypted
+credentials, VM ownership checks, a reserved address and a dedicated
+root-squashed NFS export protect service/data reuse.
+
+Repositories and file data use host NFS; SQLite remains local with consistent
+NFS snapshots hourly and on stop. Default uninstall retains this service;
+credential-stripping reconfiguration is refused while the VM exists.
+Live checks passed private Git clone/push, repeated enable and dashboard
+stop/start with unchanged repository commit, VM UUID, CA and credentials.
+Native Git read access from the AAP execution environment passed with explicit
+CA trust. Those Git-only checks did not establish CI/CD or full lab reinstall;
+the later prerequisite qualification above records the additional evidence.
+
+### Native connector repair and optional CI/CD simulation
+
+Repaired Satellite proxy-to-self SSH authorization without replacing existing
+keys. Native connector invocation 2 succeeded; `rhcd` is active/enabled, its
+worker exists, and the connector identity is populated. The new
+`--cloud-connector-only` action reuses healthy configuration and verifies the
+exact native task without replaying maintenance. Cloud acceptance and Fleet
+reporting remain unverified.
+
+Added the optional [Lightwell simulation addon](../addons/lightwell/README.md),
+pinned SCM templates, an authenticated AO workflow with rejecting human
+approval and tool-free AI notes, and dashboard service/function links.
+`--full-demo --sno --satellite --lightwell` now supports implicit `create`.
+Nothing launches jobs automatically. Prepared Gitea/OpenFlake services,
+credentials, runner, repository, and a dedicated application host are required.
+Mocked tests do not establish live service health. CRC is reachable again.
+The later managed preparation above supplies local services, inventory and
+credentials. Full uninstall/reinstall still needs recovery/entitlement gates
+and explicit teardown approval; no lab resources were removed for that test.
+
+The dashboard now separates Overview, Demos, Add-ons, and Services/Fleet, with
+Lightwell, Satellite, and Product Demos submenus. Configure/remove buttons reuse
+guarded addon operations; a new allowlisted button runs only the existing
+read-only integration check. Native application buttons navigate to jobs,
+workflows, and approvals without launching anything. Scoped tests cover menu
+isolation, unsafe action rejection, session/origin protection, and unconfigured
+demos. Browser checks verified navigation, cancel-without-mutation, Satellite
+links, and a real read-only check. No CI/CD deployment was launched.
+
+### Travel handoff - 2026-11-17
+
+Satellite 6.18.11 now has a valid native RHSM identity. Authenticated discovery
+resolved a stored organization mismatch without exposing credentials. The
+owner-matched cached manifest was imported using the manifest-only workflow;
+three subscriptions are listed. A private pre-registration RHSM backup and
+the existing Pulp/backup NFS data were retained.
+
+This is partial operational progress, not completed cloud integration. Native
+cloud-connector job 1 failed, `rhcd` is inactive, Fleet registration and content
+bootstrap remain unfinished, and cloud reporting has not been verified.
+See [the roadmap](ROADMAP.md#rm-04d-hosted-satellite-lightspeed-and-rhc) and
+[travel pause instructions](guides/older-command.md#pause-for-travel-without-deleting-data).
+On 2026-11-18, Satellite and all three Fleet guests were verified off after
+graceful shutdown. CRC's graceful stop failed and the VM remained running.
+No forced shutdown was attempted; the shared host was left running.
+
+Publication remains blocked by intermittent native Lightspeed HTTP 502/504
+responses, Portal runtime validation, and unfinished Satellite setup. The
+pending implementation is uncommitted and unpushed; the release worktree still
+has an unfinished merge with no unmerged paths. No release is authorized.
+
+### 68. Discover Satellite links without the manifest addon
+
+The Routes and Namespaces inventory discovers the Satellite VM independently
+of `satellite-manifest` addon state. Supplying an existing manifest no longer
+hides the running VM's dashboard link. Failed HTTPS responses remain pending;
+missing or stopped VMs do not produce an active route. Isolated inventory and
+dashboard rendering tests cover this path without contacting local libvirt.
+
+### 67. Recover the native offline repository selection failure
+
+Live Satellite maintenance exposed RHSM's unregistered multi-enable bug: native
+setup reported success but left only the target maintenance repository enabled.
+The wrapper recognizes that specific state after a failed upgrade, enables the
+four required repositories separately, verifies them, and repeats native checks
+before one resume attempt. Other failures stop normally. No vendor files,
+forced removals, skipped checks, or automatic release-pin changes are involved.
+Isolated regressions cover recovery, unrelated and registered-host failures,
+failed or ineffective repository changes, and a failed retry.
+The host-entitlement fallback also retains mode `0600` on copied private keys
+instead of changing every PEM file, including keys, to world-readable mode.
+
+### 66. Configure the managed AI assistants separately
+
+The Lightspeed addon configures the OpenAI-compatible chatbot Secret and native
+gateway/controller MCP sidecars through the owning AAP resource. It preserves
+separate code-generation settings, waits for both rollouts, and disables through
+the parent rather than deleting an operator-owned child. It no longer launches
+database ownership repair pods. Isolated tests exercise configuration, secret
+escaping, failure propagation, and removal.
+
+The x86 Portal can opt into chart 2.2.11's Developer Lightspeed sidecar with local
+Ollama. Isolated configuration tests and an offline render of that chart cover the
+new path. Explicitly opt-in live tests cover MCP authentication rejection,
+temporary read-only token cleanup, actual Hub repository tool execution, and a
+local response from AO's selected model. Those checks passed locally; full
+Lightspeed/Portal application flows remain required before release.
+Deployment discovery now uses the configured rollout timeout with native
+`kubectl wait --for=create`, instead of a separate hard-coded five-minute poll.
+An isolated case verifies missing deployments stop before rollout checks.
+An additional opt-in live check verifies native Lightspeed authentication and a
+no-tools conversation through the AAP gateway, without broadening the read-only
+MCP token. Native assistant MCP tool execution and Portal remain separate gates.
+Offline scanning flagged the test's Kubernetes Secret resource name, not a
+credential. That single file/type/hash was reviewed as a false positive; no real
+credentials were added or moved.
+
+### 65. Stop Satellite builds on SSH trust failures
+
+The Satellite builder distinguishes host-key verification failures from transient
+SSH startup failures. It stops before provisioning or retry sleeps, preserves saved
+trust, and gives fingerprint-verification guidance. A detected initial trust
+failure is recorded in the workflow journal. Isolated tests cover changed-key and
+verification errors, plus retrying a connection that is still starting.
+
+### 64. Isolate the Linux CRC daemon regression
+
+The Linux create test uses a local socket fixture and mocked curl/systemctl
+commands instead of reaching the real user systemd instance. It verifies
+that a ready daemon needs no recovery and that create reaches the expected
+missing-pull-secret check, rather than passing on an earlier failure.
+Live validation exposed the missing systemctl isolation when the test
+restarted the host's CRC sockets and interrupted API access.
+
+### 63. Stop the CRC watchdog during full uninstall
+
+Linux uninstall disables the managed watchdog timer, stops an in-flight
+watchdog service, and removes both user units before removing local VM state.
+Stop failures abort cleanup rather than leaving a recovery process able to
+restart CRC during the next build. Isolated tests cover cleanup and stop
+failure handling; live lifecycle testing exposed the leftover timer.
+
+### 62. Correct live MicroShift validation checks
+
+The AO inventory-proxy inspection supplies the selected integration ID and
+management credential ID required by the installed API. An authenticated
+live request returned five inventories after the fix.
+
+AAP pod diagnostics exclude failed attempts only when their controlling
+Job UID matches a Job with `Complete=True`. Failed or missing Jobs still
+report a failure, and unreadable Job status produces an explicit warning.
+This avoids flagging a successfully retried migration as an active outage.
+
+### 61. Discover local CRC from desktop-launched dashboards
+
+POSIX dashboard commands retain the inherited PATH's precedence and append
+`~/.local/bin`, `~/.crc/bin/oc`, and `/usr/local/bin` when missing. Graphical
+sessions can therefore find an existing user-installed CRC without requiring
+a reinstall. Native Windows command discovery is unchanged.
+
+### 60. Review secret-scan findings without external verification
+
+The release scan disables online credential verification. All 28 additional
+findings were individually reviewed as non-secret identifiers, placeholders,
+or synthetic test content, and recorded as exact file/type/hash baseline
+exceptions. No live credentials were found among those findings, and the
+local encrypted Vault was not changed. The linting guide describes Vault-backed
+handling and rotation for actual credentials.
+
+### 59. Console route and MicroShift catalog detection
+
+The dashboard links to the discovered OpenShift console route instead of the
+OAuth endpoint. Status and inventory retain the OAuth route and now include
+the console route when present.
+
+The catalog signature workaround uses API discovery to distinguish full
+OpenShift from MicroShift, and confirms the CRC guest's MicroShift service
+before changing its policy. Discovery or guest verification failures stop the
+workaround; full OpenShift policy remains operator-managed.
+
+### 58. Protect the shared Fleet SSH identity and verify peer host keys
+
+The shared Fleet SSH private key lives in the encrypted credential Vault.
+Existing plaintext keys are imported and read back for identity verification
+before the legacy private-key file is removed. Missing keys are generated only
+when no Fleet nodes need an existing identity; unreadable Vaults and mismatched
+copies fail closed. Bash Fleet SSH callers materialize mode-600 temporary key
+files and clean them up after use, while protected guest copies remain for
+cross-guest SSH. Bash lab connections use trust on first use and reject later
+unexpected host-key changes. See [settings](reference/settings.md) for storage,
+migration, and recovery details.
+
+**Validation:** Isolated tests cover Vault migration/readback, preservation of
+existing identities, temporary-key cleanup, and SSH policy options. Real SSH
+host-key exchanges and live Vault migration have not been tested.
+
+### 57. Diagnostics, integration inspection, and recovery progress
+
+The Bash diagnostic checks AAP pod readiness and reports missing CPU metrics
+or unknown HPA CPU samples without enabling monitoring. The live idempotency
+helper fails on incomplete discovery, failed resource reads, invalid or empty
+snapshots, and changes in discovered resource coverage. Optional APIs absent
+from discovery are reported and excluded.
+
+The Bash `check-integrations` command inspects enabled AO integrations,
+authenticated AAP inventory access, and historical Satellite sync and Fleet
+ping results without running jobs or tools. Recorded validations and past
+jobs do not prove current end-to-end health; current Fleet registration, tool
+execution, and LLM responses remain untested by this command.
+
+Full-demo and Satellite builds record private, non-secret phase progress.
+Journals do not automatically resume or skip operations. See the
+[recovery guidance](guides/older-command.md) before retrying an interrupted run.
+Six operational skills and three optional Copilot agents are documented in the
+[assistant guide](guides/assistant-skills.md).
+
+**Validation:** Focused mocked tests, ShellCheck, and live read-only
+diagnostic and integration inspections passed. The live idempotency helper
+was not run against repeated cluster operations. CPU metrics remain disabled;
+the optional agents' VS Code picker discovery and behavior have not been
+verified.
+
 ### 56. Satellite upgrade recovery, operator ownership, and OpenShift access
 
 **Supported Satellite maintenance.** Stage both `satellite-maintain` and

@@ -95,6 +95,28 @@ def items(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
+def one(records: list[dict[str, Any]], description: str) -> dict[str, Any] | None:
+    """Return one record or reject an ambiguous server-side selection."""
+    if len(records) > 1:
+        raise RuntimeError(f"Ambiguous {description}; refusing to select one")
+    return records[0] if records else None
+
+
+def unique_index(
+    records: list[dict[str, Any]], field: str, description: str,
+) -> dict[str, dict[str, Any]]:
+    """Index nonempty records while rejecting duplicate server-side keys."""
+    indexed: dict[str, dict[str, Any]] = {}
+    for record in records:
+        value = record.get(field)
+        if not value:
+            continue
+        if value in indexed:
+            raise RuntimeError(f"Ambiguous {description}: {value}")
+        indexed[value] = record
+    return indexed
+
+
 def validate_existing_workflow_project(
     workflow: dict[str, Any], project_id: str,
 ) -> None:
@@ -230,21 +252,34 @@ def normalize(
 def import_workflows(args: argparse.Namespace) -> int:
     base = f"https://{args.route}/api/v1"
     projects = items(request(base, args.token, "GET", "/projects?limit=100"))
-    project_id = args.project_id or next((p["id"] for p in projects if p.get("is_default")), None)
-    project_id = project_id or (projects[0]["id"] if projects else None)
-    if not project_id:
-        raise RuntimeError("Automation Orchestrator has no project to receive demo workflows")
+    if len(projects) >= 100:
+        raise RuntimeError("AO project list may be truncated; refusing selection")
+    if args.project_id:
+        project = one(
+            [project for project in projects if str(project.get("id")) == str(args.project_id)],
+            "AO project selection",
+        )
+    else:
+        project = one(
+            [project for project in projects if project.get("is_default")],
+            "default AO project selection",
+        )
+    if not project or not project.get("id"):
+        raise RuntimeError("Exactly one target Automation Orchestrator project is required")
+    project_id = project["id"]
 
-    service_account_name = "aap-demo webhook caller"
+    service_account_name = getattr(args, "webhook_service_account_name", "aap-demo webhook caller")
     service_accounts = items(request(base, args.token, "GET", "/service_accounts?limit=100"))
-    webhook_service_account = next(
-        (
+    if len(service_accounts) >= 100:
+        raise RuntimeError("AO service-account list may be truncated; refusing selection")
+    webhook_service_account = one(
+        [
             account
             for account in service_accounts
             if account.get("name") == service_account_name
-            and account.get("project_id") == project_id
-        ),
-        None,
+            and str(account.get("project_id")) == str(project_id)
+        ],
+        f"AO webhook service-account selection: {service_account_name}",
     )
     if not webhook_service_account:
         webhook_service_account = request(
@@ -264,12 +299,17 @@ def import_workflows(args: argparse.Namespace) -> int:
         raise RuntimeError("AO webhook service account did not return an id")
 
     existing = items(request(base, args.token, "GET", "/workflows?limit=100"))
-    existing_by_name = {w.get("name"): w for w in existing}
-    existing_by_source = {
-        w.get("labels", {}).get("source_file"): w
-        for w in existing
-        if w.get("labels", {}).get("source_file")
-    }
+    if len(existing) >= 100:
+        raise RuntimeError("AO workflow list may be truncated; refusing selection")
+    existing_by_name = unique_index(existing, "name", "AO workflow name")
+    existing_by_source: dict[str, dict[str, Any]] = {}
+    for workflow in existing:
+        source = workflow.get("labels", {}).get("source_file")
+        if not source:
+            continue
+        if source in existing_by_source:
+            raise RuntimeError(f"Ambiguous AO workflow source: {source}")
+        existing_by_source[source] = workflow
     with workflow_sources(args.source_dir, args.repository, args.ref) as source_dir:
         sources = sorted(source_dir.glob("*.json") if args.source_dir else source_dir.rglob("ao/*.json"))
         if not sources:

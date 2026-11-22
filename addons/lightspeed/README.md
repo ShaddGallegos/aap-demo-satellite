@@ -3,8 +3,10 @@
 Deploys the Ansible Lightspeed intelligent assistant into the AAP namespace,
 backed by the local [Ollama](https://ollama.com/) LLM (`qwen2.5:3b`) instead of
 a cloud model. The `ansible-lightspeed` operator (installed with AAP)
-reconciles an `AnsibleLightspeed` custom resource into the Lightspeed API and
-chatbot, wired to Ollama's in-cluster OpenAI-compatible endpoint.
+reconciles AAP's managed `AnsibleLightspeed` resource into the Lightspeed API and
+chatbot, wired to Ollama's in-cluster OpenAI-compatible endpoint. The addon updates
+the parent AAP resource so that gateway registration and authentication remain
+operator-managed.
 
 ## Usage
 
@@ -16,13 +18,17 @@ aap-demo disable lightspeed  # Remove Lightspeed
 
 The addon automatically:
 
-1. Creates a model-configuration Secret pointing at the in-cluster Ollama
-   endpoint (`http://ollama.aap-demo-ollama.svc.cluster.local:11434/v1`,
-   `model_type: wca-onprem`, model `qwen2.5:3b`)
-2. Creates an `AnsibleLightspeed` CR (`lightspeed.ansible.com/v1alpha1`) with
-   one API and one chatbot replica
-3. On SNO/full OpenShift, repairs the postgres PVC ownership when the operator's
-   init container is skipped (see below)
+1. Creates a chatbot-configuration Secret pointing at the in-cluster Ollama
+   `/v1` endpoint, with provider `openai` and model `qwen2.5:3b`.
+2. Enables the assistant in the parent AAP resource with one API and one chatbot
+   replica, without replacing existing code-generation provider settings.
+3. Configures internal gateway and controller URLs so the operator deploys the
+   native MCP sidecars (Technology Preview).
+4. Waits for both API and chatbot rollouts. A healthy API alone is not success.
+
+The chat assistant and code-generation service use different configuration
+contracts. Ollama's OpenAI-compatible endpoint is not a `wca-onprem` endpoint.
+This addon configures chat, not a Watson Code Assistant replacement.
 
 Access the assistant from the AAP console → Lightspeed intelligent assistant.
 
@@ -39,19 +45,23 @@ Override via environment variables:
 |----------|---------|---------|
 | `LIGHTSPEED_MODEL_URL` | in-cluster Ollama `/v1` | Model endpoint |
 | `LIGHTSPEED_MODEL_ID` | `qwen2.5:3b` | Model name |
-| `LIGHTSPEED_MODEL_TYPE` | `wca-onprem` | Operator model provider type |
-| `LIGHTSPEED_CR_NAME` | `aap-lightspeed` | AnsibleLightspeed CR name |
+| `LIGHTSPEED_MODEL_API_KEY` | `ollama` | Non-empty placeholder for local Ollama |
+| `LIGHTSPEED_CHATBOT_SECRET` | `aap-lightspeed-chatbot-config` | Chatbot Secret |
+| `LIGHTSPEED_API_CPU_REQUEST` / `LIGHTSPEED_API_MEMORY_REQUEST` | `200m` / `2Gi` | Local-demo API requests |
+| `LIGHTSPEED_CHATBOT_CPU_REQUEST` / `LIGHTSPEED_CHATBOT_MEMORY_REQUEST` | `500m` / `5Gi` | Local-demo chatbot requests |
+| `LIGHTSPEED_API_CPU_LIMIT` / `LIGHTSPEED_API_MEMORY_LIMIT` | `1000m` / `4Gi` | API limits |
+| `LIGHTSPEED_CHATBOT_CPU_LIMIT` / `LIGHTSPEED_CHATBOT_MEMORY_LIMIT` | `1500m` / `8Gi` | Chatbot limits |
+| `AAP_CR_NAME` | `aap` | Parent AAP resource name |
+| `LIGHTSPEED_CR_NAME` | `<AAP_CR_NAME>-lightspeed` | Must match the managed child |
 | `LIGHTSPEED_NAMESPACE` | `aap-operator` | Target namespace |
+| `LIGHTSPEED_ROLLOUT_TIMEOUT` | `600s` | Timeout for each deployment rollout |
 
-## SNO / full OpenShift note
+## Ownership and removal
 
-On single-node OpenShift the Lightspeed postgres StatefulSet runs with a random
-UID (the `anyuid` SCC) and cannot write its root-owned PVC, crash-looping with
-`mkdir: cannot create directory '/var/lib/pgsql/data/userdata': Permission
-denied`. The operator's `postgres_data_volume_init` init container is gated to
-non-OpenShift clusters, so the addon fixes the volume ownership directly with a
-one-off privileged pod (`chown -R 26:26`) and restarts postgres. This runs
-automatically on `enable` when the permission crash is detected.
+Database and authentication configuration belong to the AAP operator. The addon
+does not launch root-owned repair pods, change PVC ownership, or restart databases.
+Disabling sets `spec.lightspeed.disabled: true` on AAP and removes the addon chatbot
+Secret. It does not erase existing code-generation Secrets or retained PVCs.
 
 ## Status
 
@@ -81,4 +91,9 @@ kubectl exec -n aap-operator deploy/aap-lightspeed-api -- \
 ```
 
 The output should list `qwen2.5:3b`. If not, verify the Ollama addon is healthy
-(`aap-demo enable ollama` is idempotent) and re-run `aap-demo wire`.
+(`aap-demo enable ollama` is idempotent), then re-enable Lightspeed. Check the
+chatbot deployment and native MCP containers separately; pod readiness does not
+prove that a chat request or tool call succeeds.
+
+See the [AI integration guide](../../docs/guides/ai-integrations.md) for product
+boundaries and end-to-end validation.

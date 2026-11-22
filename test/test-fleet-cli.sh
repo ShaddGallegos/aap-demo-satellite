@@ -80,6 +80,46 @@ if fleet_node_power 9 stop >/dev/null 2>&1; then
 fi
 echo "PASS: rejects a missing node"
 
+# shellcheck disable=SC2329
+(
+  set -e
+  touch "$FLEET_DIR/node-1/disk.qcow2" "$FLEET_DIR/node-1/cloud-init.iso"
+  fleet_ssh_key_ready() { :; }
+  _fleet_check_port_available() { :; }
+  _fleet_qemu_binary() { printf mock_qemu; }
+  _fleet_qemu_accel() { printf kvm; }
+  _fleet_qemu_machine() { printf q35; }
+  _fleet_qemu_bios_args() { :; }
+  fleet_ssh() { :; }
+  fleet_reconcile_access() { :; }
+  mock_qemu() {
+    printf '%s\n' "$@" >"$TEST_HOME/qemu-args"
+    while [ "$#" -gt 1 ]; do
+      if [ "$1" = -pidfile ]; then printf 999999999 >"$2"; fi
+      shift
+    done
+  }
+  printf 'MEMORY_MB=4096\n' >>"$FLEET_DIR/node-1/meta"
+  _FLEET_NODE_MEM_EXPLICIT=""
+  fleet_node_start 1 >/dev/null || exit 1
+  grep -Fxq 4096 "$TEST_HOME/qemu-args" || exit 1
+  _FLEET_NODE_MEM_EXPLICIT=2048
+  fleet_node_start 1 >/dev/null || exit 1
+  grep -Fxq 2048 "$TEST_HOME/qemu-args" || exit 1
+  grep -Fxq MEMORY_MB=2048 "$FLEET_DIR/node-1/meta" || exit 1
+  test "$(grep -c '^MEMORY_MB=' "$FLEET_DIR/node-1/meta")" = 1 || exit 1
+  sed -i 's/^MEMORY_MB=.*/MEMORY_MB=invalid/' "$FLEET_DIR/node-1/meta"
+  _FLEET_NODE_MEM_EXPLICIT=""
+  if fleet_node_start 1 >/dev/null 2>&1; then
+    echo "FAIL: invalid saved memory was accepted" >&2
+    exit 1
+  fi
+) || {
+  echo "FAIL: per-node memory retention or override failed" >&2
+  exit 1
+}
+echo "PASS: node memory survives restart, accepts explicit overrides, and rejects invalid state"
+
 # stop on an existing (stopped) node updates the meta without error.
 fleet_node_start() { return 0; }
 _fleet_stop_vm() { return 0; }

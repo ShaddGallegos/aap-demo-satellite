@@ -71,8 +71,14 @@ cmd_fleet_qemu() {
       ;;
     node)
       local node_index="${1:-}" node_action="${2:-}"
-      [[ "$node_index" =~ ^[1-9][0-9]*$ ]] || { _err "Usage: aap-demo fleet node <index> <start|stop|restart>"; return 1; }
-      [[ "$node_action" =~ ^(start|stop|restart)$ ]] || { _err "Usage: aap-demo fleet node <index> <start|stop|restart>"; return 1; }
+      [[ "$node_index" =~ ^[1-9][0-9]*$ ]] || {
+        _err "Usage: aap-demo fleet node <index> <start|stop|restart>"
+        return 1
+      }
+      [[ "$node_action" =~ ^(start|stop|restart)$ ]] || {
+        _err "Usage: aap-demo fleet node <index> <start|stop|restart>"
+        return 1
+      }
       fleet_node_power "$node_index" "$node_action"
       ;;
     register)
@@ -86,12 +92,18 @@ cmd_fleet_qemu() {
       ;;
     ssh)
       local index="${1:-1}" port
-      [[ "$index" =~ ^[1-9][0-9]*$ ]] || { _err "Fleet SSH requires a node index"; return 1; }
+      [[ "$index" =~ ^[1-9][0-9]*$ ]] || {
+        _err "Fleet SSH requires a node index"
+        return 1
+      }
       port=$(sed -n 's/^PORT=//p' "$FLEET_DIR/node-$index/meta") || return 1
-      [[ "$port" =~ ^[0-9]+$ ]] || { _err "Invalid Fleet node port"; return 1; }
+      [[ "$port" =~ ^[0-9]+$ ]] || {
+        _err "Invalid Fleet node port"
+        return 1
+      }
       _aap_demo_release_operation_lock
-      ssh -t -p "$port" -i "$FLEET_DIR/ssh_key" \
-        -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$FLEET_DIR/known_hosts" admin@127.0.0.1
+      fleet_ssh_key_ensure false || return 1
+      fleet_ssh -t -p "$port" admin@127.0.0.1
       ;;
     remove)
       local target="${1:-1}"

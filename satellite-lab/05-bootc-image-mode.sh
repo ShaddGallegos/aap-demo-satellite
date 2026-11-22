@@ -6,7 +6,7 @@ set -euo pipefail
 
 SAT=satellite.demo.lab
 ORG="Default Organization"
-ORG_LABEL=Demo_Org                 # org label (spaces -> underscores); check: hammer organization list
+ORG_LABEL=Default_Organization     # org label (spaces -> underscores); check: hammer organization list
 RHSM_USER="${RHSM_USER:-changeme}" # CDN creds to pull the upstream rhel-bootc base image
 RHSM_PASS="${RHSM_PASS:-changeme}"
 
@@ -39,7 +39,7 @@ cat <<EOF
 == C. Build host: produce a QCOW2 with bootc-image-builder and boot it ==
 
   # Optional user/ssh config for the image (bib-config.json):
-  #   {"blueprint":{"customizations":{"user":[{"name":"demo","password":"RedHat123!","groups":["wheel"]}]}}}
+  #   {"blueprint":{"customizations":{"user":[{"name":"demo","password":"<vault-supplied-password>","groups":["wheel"]}]}}}
   mkdir -p output
   sudo podman run --rm -it --privileged \
     -v "\$PWD/output:/output" \

@@ -8,9 +8,12 @@ set -euo pipefail
 ORG="Default Organization"
 MANIFEST="${1:-/root/manifest.zip}"
 RHEL_PRODUCT="Red Hat Enterprise Linux for x86_64"
-CLIENT_PRODUCT="Red Hat Satellite Client 6"   # verify: hammer repository-set list --search "Satellite Client"
+CLIENT_PRODUCT="Red Hat Satellite Client 6" # verify: hammer repository-set list --search "Satellite Client"
 
-[[ -f $MANIFEST ]] || { echo "ERROR: manifest not found at $MANIFEST"; exit 1; }
+[[ -f $MANIFEST ]] || {
+  echo "ERROR: manifest not found at $MANIFEST"
+  exit 1
+}
 
 hammer defaults add --param-name organization --param-value "$ORG" 2>/dev/null || true
 
@@ -41,7 +44,7 @@ enable_set "$RHEL_PRODUCT" "Red Hat Enterprise Linux 10 for x86_64 - AppStream (
 enable_set "$RHEL_PRODUCT" "Red Hat Enterprise Linux 10 for x86_64 - BaseOS (Kickstart)" 10.0
 enable_set "$RHEL_PRODUCT" "Red Hat Enterprise Linux 10 for x86_64 - AppStream (Kickstart)" 10.0
 # Satellite Client (katello-host-tools / REX agent bits) for managed nodes
-enable_set "$CLIENT_PRODUCT" "Red Hat Satellite Client 6 for RHEL 9 x86_64 (RPMs)"  || echo "WARN: verify client repo-set name via: hammer repository-set list --search 'Satellite Client'"
+enable_set "$CLIENT_PRODUCT" "Red Hat Satellite Client 6 for RHEL 9 x86_64 (RPMs)" || echo "WARN: verify client repo-set name via: hammer repository-set list --search 'Satellite Client'"
 enable_set "$CLIENT_PRODUCT" "Red Hat Satellite Client 6 for RHEL 10 x86_64 (RPMs)" || echo "WARN: verify client repo-set name via: hammer repository-set list --search 'Satellite Client'"
 
 echo "== 4/7 Enforce on_demand on every repo, then sync =="
@@ -58,11 +61,11 @@ sync_repo "$RHEL_PRODUCT" "Red Hat Enterprise Linux 10 for x86_64 - BaseOS RPMs 
 sync_repo "$RHEL_PRODUCT" "Red Hat Enterprise Linux 10 for x86_64 - AppStream RPMs 10"
 sync_repo "$RHEL_PRODUCT" "Red Hat Enterprise Linux 10 for x86_64 - BaseOS Kickstart 10.0"
 sync_repo "$RHEL_PRODUCT" "Red Hat Enterprise Linux 10 for x86_64 - AppStream Kickstart 10.0"
-sync_repo "$CLIENT_PRODUCT" "Red Hat Satellite Client 6 for RHEL 9 x86_64 RPMs"  || true
+sync_repo "$CLIENT_PRODUCT" "Red Hat Satellite Client 6 for RHEL 9 x86_64 RPMs" || true
 sync_repo "$CLIENT_PRODUCT" "Red Hat Satellite Client 6 for RHEL 10 x86_64 RPMs" || true
 
 echo "== 5/7 Lifecycle environments: Library -> DEV -> TEST -> PROD =="
-hammer lifecycle-environment create --name DEV  --prior Library
+hammer lifecycle-environment create --name DEV --prior Library
 hammer lifecycle-environment create --name TEST --prior DEV
 hammer lifecycle-environment create --name PROD --prior TEST
 
@@ -84,7 +87,7 @@ create_cv() { # <cv name> <rhel major> <kickstart releasever>
     hammer content-view version promote --content-view "$cv" --version 1.0 --to-lifecycle-environment "$env"
   done
 }
-create_cv RHEL9  9  9.5
+create_cv RHEL9 9 9.5
 create_cv RHEL10 10 10.0
 
 echo "== 7/7 Activation keys per OS x lifecycle stage =="
@@ -96,7 +99,7 @@ for spec in "rhel9 RHEL9" "rhel10 RHEL10"; do
     else
       hammer activation-key create --name "ak-$1-${env,,}" \
         --lifecycle-environment "$env" --content-view "$2" \
-        --auto-attach true --unlimited-hosts
+        --unlimited-hosts
     fi
   done
 done

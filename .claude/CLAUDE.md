@@ -109,7 +109,27 @@ ansible/                       # Ansible playbook alternative
 
 ## Contributing to aap-demo
 
-Three Claude Code skills are available to guide common development workflows:
+Repository skills are available to guide common development workflows.
+See the [assistant skills guide](../docs/guides/assistant-skills.md) for
+activation, scope, and approval boundaries.
+
+### Operational validation and maintenance
+
+- `aap-integration-validation`: verify authenticated integration connections.
+- `satellite-lifecycle`: manifests, supported maintenance, and Fleet registration.
+- `openshift-safe-recovery`: recover CRC while preserving operator-owned state.
+- `aap-idempotency-testing`: test resource reuse and repeated-operation behavior.
+- `aap-release-validation`: validate changes and requested publication.
+- `aap-resource-diagnostics`: investigate metrics, HPAs, memory, and storage.
+
+### Optional Copilot agents
+
+Users may explicitly select `aap-integration-validator`,
+`aap-regression-tester`, or `aap-release-reviewer` from
+[`.github/agents/`](../.github/agents/). Do not invoke these agents
+automatically. They reuse the skills above and do not change CLI behavior.
+See the [guide](../docs/guides/assistant-skills.md#optional-agents) for
+selection, tool limitations, and approval boundaries.
 
 ### Architecture Decision Records (ADRs)
 

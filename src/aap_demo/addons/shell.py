@@ -30,6 +30,7 @@ GALAXY_TOKEN_PREFIX = ".galaxy-token."
 
 #: Installers shipped beside this package, and present in a git checkout.
 BUNDLED_ADDON_DIRS: tuple = (
+    "eda",
     "product-demos",
     "product-demos-base",
     "product-demo-linux",
@@ -38,10 +39,18 @@ BUNDLED_ADDON_DIRS: tuple = (
     "product-demo-cloud",
     "product-demo-openshift",
     "product-demo-satellite",
+    "product-demo-infrastructure",
+    "product-demo-eda",
 )
 
 #: Names ``aap-demo enable`` prints when no addon is given.
-PUBLIC_SHELL_ADDONS: tuple = ("product-demos", "product-demo-satellite")
+PUBLIC_SHELL_ADDONS: tuple = (
+    "eda",
+    "product-demos",
+    "product-demo-satellite",
+    "product-demo-infrastructure",
+    "product-demo-eda",
+)
 
 
 _INSTALLER_TOOLS = ("bash", "curl", "jq")

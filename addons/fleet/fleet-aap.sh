@@ -291,7 +291,7 @@ _fleet_aap_get_host_gateway_ip() {
   # can reach. Detect it by finding the host IP on the route to the CRC VM.
   local crc_vm_ip
   crc_vm_ip=$(ssh -p 2222 -i "$HOME/.crc/machines/crc/id_ed25519" \
-    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    -o StrictHostKeyChecking=accept-new \
     -o LogLevel=ERROR -o ConnectTimeout=5 -o BatchMode=yes \
     core@127.0.0.1 "hostname -I | awk '{print \$1}'" 2>/dev/null || echo "")
 
@@ -387,6 +387,13 @@ CRED_EOF
     echo "$resp" >&2
     return 1
   fi
+}
+
+_fleet_aap_create_credential_with_vault_key() {
+  local ssh_key_path="$1"
+  local org_id="$2"
+  local cred_type_id="$3"
+  _fleet_aap_create_credential "$org_id" "$cred_type_id" "$ssh_key_path"
 }
 
 _fleet_aap_create_inventory() {
@@ -513,6 +520,10 @@ for host in response.get("results", []):
 _fleet_aap_run_ping() {
   local inv_id="$1"
   local cred_id="$2"
+  # AAP may queue an ad-hoc command behind controller work during a full-demo
+  # reconciliation. Host creation and SSH access were already verified above;
+  # a queued verification should not discard that successful registration.
+  FLEET_AAP_PING_PENDING=false
 
   echo "  Running ad-hoc ping..."
 
@@ -536,7 +547,8 @@ PING_EOF
   if [ -n "$job_id" ]; then
     echo "  ✓ Ad-hoc ping launched (job: ${job_id})"
 
-    # Wait briefly for result
+    # Wait briefly for a definitive result. A queued/running job is reported as
+    # pending below; completed failures remain fatal.
     local attempts=0
     while [ "$attempts" -lt 15 ]; do
       sleep 2
@@ -562,8 +574,10 @@ PING_EOF
       esac
       attempts=$((attempts + 1))
     done
-    echo "  ⚠ Ping still running — check AAP UI for results"
-    return 1
+    FLEET_AAP_PING_PENDING=true
+    echo "  ⚠ Ping still running — Fleet registration succeeded; verification remains pending"
+    echo "    Check in AAP UI: Jobs → Ad Hoc Commands (or re-run: aap-demo fleet register)"
+    return 0
   else
     echo "  ⚠ Could not launch ad-hoc ping"
     return 1
@@ -609,8 +623,10 @@ fleet_register_aap() {
   echo "  Host gateway IP: ${host_gw_ip}"
 
   # Status messages go to stderr, IDs to stdout
+  fleet_ssh_key_ready || return 1
   local cred_id
-  cred_id=$(_fleet_aap_create_credential "$org_id" "$cred_type_id" "$(_fleet_ssh_private_key_path)")
+  cred_id=$(aap_demo_vault_with_file "$FLEET_SSH_VAULT_KEY" \
+    _fleet_aap_create_credential_with_vault_key "$org_id" "$cred_type_id") || return 1
 
   local inv_id
   inv_id=$(_fleet_aap_create_inventory "$org_id")
@@ -654,6 +670,9 @@ fleet_register_aap() {
   echo "  Inventory: Fleet"
   echo "  Credential: Fleet SSH Key"
   echo "  AAP UI: ${_FLEET_AAP_URL}"
+  if [ "${FLEET_AAP_PING_PENDING:-false}" = true ]; then
+    echo "  Verification: pending AAP ad-hoc ping"
+  fi
 }
 
 fleet_node_deregister_host() {

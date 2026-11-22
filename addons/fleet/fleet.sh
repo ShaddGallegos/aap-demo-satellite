@@ -14,7 +14,11 @@ _FLEET_LOADED=1
 
 FLEET_ADDON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FLEET_DIR="${AAP_DEMO_DIR:-$HOME/.aap-demo}/fleet"
-FLEET_NODE_MEM="${FLEET_NODE_MEM:-1024}"
+_FLEET_NODE_MEM_EXPLICIT="${FLEET_NODE_MEM:-}"
+# RHEL's package and remote-management services can exceed 1 GiB during a
+# metadata refresh.  Two GiB is the minimum reliable baseline for managed
+# Fleet nodes; application hosts can request more explicitly.
+FLEET_NODE_MEM="${FLEET_NODE_MEM:-2048}"
 FLEET_NODE_CPUS="${FLEET_NODE_CPUS:-2}"
 FLEET_NODE_PORT_BASE=2200
 # shellcheck source=../../includes/fleet-access.sh
@@ -291,25 +295,12 @@ _fleet_validate_image() {
 # -----------------------------------------------------------------------------
 
 _fleet_generate_ssh_key() {
-  local key_path="${FLEET_DIR}/ssh_key"
-  mkdir -p "$FLEET_DIR" || return 1
-  chmod 700 "$FLEET_DIR" || return 1
-  if [ ! -f "$key_path" ]; then
-    ssh-keygen -t ed25519 -f "$key_path" -N "" -C "aap-demo-fleet" -q || return 1
-  fi
-  if [ ! -f "${key_path}.pub" ]; then
-    ssh-keygen -y -P '' -f "$key_path" >"${key_path}.pub" || return 1
-  fi
-  chmod 600 "$key_path"
-  chmod 644 "${key_path}.pub"
+  fleet_ssh_key_ensure true || return 1
+  _FLEET_SSH_KEY_READY=true
 }
 
 _fleet_ssh_public_key() {
   cat "${FLEET_DIR}/ssh_key.pub"
-}
-
-_fleet_ssh_private_key_path() {
-  echo "${FLEET_DIR}/ssh_key"
 }
 
 # -----------------------------------------------------------------------------
@@ -473,19 +464,15 @@ PORT=${port}
 PID=${pid}
 HOSTNAME=${hostname}
 STATUS=running
+MEMORY_MB=${FLEET_NODE_MEM}
 EOF
 
   # Wait for SSH
   echo "  Waiting for SSH on port ${port}..."
-  local ssh_key
-  ssh_key=$(_fleet_ssh_private_key_path)
   local attempts=0
   local max_attempts=60
   while [ "$attempts" -lt "$max_attempts" ]; do
-    if ssh -p "$port" -i "$ssh_key" \
-      -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-      -o LogLevel=ERROR -o ConnectTimeout=2 -o BatchMode=yes \
-      ansible@127.0.0.1 'true' 2>/dev/null; then
+    if fleet_ssh -p "$port" -o ConnectTimeout=2 ansible@127.0.0.1 'true' 2>/dev/null; then
       echo "  ✓ ${hostname} ready (SSH on port ${port})"
       fleet_reconcile_access "$index"
       return $?
@@ -557,16 +544,23 @@ fleet_node_start() {
   local index="$1"
   local node_dir="${FLEET_DIR}/node-${index}"
   local meta="${node_dir}/meta"
+  fleet_ssh_key_ready || return 1
   if [ ! -f "$meta" ] || [ ! -f "${node_dir}/disk.qcow2" ] \
     || [ ! -f "${node_dir}/cloud-init.iso" ]; then
     _err "Fleet node ${index} is incomplete and cannot be restarted"
     return 1
   fi
 
-  local port pid hostname
+  local port pid hostname memory
   port=$(grep '^PORT=' "$meta" | cut -d= -f2)
   pid=$(grep '^PID=' "$meta" | cut -d= -f2)
   hostname=$(grep '^HOSTNAME=' "$meta" | cut -d= -f2)
+  memory="${_FLEET_NODE_MEM_EXPLICIT:-$(sed -n 's/^MEMORY_MB=//p' "$meta")}"
+  memory="${memory:-$FLEET_NODE_MEM}"
+  [[ "$memory" =~ ^[1-9][0-9]*$ ]] || {
+    _err "Invalid saved or requested Fleet memory for node ${index}"
+    return 1
+  }
   if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
     echo "  ✓ ${hostname} already running"
     return 0
@@ -585,7 +579,7 @@ fleet_node_start() {
     "$qemu_bin"
     -accel "$accel"
     -M "$machine"
-    -m "$FLEET_NODE_MEM"
+    -m "$memory"
     -smp "$FLEET_NODE_CPUS"
     -cpu host
     -drive "file=${node_dir}/disk.qcow2,format=qcow2"
@@ -609,17 +603,15 @@ fleet_node_start() {
     return 1
   fi
   pid=$(cat "${node_dir}/qemu.pid")
-  sed -i.bak -e "s/^PID=.*/PID=${pid}/" -e 's/^STATUS=.*/STATUS=running/' "$meta"
+  sed -i.bak -e "s/^PID=.*/PID=${pid}/" -e 's/^STATUS=.*/STATUS=running/' \
+    -e '/^MEMORY_MB=/d' "$meta"
+  printf 'MEMORY_MB=%s\n' "$memory" >>"$meta"
   rm -f "${meta}.bak"
 
   echo "  Waiting for SSH on port ${port}..."
-  local ssh_key attempts=0
-  ssh_key=$(_fleet_ssh_private_key_path)
+  local attempts=0
   while [ "$attempts" -lt 60 ]; do
-    if ssh -p "$port" -i "$ssh_key" \
-      -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-      -o LogLevel=ERROR -o ConnectTimeout=2 -o BatchMode=yes \
-      ansible@127.0.0.1 'true' 2>/dev/null; then
+    if fleet_ssh -p "$port" -o ConnectTimeout=2 ansible@127.0.0.1 'true' 2>/dev/null; then
       echo "  ✓ ${hostname} ready (SSH on port ${port})"
       fleet_reconcile_access "$index"
       return $?
@@ -804,9 +796,15 @@ fleet_stop_all() {
 # fleet_node_power <index> <start|stop|restart>
 fleet_node_power() {
   local index="$1" action="$2"
-  [[ "$index" =~ ^[1-9][0-9]*$ ]] || { _err "Invalid fleet node index: $index"; return 1; }
+  [[ "$index" =~ ^[1-9][0-9]*$ ]] || {
+    _err "Invalid fleet node index: $index"
+    return 1
+  }
   local node_dir="${FLEET_DIR}/node-${index}"
-  [ -d "$node_dir" ] || { _err "Fleet node ${index} does not exist"; return 1; }
+  [ -d "$node_dir" ] || {
+    _err "Fleet node ${index} does not exist"
+    return 1
+  }
 
   case "$action" in
     start)

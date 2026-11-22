@@ -16,6 +16,7 @@ import select
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import webbrowser
@@ -37,6 +38,47 @@ TERMINAL_IDLE_SECONDS = 300
 # TTL shorter than that makes every auto-refresh re-run the full collection and
 # queue behind the in-flight one, so the UI sits on a stale/empty payload.
 INVENTORY_CACHE_TTL_SECONDS = 30
+VAULT_HELPER_TIMEOUT_SECONDS = 30
+
+
+def _terminate_process_group(process: subprocess.Popen[Any]) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+
+    # Keep the group leader unreaped until escalation so its PID cannot be
+    # reused for an unrelated process group during the cleanup grace period.
+    time.sleep(1)
+
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Unable to stop the Vault helper process group") from None
+
+
+def _run_bounded_process(command: list[str], timeout: float) -> None:
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        returncode = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _terminate_process_group(process)
+        raise
+    except BaseException:
+        _terminate_process_group(process)
+        raise
+    if returncode:
+        raise subprocess.CalledProcessError(returncode, command)
 
 
 class FleetTerminal:
@@ -48,12 +90,19 @@ class FleetTerminal:
         import pty
 
         self.lock = threading.Lock()
+        self._key_cleanup_lock = threading.Lock()
+        self._ssh_key_path: Path | None = self._materialize_ssh_key(root)
         self.last_used = time.monotonic()
-        self.master, slave = pty.openpty()
+        try:
+            self.master, slave = pty.openpty()
+        except BaseException:
+            self._cleanup_ssh_key()
+            raise
+        self.closed = False
         try:
             self.process = subprocess.Popen(
                 [
-                    "ssh", "-tt", "-p", str(port), "-i", str(root / "ssh_key"),
+                    "ssh", "-tt", "-p", str(port), "-i", str(self._ssh_key_path),
                     "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
                     "-o", "StrictHostKeyChecking=yes",
                     "-o", f"UserKnownHostsFile={root / 'known_hosts'}",
@@ -64,13 +113,73 @@ class FleetTerminal:
                 start_new_session=True,
                 env={**os.environ, "TERM": "xterm-256color"},
             )
-        except OSError:
-            os.close(self.master)
+        except BaseException:
+            try:
+                os.close(self.master)
+            finally:
+                try:
+                    os.close(slave)
+                finally:
+                    self._cleanup_ssh_key()
             raise
-        finally:
+        try:
             os.close(slave)
-        os.set_blocking(self.master, False)
-        self.closed = False
+        except BaseException:
+            self.close()
+            raise
+        try:
+            os.set_blocking(self.master, False)
+            threading.Thread(target=self._cleanup_ssh_key_after_exit, daemon=True).start()
+        except BaseException:
+            self.close()
+            raise
+
+    @staticmethod
+    def _materialize_ssh_key(root: Path) -> Path:
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(root, 0o700)
+        descriptor, key_name = tempfile.mkstemp(prefix=".dashboard-ssh-key.", dir=root)
+        key_path = Path(key_name)
+        helper = Path(__file__).resolve().parents[1] / "includes" / "fleet-access.sh"
+        materialized = False
+        try:
+            os.close(descriptor)
+            _run_bounded_process(
+                [
+                    "bash", "-c",
+                    'source "$1" && fleet_ssh_key_ensure false '
+                    '&& aap_demo_vault_get_file "$FLEET_SSH_VAULT_KEY" "$2"',
+                    "aap-demo-dashboard", str(helper),
+                    str(key_path),
+                ],
+                timeout=VAULT_HELPER_TIMEOUT_SECONDS,
+            )
+            if not key_path.is_file() or key_path.stat().st_size == 0:
+                raise OSError("Vault returned an empty Fleet SSH key")
+            os.chmod(key_path, 0o600)
+            materialized = True
+            return key_path
+        except (OSError, subprocess.SubprocessError):
+            raise RuntimeError("Unable to read the Fleet SSH identity from the Vault") from None
+        finally:
+            if not materialized:
+                key_path.unlink(missing_ok=True)
+
+    def _cleanup_ssh_key(self) -> None:
+        with self._key_cleanup_lock:
+            key_path = self._ssh_key_path
+            if key_path is None:
+                return
+            try:
+                key_path.unlink(missing_ok=True)
+            except OSError:
+                print("ERROR: Unable to remove temporary Fleet SSH key", file=sys.stderr)
+                return
+            self._ssh_key_path = None
+
+    def _cleanup_ssh_key_after_exit(self) -> None:
+        self.process.wait()
+        self._cleanup_ssh_key()
 
     def exchange(self, data: str, cols: int, rows: int) -> dict[str, Any]:
         import fcntl
@@ -121,6 +230,7 @@ class FleetTerminal:
                     except ProcessLookupError:
                         pass
                     self.process.wait(timeout=2)
+            self._cleanup_ssh_key()
             os.close(self.master)
 
 
@@ -144,6 +254,65 @@ def value_at_path(document: dict[str, Any], path: list[str]) -> Any:
             return None
         value = value.get(key)
     return value
+
+
+def lightwell_services() -> list[dict[str, str]]:
+    root = Path(os.environ.get("AAP_DEMO_DIR", Path.home() / ".aap-demo"))
+    path = root / "lightwell/services.json"
+    if not path.exists():
+        return []
+    try:
+        if path.stat().st_size > MAX_BODY_BYTES:
+            raise ValueError("state file is too large")
+        document = json.loads(path.read_text(encoding="utf-8"))
+        services = document["services"]
+        if not isinstance(services, list):
+            raise ValueError("services must be a list")
+        result = []
+        for service in services:
+            url = service["url"]
+            parsed = urlparse(url)
+            if (
+                parsed.scheme != "https" or not parsed.hostname
+                or parsed.username or parsed.password or parsed.query or parsed.fragment
+                or parsed.path not in ("", "/") or not isinstance(service["name"], str)
+            ):
+                raise ValueError("invalid service link")
+            result.append({"name": service["name"], "url": url})
+        return result
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise RuntimeError(
+            "Cannot read valid Lightwell service links; "
+            "rerun the addon after fixing its configuration"
+        ) from error
+
+
+def gitea_services() -> list[dict[str, str]]:
+    root = Path(os.environ.get(
+        "AAP_DEMO_GITEA_DIR",
+        str(Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
+            / "aap-demo/gitea"),
+    ))
+    path = root / "state.json"
+    if not path.exists():
+        return []
+    try:
+        if path.stat().st_size > MAX_BODY_BYTES:
+            raise ValueError("state file is too large")
+        state = json.loads(path.read_text(encoding="utf-8"))
+        if not state.get("provisioned"):
+            return []
+        parsed = urlparse(state["url"])
+        if (
+            state["domain"] != "aap-demo-gitea"
+            or parsed.scheme != "https" or not parsed.hostname or parsed.port != 3000
+            or parsed.username or parsed.password or parsed.path not in ("", "/")
+            or parsed.query or parsed.fragment
+        ):
+            raise ValueError("invalid Gitea service origin")
+        return [{"name": "Local Gitea · Fedora 45 VM / host NFS", "url": state["url"]}]
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise RuntimeError("Cannot read valid Gitea service links; inspect its managed state") from error
 
 
 def active_dependencies(addon: dict[str, Any], inventory: dict[str, Any]) -> list[str]:
@@ -191,7 +360,18 @@ def addon_state(addon: dict[str, Any], inventory: dict[str, Any]) -> str:
     return "degraded"
 
 
+ANSI_ESCAPE = re.compile(
+    r"\x1B(?:[@-_][0-?]*[ -/]*[@-~]|\][^\x07\x1B]*(?:\x07|\x1B\\\\))"
+)
+UNSAFE_CONTROL = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]")
+
+
 def redact_output(output: str) -> str:
+    # Operation output is rendered as text, but strip terminal control sequences
+    # before retaining it. This keeps ANSI colour escapes from appearing as
+    # literal noise in the dashboard and prevents terminal-title/control output
+    # from crossing the CLI-to-browser boundary.
+    output = UNSAFE_CONTROL.sub("", ANSI_ESCAPE.sub("", output))
     patterns = [
         (re.compile(r"(?i)(authorization:\s*bearer\s+)\S+"), r"\1******"),
         (re.compile(r"(?i)(password\s*[:=]\s*)\S+"), r"\1******"),
@@ -271,8 +451,8 @@ class DashboardApp:
         port = node.get("ssh_port")
         if not isinstance(port, int) or not 1 <= port <= 65535:
             raise RuntimeError("Fleet node has an invalid SSH port")
-        if not (root / "ssh_key").is_file() or not (root / "known_hosts").is_file():
-            raise RuntimeError("Fleet SSH access is not configured; run 'aap-demo fleet register'")
+        if not (root / "known_hosts").is_file():
+            raise RuntimeError("Fleet SSH host trust is not configured; run 'aap-demo fleet register'")
         if not (self.repo_root / "dashboard/node_modules/@xterm/xterm/lib/xterm.js").is_file():
             raise RuntimeError("Browser terminal assets are missing; run 'npm ci --prefix dashboard'")
         with self.terminal_lock:
@@ -348,6 +528,17 @@ class DashboardApp:
         )
         if sys.platform == "win32":
             environment["AAP_DEMO_DASHBOARD_COMMAND"] = "1"
+        else:
+            # Desktop sessions may omit user-installed tools from PATH.
+            paths = (environment.get("PATH") or os.defpath).split(os.pathsep)
+            for directory in (
+                str(Path.home() / ".local/bin"),
+                str(Path.home() / ".crc/bin/oc"),
+                "/usr/local/bin",
+            ):
+                if directory not in paths:
+                    paths.append(directory)
+            environment["PATH"] = os.pathsep.join(paths)
         return environment
 
     def inventory(self) -> dict[str, Any]:
@@ -399,6 +590,8 @@ class DashboardApp:
             "inventory": inventory,
             "addons": addons,
             "operation": self.operation.snapshot(),
+            "lightwell_services": lightwell_services() if "lightwell" in enabled else [],
+            "gitea_services": gitea_services() if "gitea" in enabled else [],
         }
 
     def dependent_addons(self, addon_id: str, inventory: dict[str, Any]) -> list[str]:
@@ -410,7 +603,18 @@ class DashboardApp:
             and addon_id in active_dependencies(definition, inventory)
         ]
 
-    def start_operation(self, addon_id: str, action: str) -> dict[str, Any]:
+    def start_operation(
+        self, addon_id: str, action: str, *, eda_demo_opt_in: bool = False,
+    ) -> dict[str, Any]:
+        if addon_id not in self.addons or action not in {"enable", "disable", "check"}:
+            raise ValueError("Unsupported dashboard operation")
+        if addon_id == "product-demo-eda" and action == "enable" and not eda_demo_opt_in:
+            raise ValueError("EDA demo enablement requires explicit prerequisite acknowledgement")
+        if action == "check":
+            if self.addons[addon_id]["category"] != "Demo content":
+                raise ValueError("Integration checks require a known demo")
+            if addon_id not in self.inventory().get("addons", []):
+                raise RuntimeError("Configure the demo before checking integrations")
         if sys.platform == "win32" and addon_id not in self.inventory().get("supported_addons", []):
             raise RuntimeError(f"Add-on '{addon_id}' is not supported by native Windows PowerShell")
         with self.operation.lock:
@@ -423,13 +627,16 @@ class DashboardApp:
             self.operation.addon = addon_id
             self.operation.action = action
             self.operation.status = "running"
-            self.operation.message = f"{action.title()}ing {addon_id}"
+            self.operation.message = (
+                "Checking enabled integrations (read-only)"
+                if action == "check" else f"{action.title()}ing {addon_id}"
+            )
             self.operation.output = ""
             self.operation.started_at = time.time()
             self.operation.completed_at = None
         thread = threading.Thread(
             target=self._execute_operation,
-            args=(operation_id, addon_id, action),
+            args=(operation_id, addon_id, action, eda_demo_opt_in),
             daemon=True,
         )
         thread.start()
@@ -443,14 +650,23 @@ class DashboardApp:
                 raise RuntimeError("The dashboard is already restarting")
             self.restart_requested = True
 
-    def _execute_operation(self, operation_id: str, addon_id: str, action: str) -> None:
+    def _execute_operation(
+        self, operation_id: str, addon_id: str, action: str, eda_demo_opt_in: bool = False,
+    ) -> None:
         process: subprocess.Popen[str] | None = None
         output_lines: list[str] = []
         try:
+            environment = self.command_environment()
+            # This is scoped to the user-confirmed dashboard operation. It is
+            # never persisted and it does not create an event source, broker,
+            # cloud resource, credential, or rulebook activation.
+            if addon_id == "product-demo-eda" and action == "enable" and eda_demo_opt_in:
+                environment["PRODUCT_DEMOS_ENABLE_EDA"] = "true"
             process = subprocess.Popen(
-                self.cli_command(action, addon_id),
+                self.cli_command("check-integrations") if action == "check"
+                else self.cli_command(action, addon_id),
                 cwd=self.repo_root,
-                env=self.command_environment(),
+                env=environment,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -693,6 +909,19 @@ def create_handler(app: DashboardApp) -> type[BaseHTTPRequestHandler]:
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
                 return
 
+            demo_check = re.fullmatch(r"/api/demos/([a-z0-9-]+)/check", urlparse(self.path).path)
+            if demo_check:
+                try:
+                    operation = app.start_operation(demo_check[1], "check")
+                except ValueError as error:
+                    self.json_response(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                    return
+                except RuntimeError as error:
+                    self.json_response(HTTPStatus.CONFLICT, {"error": str(error)})
+                    return
+                self.json_response(HTTPStatus.ACCEPTED, operation)
+                return
+
             match = re.fullmatch(r"/api/addons/([a-z0-9-]+)/(enable|disable)", urlparse(self.path).path)
             if not match:
                 self.send_error(HTTPStatus.NOT_FOUND)
@@ -705,6 +934,21 @@ def create_handler(app: DashboardApp) -> type[BaseHTTPRequestHandler]:
                 self.json_response(
                     HTTPStatus.BAD_REQUEST,
                     {"error": "Disable confirmation is required"},
+                )
+                return
+            eda_demo_opt_in = (
+                addon_id == "product-demo-eda"
+                and action == "enable"
+                and body.get("confirm_eda_prerequisites") is True
+            )
+            if addon_id == "product-demo-eda" and action == "enable" and not eda_demo_opt_in:
+                self.json_response(
+                    HTTPStatus.BAD_REQUEST,
+                    {
+                        "error": (
+                            "Confirm EDA prerequisites before enabling this guarded demo"
+                        )
+                    },
                 )
                 return
             try:
@@ -722,7 +966,9 @@ def create_handler(app: DashboardApp) -> type[BaseHTTPRequestHandler]:
                             },
                         )
                         return
-                operation = app.start_operation(addon_id, action)
+                operation = app.start_operation(
+                    addon_id, action, eda_demo_opt_in=eda_demo_opt_in,
+                )
             except RuntimeError as error:
                 self.json_response(HTTPStatus.CONFLICT, {"error": str(error)})
                 return

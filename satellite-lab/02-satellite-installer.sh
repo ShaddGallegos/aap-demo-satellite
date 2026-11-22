@@ -14,12 +14,11 @@ set -euo pipefail
 FQDN=satellite.demo.lab
 ORG="Default Organization"
 LOC="Lab"
-ADMIN_USER=admin
+ADMIN_USER="admin"
 # The admin password comes from the host's encrypted credential Vault
 # (aap_demo.satellite.admin_password), passed in by build-and-configure.sh via
-# the SATELLITE_ADMIN_PASSWORD env var. The literal below is only a last-resort
-# fallback for a standalone manual run — never a committed secret.
-ADMIN_PASS="${SATELLITE_ADMIN_PASSWORD:-RedHat123!}"
+# the SATELLITE_ADMIN_PASSWORD env var. There is no committed fallback.
+ADMIN_PASS="${SATELLITE_ADMIN_PASSWORD:-}"
 LAB_IP=192.168.150.10
 LAB_GW=192.168.150.1
 DHCP_RANGE="192.168.150.100 192.168.150.200"
@@ -29,6 +28,11 @@ DNS_FORWARDER=192.168.122.1      # libvirt dnsmasq on the 'default' network (hos
                                  # resolves upstream; AAP/CRC is reached through the
                                  # host's forwarded ports via the default gateway
 # ---------------------------------------------------------------------------
+
+if [ -z "$ADMIN_PASS" ]; then
+  echo "ERROR: SATELLITE_ADMIN_PASSWORD must be supplied from the encrypted aap-demo Vault" >&2
+  exit 1
+fi
 
 hostnamectl set-hostname "$FQDN"
 grep -q "$FQDN" /etc/hosts || echo "$LAB_IP $FQDN satellite" >> /etc/hosts
@@ -52,13 +56,31 @@ firewall-cmd --permanent \
   --add-port=9090/tcp
 firewall-cmd --reload
 
+# Store the initial administrator password in Kafo's root-only answer file.
+# Passing it as --foreman-initial-admin-password exposes the secret to every
+# local user through the satellite-installer process arguments for hours.
+ANSWERS_FILE=/etc/foreman-installer/scenarios.d/satellite-answers.yaml
+install -d -m 0700 "$(dirname "$ANSWERS_FILE")"
+printf '%s' "$ADMIN_PASS" | ruby -ryaml -e '
+  path = ARGV.fetch(0)
+  password = STDIN.read
+  answers = File.exist?(path) ? YAML.load_file(path) : {}
+  answers = {} unless answers.is_a?(Hash)
+  answers["foreman"] = {} unless answers["foreman"].is_a?(Hash)
+  answers["foreman"]["initial_admin_password"] = password
+  temporary = "#{path}.aap-demo.#{$$}"
+  File.open(temporary, "w", 0600) { |file| file.write(YAML.dump(answers)) }
+  File.chmod(0600, temporary)
+  File.rename(temporary, path)
+' "$ANSWERS_FILE"
+chmod 600 "$ANSWERS_FILE"
+
 # --tuning default fits 32 GB; use '--tuning development' only for tiny labs.
 satellite-installer --scenario satellite \
   --tuning default \
   --foreman-initial-organization "$ORG" \
   --foreman-initial-location "$LOC" \
   --foreman-initial-admin-username "$ADMIN_USER" \
-  --foreman-initial-admin-password "$ADMIN_PASS" \
   --foreman-proxy-dns true \
   --foreman-proxy-dns-managed true \
   --foreman-proxy-dns-interface "$LAB_IF" \
@@ -108,6 +130,6 @@ getent hosts aap-aap-operator.apps.127.0.0.1.nip.io >/dev/null \
 
 cat <<EOF
 
-Satellite is up:  https://$FQDN   ($ADMIN_USER / $ADMIN_PASS)
+Satellite is up:  https://$FQDN   (user: $ADMIN_USER; password retained in the encrypted host Vault)
 Next: scp your manifest to /root/manifest.zip, then run 03-content-hammer.sh
 EOF

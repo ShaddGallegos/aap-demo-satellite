@@ -187,6 +187,11 @@ def category(name):
         name,
     ):
         return "RHEL server"
+    # This exact personal-lab SKU provides RHEL content but omits the usual
+    # "Enterprise Linux Server" wording. Do not broaden this to other
+    # developer, beta, or employee offerings.
+    if name == "red hat developer subscription for individuals":
+        return "RHEL server"
     return None
 
 covered = set()
@@ -202,12 +207,19 @@ for required in ("Satellite Infrastructure", "RHEL server"):
     if required in covered:
         continue
     matches = {}
+    available_products = []
     for pool in pools:
-        if category(pool["subscriptionName"]) != required:
-            continue
-        available = pool["entitlementsAvailable"]
+        name = pool.get("subscriptionName")
+        available = pool.get("entitlementsAvailable")
+        if not isinstance(name, str) or not name:
+            sys.exit("ERROR: RHSM pool has no usable subscription name")
         if not isinstance(available, int) or isinstance(available, bool) or available < -1:
             sys.exit("ERROR: Invalid available entitlement quantity")
+        # Names and quantities explain an unsupported SKU safely; never print
+        # a pool ID, entitlement certificate, account identifier, or token.
+        available_products.append((name, available))
+        if category(name) != required:
+            continue
         if available == -1 or available >= 1:
             pool_id = pool["id"]
             if not isinstance(pool_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", pool_id):
@@ -215,8 +227,16 @@ for required in ("Satellite Infrastructure", "RHEL server"):
             matches[pool_id] = pool["subscriptionName"]
     if len(matches) != 1:
         detail = ", ".join(f"{key} ({value})" for key, value in matches.items()) or "none"
+        visible_products = []
+        for name, available in available_products[:20]:
+            quantity = "unlimited" if available == -1 else str(available)
+            visible_products.append(f"{name} [available {quantity}]")
+        visible = ", ".join(visible_products) or "none"
+        if len(available_products) > 20:
+            visible += f"; plus {len(available_products) - 20} more"
         sys.exit(
             f"ERROR: Expected one eligible {required} pool; found {len(matches)}: {detail}. "
+            f"Allocation pool products: {visible}. "
             "Attach the desired subscription manually under Red Hat Console > "
             "Subscriptions > Subscription Allocations, then rerun. "
             "For unrecognized subscription names, supply an exported MANIFEST to the lab builder. "

@@ -91,8 +91,8 @@ echo "PASS: forced CRC stop requires opt-in, waits the timeout, avoids clean/unk
   guest_pid=$!
   trap 'kill "$guest_pid" 2>/dev/null || true' EXIT
   printf 'INDEX=1\nPID=%s\n' "$guest_pid" >"$STATE_HOME/.aap-demo/fleet/node-1/meta"
-  state_user() {
-    [ "$1" = ssh ]
+  state_fleet_ssh() {
+    [ "$1" = -p ]
     [ "${!#}" = 'sudo -n systemd-run --on-active=2s /usr/bin/systemctl poweroff' ]
     kill "$guest_pid"
     wait "$guest_pid" 2>/dev/null || true
@@ -201,6 +201,8 @@ fi
 source "$REPO_ROOT/includes/state-service.sh"
 _err() { printf 'ERROR: %s\n' "$*" >&2; }
 sudo() { printf 'sudo %s\n' "$*"; }
+systemctl() { printf 'systemctl %s\n' "$*"; }
+export -f systemctl
 SCRIPT_DIR="$REPO_ROOT"
 output=$(cmd_service install --force-stop --stop-timeout 45 --keep 2)
 grep -q " $REPO_ROOT 2 true 45" <<<"$output"
@@ -310,7 +312,10 @@ echo "PASS: reinstall restarts and validates recovery before enabling boot start
   : >"$LOG"
   state_boot
   test "$(cat "$LOG")" = "$expected"
-  state_save() { echo save >>"$LOG"; return 1; }
+  state_save() {
+    echo save >>"$LOG"
+    return 1
+  }
   : >"$LOG"
   if state_shutdown; then
     echo "FAIL: shutdown ignored checkpoint failure" >&2
@@ -328,13 +333,25 @@ echo "PASS: reinstall restarts and validates recovery before enabling boot start
   state_boot >"$TEST_DIR/pending-output" 2>&1
   test "$(cat "$LOG")" = "$expected"
   test ! -e "$STATE_ROOT/.shutdown-pending"
-  state_cli() { echo "cli $*" >>"$LOG"; [ "$1" != start ]; }
+  state_cli() {
+    echo "cli $*" >>"$LOG"
+    [ "$1" != start ]
+  }
   : >"$LOG"
-  if state_boot; then echo "FAIL: CRC startup failure was ignored" >&2; exit 1; fi
+  if state_boot; then
+    echo "FAIL: CRC startup failure was ignored" >&2
+    exit 1
+  fi
   test "$(cat "$LOG")" = "$(printf 'user systemctl --user restart crc-daemon.service\ncli start\n')"
-  state_cli() { echo "cli $*" >>"$LOG"; [ "$1" != dashboard ]; }
+  state_cli() {
+    echo "cli $*" >>"$LOG"
+    [ "$1" != dashboard ]
+  }
   : >"$LOG"
-  if state_boot; then echo "FAIL: dashboard startup failure was ignored" >&2; exit 1; fi
+  if state_boot; then
+    echo "FAIL: dashboard startup failure was ignored" >&2
+    exit 1
+  fi
   test "$(cat "$LOG")" = "$expected"
   state_user() {
     if [ "$1" = crc ] && [ "$2" = status ]; then
@@ -345,7 +362,10 @@ echo "PASS: reinstall restarts and validates recovery before enabling boot start
     return 1
   }
   : >"$LOG"
-  if state_boot; then echo "FAIL: CRC daemon failure was ignored" >&2; exit 1; fi
+  if state_boot; then
+    echo "FAIL: CRC daemon failure was ignored" >&2
+    exit 1
+  fi
   test "$(cat "$LOG")" = "user systemctl --user restart crc-daemon.service"
 )
 echo "PASS: boot preserves latest live state without copying old checkpoints; shutdown saves only stopped state"

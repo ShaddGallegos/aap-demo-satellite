@@ -21,7 +21,10 @@ Cluster
   create            Create the OpenShift Local cluster
   start             Start a stopped cluster (re-applies CoreDNS config)
   stop              Stop the cluster
+  restart           Restart the demo, using service recovery when configured
+  service           Manage demo shutdown, backup, and startup recovery
   ssh               SSH into the cluster node
+  console           Show or open the full OpenShift web console
   destroy           Delete the local cluster
   repair            Repair the cluster after a crash
   trust-ca          Repair ingress certificate trust only
@@ -47,6 +50,7 @@ AAP
 Health
   preflight         Read-only tools, capacity, storage, and catalog checks
   diagnose          Check environment health
+  check-integrations Inspect enabled integration connections without running jobs
   must-gather       Collect AAP and cluster diagnostics
   redhat-status     Check Red Hat registry status
 
@@ -55,9 +59,11 @@ Addons
   disable           Disable an addon
   fleet             Manage fleet node VMs
   keycloak          Configure Keycloak OIDC for AAP and AO
+  gpu               Inspect or configure NVIDIA GPU passthrough for MicroShift
 
 Other
   config            Configure aap-demo settings
+  credentials       Manage the optional offline-token keepalive
   update            Pull latest code and reinstall
   v2 [args...]      Run the Python v2 CLI (for example: aap-demo v2 deploy)
   version           Show version and build timestamp
@@ -66,9 +72,16 @@ Other
 Options
   --kubeconfig=FILE   Path to kubeconfig file (default: ~/.aap-demo/kubeconfig.microshift)
   --context=NAME      kubectl context to use (default: current context)
+  --branch=NAME       Branch used by update
   --backend=NAME      Fleet backend: qemu, kube-native, or all
-  --full-demo         With create: build the complete local demo
-  --satellite         With create --full-demo: also build the Satellite lab and demo
+  --ansible           With create: build the complete AAP/AO/MCP/EDA/Fleet demo
+  --full-demo         Compatibility alias for --ansible
+  --satellite         With create: build the Satellite lab and demo (implies --ansible)
+  --lightspeed        With create: enable Ansible Lightspeed with local Ollama (implies --ansible)
+  --lightwell         With create: prepare the Lightwell CI/CD profile (implies --ansible,
+                      --satellite, --lightspeed, and --gitea)
+  --gitea, --gittea   Install/start a Fedora 45 Gitea VM outside CRC, using host NFS
+                      Standalone or with create --full-demo; disable retains data
   --sno               With create: use Single Node OpenShift (full control plane +
                       web console); skips the tier prompt, fails if SNO minimums unmet
   --microshift        With create: use MicroShift (minimal edge runtime); skips the
@@ -78,6 +91,7 @@ Options
   --refresh-catalog   Refresh supported addon catalogs
   --purge-data        Delete retained addon data when disabling
   --purge-creds       Delete retained addon credentials when disabling
+  --apply             Apply a maintenance uninstall or GPU passthrough change
 
 Environment
   NAMESPACE=<name>    Kubernetes namespace (default: aap-operator)
@@ -100,7 +114,7 @@ Environment
 
 Notes
   idle                No argument shows state; true scales down; false scales up
-  diagnose            Checks cluster, storage, SCCs, pods, PVCs, and DNS
+  diagnose            Checks cluster, storage, SCCs, pod readiness, PVCs, HPA metrics, and DNS
   diagnose --ai       Analyze issues with Claude (requires the claude CLI)
   must-gather [dir]   Uses the AAP must-gather image. Output is
                       must-gather.local.<timestamp>, or the directory given
@@ -110,13 +124,30 @@ Notes
                       Export redacted, JSON, or custom-path inventory
   dashboard [--no-open]
                       Start the localhost dashboard without opening a browser
+  console [--no-open] Show the console URL without opening a browser
+  service install [--keep N] [--force-stop] [--stop-timeout SECONDS]
+                      Install demo shutdown and startup recovery
+  service retention N | backups | backup | status | disable
+                      Manage service checkpoints and recovery
+  credentials keepalive [setup|enable|status|disable|run]
+                      Manage the opt-in offline-token keepalive
+  credentials github [configure|status]
+                      Store a GitHub PAT in the encrypted Vault and authenticate gh
   maintenance [--apply]
                       Preview or remove safe-to-delete VM data
-  maintenance uninstall [--apply]
+  maintenance uninstall [--apply] [--reconfigure]
                       Remove CRC, Fleet, managed Satellite VM/disk, and local state.
+                      --reconfigure also removes managed Vault entries.
                       Noninteractive apply requires
                       AAP_DEMO_UNINSTALL_CONFIRM=UNINSTALL with QUIET=true
-  create --full-demo  Build AAP, Product Demos, AO/Ollama, Fleet, and dashboard
+  gpu [status|enable|disable] [--apply]
+                      GPU enable stops/restarts CRC, assigns an isolated NVIDIA PCI
+                      group, installs its guest runtime/device plugin, then verifies
+                      Kubernetes advertises nvidia.com/gpu. Default: status.
+  create --ansible    Build AAP, Product Demos, AO/Ollama/EDA, Fleet, and dashboard
+  create --satellite  Adds the Satellite lab/demo; interactive runs offer optional
+                      RHIS GPL-3.0 report-template import
+  create --lightwell  Adds Satellite, Lightspeed, retained Gitea, and Lightwell
   fleet               add, list, remove, destroy
                       --backend qemu|kube-native|all
                       add [N] --image <path> creates N RHEL VMs (requires: enable fleet)
@@ -163,22 +194,33 @@ Examples
     Keep those credentials private; do not paste them into logs or messages.
 
   All-in-one demo instead of the manual deployment above (choose one)
-    aap-demo create --full-demo           # AAP, demo content, AO/Ollama, Fleet, dashboard
-    aap-demo create --full-demo --microshift
+    aap-demo create --ansible             # AAP, demo content, AO/Ollama/EDA, Fleet, dashboard
+    aap-demo create --ansible --microshift
                                          # Choose the smaller MicroShift cluster
-    aap-demo create --full-demo --satellite --sno
+    aap-demo create --lightspeed --microshift
+                                         # Ansible profile plus local-model Lightspeed
+    aap-demo create --satellite --sno     # Includes the required Ansible profile
                                          # Full OpenShift console plus the Satellite lab
+    aap-demo create --lightwell --microshift
+                                         # Ansible, Satellite, Lightspeed, Gitea, and Lightwell
+    aap-demo --gitea                      # Start only the retained local Gitea VM
     Satellite requires Red Hat subscriptions and a Linux KVM/libvirt host.
     Reruns reuse Satellite, but maintenance can stop services and reboot its VM.
     Ensure there is room for the required backup before rerunning with --satellite.
+    Interactive Satellite profiles ask before importing optional GPL-3.0 RHIS reports.
+    Automation: set SATELLITE_IMPORT_RHIS_TEMPLATES=true and
+    SATELLITE_RHIS_TEMPLATE_LICENSE_ACCEPTED=true only after accepting that license.
 
   Optional addons, after AAP is deployed (choose only what you need)
     aap-demo enable                       # List the available addons
     aap-demo enable portal                # Add the self-service portal
     aap-demo enable mcp-server            # Expose AAP tools to AI assistants
     aap-demo enable ollama                # Add the local language-model service
+    aap-demo enable eda                   # Add Event-Driven Ansible; no event source/activation
     aap-demo enable ao                    # Add Automation Orchestrator
     aap-demo enable product-demos         # Install the non-Satellite demo content
+    PRODUCT_DEMOS_ENABLE_EDA=true aap-demo enable product-demo-eda
+                                         # Import guarded EDA templates after external prerequisites
 
   Add three RHEL practice machines (Fleet uses local QEMU VMs)
     aap-demo fleet auth                   # Securely configure Red Hat credentials
@@ -194,7 +236,7 @@ Examples
     aap-demo enable satellite-manifest    # Generate/download a manifest; no import here
     aap-demo fleet satellite-register     # Register running Fleet nodes to Satellite
     aap-demo wire                         # Reconcile installed components and integrations
-    The full-demo --satellite path also imports the manifest automatically.
+    The create --satellite profile also imports the manifest automatically.
     Satellite registration can migrate Fleet nodes away from direct Red Hat registration.
 
   Daily use: save resources without deleting your environment
@@ -204,6 +246,8 @@ Examples
     aap-demo stop                         # Stop the local cluster
     aap-demo start                        # Resume the cluster and configured demo
     aap-demo dashboard                    # Open the local management dashboard
+    aap-demo gpu status                    # Inspect NVIDIA GPU availability for MicroShift
+    aap-demo gpu enable --apply            # Configure approved GPU passthrough; restarts CRC
 
   Check a problem before rebuilding
     aap-demo preflight                    # Check tools, capacity, storage, and catalogs

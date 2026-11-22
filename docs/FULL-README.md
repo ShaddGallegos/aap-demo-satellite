@@ -26,6 +26,11 @@ requires default state paths; custom paths are supported by ordinary CLI/addon
 operations. A failed or interrupted remote API operation is not treated as
 success and can be safely retried after connectivity is restored.
 
+For a non-destructive travel pause and restart, follow the
+[shutdown and resume guide](guides/older-command.md#pause-for-travel-without-deleting-data).
+Satellite runs separately from CRC; preserve its NFS exports and verify guest
+shutdown rather than assuming `stop` powers off the entire lab.
+
 ## Quick Start
 
 ### Prerequisites
@@ -371,7 +376,9 @@ hosts in the Satellite inventory). See
 ```bash
 # Deployment
 aap-demo deploy              # Deploy AAP 2.7
-aap-demo create --full-demo  # Create AAP + Ollama/AO + three RHEL 9 Fleet nodes + dashboard
+aap-demo create --ansible    # AAP + Ollama/AO/EDA + three RHEL 9 Fleet nodes + dashboard
+aap-demo create --satellite  # Adds the local Satellite lab and Satellite demo
+aap-demo create --lightwell  # Adds Satellite, Lightspeed, retained Gitea, and Lightwell
 
 # Cluster management
 aap-demo status              # Show cluster status and routes without secrets
@@ -407,8 +414,9 @@ aap-demo help                # Full command reference
 
 `aap-demo create --full-demo` is a fail-fast demo bootstrap.
 It creates a cluster sized for the included addons, deploys AAP 2.7, configures
-Automation Hub, enables the offline-token keepalive, enables Ollama and
-Automation Orchestrator, then enables Fleet, attaches the AAP subscription, and
+Automation Hub (and waits for both Pulp remote sync tasks), enables the
+offline-token keepalive, enables Ollama, Event-Driven Ansible, and Automation
+Orchestrator, then enables Fleet, attaches the AAP subscription, and
 reconciles three started and registered RHEL 9 nodes. Product Demos is installed
 after licensing succeeds. A final strict `aap-demo wire` runs after all
 components are present, then the dashboard launches. Fleet image download
@@ -430,6 +438,12 @@ the AAP subscription selected during automatic licensing. Use the small
 page; it is blocked during dashboard add-on operations and does not restart
 CRC, AAP or Fleet. For foreground debugging, use
 `python3 dashboard/server.py --no-open` from the repository root.
+
+The dashboard's **Enable guarded EDA demo** action asks you to confirm that the
+external event-source prerequisites are ready. Confirmation supplies
+`PRODUCT_DEMOS_ENABLE_EDA=true` only to that one dashboard operation; it does
+not persist the value or create a broker, cloud resource, credential, event
+source, or rulebook activation.
 
 `maintenance --apply` keeps running containers, images used by workloads,
 namespaces, PVCs, and the optional local image cache. It also vacuums system
@@ -510,8 +524,9 @@ for networking and SSH host-key details.
 `aap-demo status --show-secrets` reveals available AAP and addon login
 passwords only in an interactive terminal; redirected output is rejected.
 
-The OpenShift OAuth login URL also appears under **Routes** on full OpenShift
-clusters. On CRC, **Credentials** includes `kubeadmin` and its password from
+The OpenShift console route appears under **Routes** on full OpenShift
+clusters; status and inventory also include the OAuth login route. On CRC,
+**Credentials** includes `kubeadmin` and its password from
 `~/.crc/machines/crc/kubeadmin-password` only when secrets are explicitly
 requested. Normal status and inventory output omit the password; redacted
 reports mask it. MicroShift does not have this OAuth route or login.
@@ -567,7 +582,7 @@ design, storage, OLM, addons, and cross-platform support).
 
 ```bash
 CRC_CPUS=8                   # VM CPU count (default: 8)
-CRC_MEMORY=24576             # VM memory in MiB (default: 24576, use 16384 for AAP-only)
+CRC_MEMORY=16384             # VM memory in MiB (default: 16384; full demo defaults to 32768)
 CRC_DISK=120                 # VM disk size in GiB (default: 120, minimum 31; prompted on create)
 CRC_PV_SIZE=70               # Persistent-volume pool in GiB (default: 70, minimum 15, must be < CRC_DISK; prompted on create)
 NAMESPACE=aap-operator       # Target namespace

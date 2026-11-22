@@ -5,10 +5,13 @@ TEST_DIR=$(mktemp -d)
 trap 'rm -rf "$TEST_DIR"' EXIT
 export AAP_DEMO_DIR="$TEST_DIR/state"
 export HOME="$TEST_DIR/home"
-mkdir -p "$AAP_DEMO_DIR/fleet"
+mkdir -p "$AAP_DEMO_DIR/fleet" "$HOME"
 ssh-keygen -q -t ed25519 -N '' -f "$AAP_DEMO_DIR/fleet/ssh_key"
-source "$REPO_ROOT/includes/lab-ssh.sh"
+source "$REPO_ROOT/includes/fleet-access.sh"
 _err() { printf 'ERROR: %s\n' "$*" >&2; }
+_test_ssh_public_key() { ssh-keygen -y -P '' -f "$1"; }
+fleet_ssh_key_ensure false
+[[ ! -e "$AAP_DEMO_DIR/fleet/ssh_key" ]]
 (
   systemctl() { return 0; }
   ip() { printf '192.168.122.20 dev virbr0 src 192.168.122.1\n'; }
@@ -17,10 +20,21 @@ _err() { printf 'ERROR: %s\n' "$*" >&2; }
     local arg mode=runtime rule=""
     for arg in "$@"; do
       case "$arg" in
-        --get-zone-of-interface=*) printf libvirt; return 0 ;;
+        --get-zone-of-interface=*)
+          printf libvirt
+          return 0
+          ;;
         --permanent) mode=permanent ;;
-        --query-rich-rule=*) rule="${arg#*=}"; grep -Fxq "$mode $rule" "$TEST_DIR/firewall"; return $? ;;
-        --add-rich-rule=*) rule="${arg#*=}"; printf '%s %s\n' "$mode" "$rule" >>"$TEST_DIR/firewall"; return 0 ;;
+        --query-rich-rule=*)
+          rule="${arg#*=}"
+          grep -Fxq "$mode $rule" "$TEST_DIR/firewall"
+          return $?
+          ;;
+        --add-rich-rule=*)
+          rule="${arg#*=}"
+          printf '%s %s\n' "$mode" "$rule" >>"$TEST_DIR/firewall"
+          return 0
+          ;;
       esac
     done
     return 1
@@ -33,15 +47,20 @@ _err() { printf 'ERROR: %s\n' "$*" >&2; }
   grep -Fq 'source address="192.168.122.20/32" destination address="192.0.2.10/32" port port="2201"' "$TEST_DIR/firewall"
 )
 lab_ssh_open_satellite_forwards() { :; }
+satellite_ssh_args="$TEST_DIR/satellite-ssh-args"
+(
+  ssh() { printf '%s\n' "$*" >"$satellite_ssh_args"; }
+  lab_ssh_satellite true
+)
+grep -Fq "UserKnownHostsFile=$AAP_DEMO_DIR/satellite/known_hosts" "$satellite_ssh_args"
+grep -Fq 'GlobalKnownHostsFile=/dev/null' "$satellite_ssh_args"
+[[ "$(stat -c %a "$AAP_DEMO_DIR/satellite/known_hosts")" == 600 ]]
 lab_ssh_inventory() {
   printf '[{"kind":"fleet","name":"aap-fleet-node-1","port":2201},
     {"kind":"satellite","name":"satellite","port":22},
     {"kind":"crc","name":"aap-demo-crc","port":2222}]'
 }
 lab_ssh_connect() {
-  if [ "$1" = crc ]; then
-    declare -F _crc_exec >/dev/null || return 1
-  fi
   cat >"$TEST_DIR/payload-$1"
   bash -n "$TEST_DIR/payload-$1"
 }
@@ -51,9 +70,10 @@ INFRA=crc lab_reconcile_ssh 192.0.2.10 >"$TEST_DIR/output"
 for peer in fleet satellite crc; do
   eval "$(head -n 5 "$TEST_DIR/payload-$peer" | tail -n 4)"
   [[ "$lab_kind" == "$peer" ]]
-  cmp <(printf '%s\n' "$lab_private_key") "$AAP_DEMO_DIR/fleet/ssh_key"
-  [[ "$lab_public_key" == "$(ssh-keygen -y -f "$AAP_DEMO_DIR/fleet/ssh_key")" ]]
-  grep -q 'StrictHostKeyChecking no' <<<"$lab_config"
+  cmp <(printf '%s\n' "$lab_private_key") <(aap_demo_vault_get "$FLEET_SSH_VAULT_KEY")
+  [[ "$lab_public_key" == "$(aap_demo_vault_with_file "$FLEET_SSH_VAULT_KEY" _test_ssh_public_key)" ]]
+  grep -q 'StrictHostKeyChecking accept-new' <<<"$lab_config"
+  grep -q 'UserKnownHostsFile ~/.ssh/aap-demo-lab-known_hosts' <<<"$lab_config"
   grep -q 'User core' <<<"$lab_config"
   grep -q 'ProxyJump admin@aap-fleet-node-1' <<<"$lab_config"
   printf '%s' "$lab_config" >"$TEST_DIR/ssh-config"
@@ -63,9 +83,13 @@ done
 cp "$TEST_DIR/payload-crc" "$TEST_DIR/before"
 lab_reconcile_ssh 192.0.2.10 >"$TEST_DIR/output"
 cmp "$TEST_DIR/before" "$TEST_DIR/payload-crc"
-lab_ssh_connect() { cat >/dev/null; return 1; }
+lab_ssh_connect() {
+  cat >/dev/null
+  return 1
+}
 if lab_reconcile_ssh 192.0.2.10 >"$TEST_DIR/output" 2>&1; then
-  echo "FAIL: failed SSH reconciliation was ignored" >&2; exit 1
+  echo "FAIL: failed SSH reconciliation was ignored" >&2
+  exit 1
 fi
 
 # Execute account reconciliation in a fake filesystem with no privileged operations.
@@ -89,7 +113,7 @@ lab_ssh_apply
 [[ "$(grep -c '^Include ~/.ssh/aap-demo-lab-config$' "$TEST_DIR/accounts/core/.ssh/config")" == 1 ]]
 grep -q 'Host personal' "$TEST_DIR/accounts/core/.ssh/config"
 [[ "$(grep -c '^# BEGIN AAP-DEMO STACK$' "$TEST_DIR/accounts/core/.ssh/authorized_keys.d/aap-demo")" == 1 ]]
-cmp "$TEST_DIR/accounts/core/.ssh/aap-demo-shared-key" "$AAP_DEMO_DIR/fleet/ssh_key"
+cmp "$TEST_DIR/accounts/core/.ssh/aap-demo-shared-key" <(aap_demo_vault_get_file "$FLEET_SSH_VAULT_KEY" "$TEST_DIR/vault-key" >/dev/null && cat "$TEST_DIR/vault-key")
 [[ ! -e "$TEST_DIR/accounts/root/.ssh/aap-demo-shared-key" ]]
 lab_ssh_configure_root() { echo root-policy >>"$TEST_DIR/policy-log"; }
 lab_kind=satellite
@@ -98,10 +122,24 @@ printf 'personal private identity\n' >"$TEST_DIR/accounts/admin/.ssh/id_ed25519"
 lab_ssh_apply
 lab_ssh_apply
 for account in admin root; do
-  cmp "$TEST_DIR/accounts/$account/.ssh/aap-demo-shared-key" "$AAP_DEMO_DIR/fleet/ssh_key"
+  cmp "$TEST_DIR/accounts/$account/.ssh/aap-demo-shared-key" "$TEST_DIR/vault-key"
   [[ "$(stat -c %a "$TEST_DIR/accounts/$account/.ssh/aap-demo-shared-key")" == 600 ]]
   [[ "$(grep -c '^# BEGIN AAP-DEMO STACK$' "$TEST_DIR/accounts/$account/.ssh/authorized_keys")" == 1 ]]
 done
 grep -q 'personal authorized key' "$TEST_DIR/accounts/admin/.ssh/authorized_keys"
 [[ "$(cat "$TEST_DIR/accounts/admin/.ssh/id_ed25519")" == 'personal private identity' ]]
+lab_kind=crc
+mv() {
+  if [[ "${!#}" == */aap-demo-shared-key ]]; then return 1; fi
+  command mv "$@"
+}
+if lab_ssh_apply >/dev/null 2>&1; then
+  echo "FAIL: guest key-install failure was ignored" >&2
+  exit 1
+fi
+unset -f mv
+if compgen -G "$TEST_DIR/accounts/core/.ssh/.aap-demo-key.*" >/dev/null; then
+  echo "FAIL: failed guest key installation left a temporary key" >&2
+  exit 1
+fi
 echo "PASS: managed shared keys are repeatable, private, preserve local config, and use core rather than root on CRC"

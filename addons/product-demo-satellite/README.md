@@ -61,6 +61,13 @@ For `https://satellite.demo.lab` (or `SATELLITE_LAB_HOST`), enable and full-demo
 7. Sync Satellite inventory and preserve the host-gateway IP and forwarded SSH
    port for each QEMU node, rather than trying to reach its private NAT address.
 
+An optional, deliberate Satellite image-provisioning profile can also create
+three general-purpose VMs. With the local KVM compute resource, the persistent
+2-vCPU, 4096-MiB, 15-GiB domains are visible in Virt-Manager. It requires both
+an explicit count and an existing Satellite image, so it cannot accidentally
+create resources or silently switch to PXE provisioning. See the
+[Satellite lab guide](../../satellite-lab/README.md#general-satellite-provisioned-vms).
+
 The local registration template supports RHEL9/RHEL10 with the lab activation
 keys. The upstream OpenSCAP demo is not certified for these versions; this
 profile does not install RHEL7/RHEL8 tailoring files or claim compliance readiness.

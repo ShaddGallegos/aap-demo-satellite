@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import unittest
 from unittest import mock
+from types import SimpleNamespace
 
 
 SCRIPT = Path(__file__).parents[1] / "addons" / "ao" / "scripts" / "import-demos.py"
@@ -116,6 +117,65 @@ class ExistingWorkflowProjectTests(unittest.TestCase):
             {"id": "workflow-id", "project_id": "target-project"},
             "target-project",
         )
+
+
+class ImportSelectionTests(unittest.TestCase):
+    def args(self):
+        return SimpleNamespace(
+            route="ao.example.test",
+            token="synthetic",
+            project_id=None,
+            webhook_service_account_name="aap-demo webhook caller",
+        )
+
+    def test_rejects_ambiguous_default_project_before_mutation(self):
+        with mock.patch.object(
+            IMPORT_DEMOS,
+            "request",
+            return_value={"resources": [{"id": "one", "is_default": True}, {"id": "two", "is_default": True}]},
+        ) as request:
+            with self.assertRaisesRegex(RuntimeError, "Ambiguous default AO project"):
+                IMPORT_DEMOS.import_workflows(self.args())
+        request.assert_called_once()
+
+    def test_rejects_ambiguous_webhook_account_before_mutation(self):
+        with mock.patch.object(
+            IMPORT_DEMOS,
+            "request",
+            side_effect=[
+                {"resources": [{"id": "default", "is_default": True}]},
+                {"resources": [
+                    {"id": "one", "name": "aap-demo webhook caller", "project_id": "default"},
+                    {"id": "two", "name": "aap-demo webhook caller", "project_id": "default"},
+                ]},
+            ],
+        ) as request:
+            with self.assertRaisesRegex(RuntimeError, "Ambiguous AO webhook service-account"):
+                IMPORT_DEMOS.import_workflows(self.args())
+        self.assertEqual(request.call_count, 2)
+
+    def test_rejects_ambiguous_workflow_before_reading_sources_or_mutation(self):
+        with mock.patch.object(
+            IMPORT_DEMOS,
+            "request",
+            side_effect=[
+                {"resources": [{"id": "default", "is_default": True}]},
+                {"resources": [
+                    {
+                        "id": "caller",
+                        "name": "aap-demo webhook caller",
+                        "project_id": "default",
+                    },
+                ]},
+                {"resources": [
+                    {"id": "one", "name": "Duplicate"},
+                    {"id": "two", "name": "Duplicate"},
+                ]},
+            ],
+        ) as request:
+            with self.assertRaisesRegex(RuntimeError, "Ambiguous AO workflow name"):
+                IMPORT_DEMOS.import_workflows(self.args())
+        self.assertEqual(request.call_count, 3)
 
 
 class DownloadArchiveTests(unittest.TestCase):

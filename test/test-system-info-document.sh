@@ -62,6 +62,16 @@ getent() {
   printf '127.0.0.1 STREAM fixture\n'
 }
 
+virsh() {
+  [ "$*" = "-c qemu:///system domstate satellite" ] || return 1
+  [ -n "${MOCK_SATELLITE_STATE:-}" ] || return 1
+  printf '%s\n' "$MOCK_SATELLITE_STATE"
+}
+
+curl() {
+  [ "${MOCK_SATELLITE_HTTPS:-true}" = true ]
+}
+
 _mock_inventory_kubectl() {
   case "$*" in
     "cluster-info")
@@ -75,11 +85,12 @@ _mock_inventory_kubectl() {
       ;;
     "get route -A -o json")
       jq --argjson openshift "${MOCK_OPENSHIFT:-true}" \
-        '.items |= map(select($openshift or .metadata.name != "oauth-openshift"))' <<'EOF'
+        '.items |= map(select($openshift or (.metadata.namespace != "openshift-authentication" and .metadata.namespace != "openshift-console")))' <<'EOF'
 {"items":[
   {"metadata":{"namespace":"aap-operator","name":"aap"},"spec":{"host":"aap.example.test","to":{"name":"aap"},"port":{"targetPort":"http"},"tls":{"termination":"edge"}}},
   {"metadata":{"namespace":"automation-orchestrator","name":"automation-orchestrator"},"spec":{"host":"ao.example.test","to":{"name":"automation-orchestrator-ui"},"port":{"targetPort":"http"},"tls":{"termination":"edge"}}},
   {"metadata":{"namespace":"openshift-authentication","name":"oauth-openshift"},"spec":{"host":"oauth-openshift.apps-crc.testing","to":{"name":"oauth-openshift"},"port":{"targetPort":"https"},"tls":{"termination":"passthrough"}}},
+  {"metadata":{"namespace":"openshift-console","name":"console"},"spec":{"host":"console-openshift-console.apps-crc.testing","to":{"name":"console"},"port":{"targetPort":"https"},"tls":{"termination":"reencrypt"}}},
   {"metadata":{"namespace":"openshift-monitoring","name":"prometheus"},"spec":{"host":"prometheus.example.test","to":{"name":"prometheus"}}}
 ]}
 EOF
@@ -145,13 +156,31 @@ omitted_inventory=$(aap_demo_collect_system_inventory omit)
 [ "$(jq -r '.credentials[] | select(.component == "OpenShift") | .password' <<<"$redacted_inventory")" = "******" ]
 [ "$(jq -r '.credentials[] | select(.component == "OpenShift") | .password' <<<"$omitted_inventory")" = "null" ]
 jq -e '.routes | any(.name == "oauth-openshift" and .url == "https://oauth-openshift.apps-crc.testing")' <<<"$omitted_inventory" >/dev/null
+jq -e '.routes | any(.namespace == "openshift-console" and .name == "console" and .url == "https://console-openshift-console.apps-crc.testing")' <<<"$omitted_inventory" >/dev/null
 jq -e '.routes | all(.namespace != "openshift-monitoring")' <<<"$omitted_inventory" >/dev/null
 
 MOCK_OPENSHIFT=false
 [ "$(_aap_demo_inventory_openshift_credential include)" = null ]
 jq -e 'all(.component != "OpenShift")' <<<"$(_aap_demo_inventory_credentials include)" >/dev/null
 jq -e 'all(.name != "oauth-openshift")' <<<"$(_aap_demo_inventory_routes)" >/dev/null
+jq -e 'all(.namespace != "openshift-console")' <<<"$(_aap_demo_inventory_routes)" >/dev/null
 unset MOCK_OPENSHIFT
+
+MOCK_SATELLITE_STATE=running
+jq -e 'any(.name == "satellite" and .url == "https://satellite.demo.lab" and .admitted and .external)' \
+  <<<"$(_aap_demo_inventory_routes "mcp-server ao")" >/dev/null
+jq -e '.name == "satellite-lab" and .ready and .external' \
+  <<<"$(_aap_demo_inventory_external_namespaces "")" >/dev/null
+MOCK_SATELLITE_HTTPS=false
+jq -e '.name == "satellite" and (.admitted | not)' \
+  <<<"$(_aap_demo_inventory_external_routes "")" >/dev/null
+MOCK_SATELLITE_STATE="shut off"
+[ -z "$(_aap_demo_inventory_external_routes "")" ]
+jq -e '.name == "satellite-lab" and (.ready | not)' \
+  <<<"$(_aap_demo_inventory_external_namespaces "")" >/dev/null
+unset MOCK_SATELLITE_STATE MOCK_SATELLITE_HTTPS
+[ -z "$(_aap_demo_inventory_external_routes "satellite-manifest")" ]
+[ -z "$(_aap_demo_inventory_external_namespaces "satellite-manifest")" ]
 
 mv "$HOME/.crc/machines/crc/kubeadmin-password" "$TEST_DIR/saved-password"
 missing_credential=$(_aap_demo_inventory_openshift_credential include 2>"$TEST_DIR/password-warning")
@@ -192,6 +221,7 @@ grep -q 'Unable to discover the OpenShift OAuth route' "$TEST_DIR/oauth-error"
   revealed=$(cmd_status) || exit 1
   grep -q '^Routes:$' <<<"$revealed"
   grep -q '^  https://oauth-openshift.apps-crc.testing$' <<<"$revealed"
+  grep -q '^  https://console-openshift-console.apps-crc.testing$' <<<"$revealed"
   awk '/^Credentials:$/ {credentials=1; next} credentials && /openshift: +kubeadmin \/ kubeadmin-fixture/ {found=1} END {exit !found}' <<<"$revealed"
   grep -q 'admin / aap-password' <<<"$revealed"
   SHOW_SECRETS=false
@@ -292,6 +322,12 @@ if grep -q 'aap-password\|ao-password\|kubeadmin-fixture\|llm-key-fixture' <<<"$
   exit 1
 fi
 
+aap_demo_generate_system_info >/dev/null
+if grep -q 'aap-password\|ao-password\|kubeadmin-fixture\|llm-key-fixture' "$AAP_DEMO_SYSTEM_INFO_FILE"; then
+  echo "Default system-information report exposed a secret" >&2
+  exit 1
+fi
+
 json_report="$TEST_DIR/docs/aap-demo-system-info.json"
 aap_demo_generate_system_info redact json "$json_report" >/dev/null
 jq -e '.schema_version == 1 and .secret_mode == "redact"' "$json_report" >/dev/null
@@ -301,8 +337,10 @@ deploy_function=$(sed -n '/^cmd_deploy()/,/^}$/p' "$REPO_ROOT/aap-demo.sh")
 redeploy_function=$(sed -n '/^cmd_redeploy()/,/^}$/p' "$REPO_ROOT/aap-demo.sh")
 redeploy_all_function=$(sed -n '/^cmd_redeploy-all()/,/^}$/p' "$REPO_ROOT/aap-demo.sh")
 grep -q 'aap_demo_generate_system_info' <<<"$deploy_function"
-grep -q 'aap_demo_generate_system_info' <<<"$redeploy_function"
-grep -q 'aap_demo_generate_system_info' <<<"$redeploy_all_function"
+grep -q 'aap_demo_generate_system_info redact' <<<"$deploy_function"
+grep -q 'aap_demo_generate_system_info redact' <<<"$redeploy_function"
+grep -q 'aap_demo_generate_system_info redact' <<<"$redeploy_all_function"
+grep -q 'workflow_phase system-info aap_demo_generate_system_info redact' "$REPO_ROOT/aap-demo.sh"
 grep -q '^/docs/aap-demo-system-info\.md$' "$REPO_ROOT/.gitignore"
 grep -q '^/docs/aap-demo-system-info\.json$' "$REPO_ROOT/.gitignore"
 

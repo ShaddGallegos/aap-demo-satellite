@@ -148,6 +148,14 @@ ensure_galaxy_credentials >/dev/null 2>&1
 [ "$(aap_demo_vault_get ah_offline_token)" = compatible-token ]
 [ "$(aap_demo_vault_get aap_demo.redhat.offline_token)" = rejected-token ]
 
+# A remote authorization failure forces one hidden replacement prompt even when
+# the stored token is still valid at Red Hat SSO.
+rm -f "$TEST_DIR/prompt"
+printf 'compatible-token\n' >"$TEST_DIR/input"
+refresh_galaxy_credentials_after_remote_failure "Validated Content" >/dev/null 2>&1
+grep -q 'Automation Hub offline token (hidden)' "$TEST_DIR/prompt"
+[ "$(aap_demo_vault_get ah_offline_token)" = compatible-token ]
+
 # Legacy plaintext imports are validated before saving, and retained on failure.
 aap_demo_vault_delete ah_offline_token
 mkdir -p "$(dirname "$GALAXY_TOKEN_FILE")"

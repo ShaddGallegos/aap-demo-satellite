@@ -25,6 +25,8 @@ RELEASE_NAME="redhat-rhaap-portal"
 CHART_REPO="openshift-helm-charts/redhat-rhaap-portal"
 # Default plugin version (AAP 2.7 compatible)
 DEFAULT_PLUGIN_VERSION="2.2"
+PORTAL_LIGHTSPEED="${PORTAL_LIGHTSPEED:-false}"
+PORTAL_OLLAMA_URL="${PORTAL_OLLAMA_URL:-http://ollama.aap-demo-ollama.svc.cluster.local:11434/v1}"
 
 # OAuth app name in AAP
 OAUTH_APP_NAME="${OAUTH_APP_NAME:-ansible-automation-portal}"
@@ -761,10 +763,48 @@ create_aap_secrets() {
   echo "✓ AAP host URL: $AAP_HOST_URL"
 }
 
+validate_portal_lightspeed() {
+  case "$PORTAL_LIGHTSPEED" in
+    false) return 0 ;;
+    true) ;;
+    *) echo "ERROR: PORTAL_LIGHTSPEED must be true or false." >&2; return 1 ;;
+  esac
+  if [ "$IS_ARM_CLUSTER" = true ]; then
+    echo "ERROR: Portal Lightspeed is only validated with the x86 Red Hat chart." >&2
+    return 1
+  fi
+  if ! kubectl get svc ollama -n aap-demo-ollama >/dev/null 2>&1; then
+    echo "ERROR: Portal Lightspeed requires aap-demo enable ollama." >&2
+    return 1
+  fi
+}
+
+configure_portal_lightspeed() {
+  [ "$PORTAL_LIGHTSPEED" = true ] || return 0
+  jq -n --arg ns "$PORTAL_NAMESPACE" --arg url "$PORTAL_OLLAMA_URL" '{
+    apiVersion: "v1", kind: "Secret",
+    metadata: {name: "aap-demo-portal-lightspeed", namespace: $ns,
+      labels: {"app.kubernetes.io/managed-by": "aap-demo"}},
+    type: "Opaque",
+    stringData: {ENABLE_OLLAMA: "true", OLLAMA_URL: $url}
+  }' | kubectl apply -f - || {
+    echo "ERROR: Could not configure Portal Lightspeed." >&2
+    return 1
+  }
+}
+
 create_helm_values() {
   echo "Creating Helm values file..."
 
-  local ssl_values=""
+  local ssl_values="" lightspeed_values=""
+  if [ "$PORTAL_LIGHTSPEED" = true ]; then
+    lightspeed_values="
+  lightspeed:
+    enabled: true
+    secret:
+      create: false
+      name: aap-demo-portal-lightspeed"
+  fi
   if [ "${NEEDS_SSL_BYPASS:-false}" = true ]; then
     if [ "${IS_ARM_CLUSTER}" = true ]; then
       ssl_values="
@@ -826,6 +866,7 @@ global:
   clusterRouterBase: $CLUSTER_BASE_URL
   pluginMode: oci
   imageTagInfo: "$DEFAULT_PLUGIN_VERSION"
+${lightspeed_values}
 
 upstream:
   backstage:
@@ -855,6 +896,10 @@ install_helm_chart() {
   echo "Installing Helm chart..."
 
   HELM_WAS_UPGRADE=false
+  local -a version_args=()
+  if [ "$PORTAL_LIGHTSPEED" = true ]; then
+    version_args=(--version 2.2.11)
+  fi
 
   # Add Helm repo if not present
   if ! helm repo list 2>/dev/null | grep -q openshift-helm-charts; then
@@ -875,12 +920,14 @@ install_helm_chart() {
     echo "Upgrading existing Helm release..."
     HELM_WAS_UPGRADE=true
     helm upgrade "$RELEASE_NAME" "$CHART_REPO" \
+      "${version_args[@]}" \
       -n "$PORTAL_NAMESPACE" \
       -f "$PORTAL_DIR/values.yaml" \
       --hide-notes
   else
     echo "Installing Helm release..."
     helm install "$RELEASE_NAME" "$CHART_REPO" \
+      "${version_args[@]}" \
       -n "$PORTAL_NAMESPACE" \
       -f "$PORTAL_DIR/values.yaml" \
       --hide-notes
@@ -1079,6 +1126,7 @@ display_success() {
 
 main() {
   check_prerequisites
+  validate_portal_lightspeed
   cleanup_legacy_install
   setup_portal_namespace
   get_aap_credentials
@@ -1090,6 +1138,7 @@ main() {
   create_registry_secret
   get_cluster_info
   create_aap_secrets
+  configure_portal_lightspeed
   create_helm_values
   install_helm_chart
   if [ "${IS_ARM_CLUSTER}" = true ]; then

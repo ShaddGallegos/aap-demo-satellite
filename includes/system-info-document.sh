@@ -255,7 +255,9 @@ EOF
 }
 
 aap_demo_generate_system_info() {
-  local secret_mode="${1:-include}"
+  # Automatic reports must be safe to retain or send to support. A caller must
+  # explicitly request `include` for the short-lived, owner-only local report.
+  local secret_mode="${1:-redact}"
   local format="${2:-markdown}"
   local output="${3:-${AAP_DEMO_SYSTEM_INFO_FILE:-${SCRIPT_DIR}/docs/aap-demo-system-info.md}}"
   local inventory tmp_inventory output_dir tmp_output

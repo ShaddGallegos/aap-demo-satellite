@@ -17,10 +17,24 @@ state_user() {
 
 state_cli() { state_user bash "$STATE_REPO/aap-demo.sh" "$@"; }
 
+state_fleet_ssh() {
+  # shellcheck disable=SC2016
+  state_user bash -c '
+    set -euo pipefail
+    source "$1/includes/fleet-access.sh"
+    shift
+    fleet_ssh_key_ensure false
+    fleet_ssh "$@"
+  ' aap-demo "$STATE_REPO" "$@"
+}
+
 state_stopped() {
   local status meta pid
   status=$(virsh -c qemu:///system domstate crc) || return 1
-  [ "$status" = "shut off" ] || { state_error "CRC is not shut off; refusing disk access"; return 1; }
+  [ "$status" = "shut off" ] || {
+    state_error "CRC is not shut off; refusing disk access"
+    return 1
+  }
   for meta in "$STATE_HOME"/.aap-demo/fleet/node-*/meta; do
     [ -f "$meta" ] || continue
     pid=$(sed -n 's/^PID=//p' "$meta")
@@ -41,19 +55,23 @@ state_stop() {
     [ -f "$meta" ] || continue
     pid=$(sed -n 's/^PID=//p' "$meta")
     index=$(sed -n 's/^INDEX=//p' "$meta")
-    [[ "$index" =~ ^[1-9][0-9]*$ ]] || { state_error "Invalid Fleet index in $meta"; return 1; }
+    [[ "$index" =~ ^[1-9][0-9]*$ ]] || {
+      state_error "Invalid Fleet index in $meta"
+      return 1
+    }
     if [[ "$pid" =~ ^[0-9]+$ ]] && [ -e "/proc/$pid" ] \
       && grep -aq 'qemu-system' "/proc/$pid/cmdline"; then
-      state_user ssh -i "$STATE_HOME/.aap-demo/fleet/ssh_key" \
-        -p "$((2200 + index))" -o BatchMode=yes -o ConnectTimeout=10 \
-        -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      state_fleet_ssh -p "$((2200 + index))" \
         "ansible@127.0.0.1" 'sudo -n systemd-run --on-active=2s /usr/bin/systemctl poweroff' || {
         state_error "Fleet node $index could not shut down cleanly; previous backup preserved"
         return 1
       }
       deadline=$((SECONDS + 120))
       while [ -e "/proc/$pid" ]; do
-        [ "$SECONDS" -lt "$deadline" ] || { state_error "Fleet node $index shutdown timed out"; return 1; }
+        [ "$SECONDS" -lt "$deadline" ] || {
+          state_error "Fleet node $index shutdown timed out"
+          return 1
+        }
         sleep 1
       done
     fi
@@ -115,7 +133,10 @@ state_prune() {
       # Only concrete completed state directories under this user's state store.
       case "$path" in
         "$STATE_ROOT"/state-*) rm -rf -- "$path" ;;
-        *) state_error "Refusing unsafe retention path: $path"; return 1 ;;
+        *)
+          state_error "Refusing unsafe retention path: $path"
+          return 1
+          ;;
       esac
     fi
   done < <(find "$STATE_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'state-*' | sort -r)
@@ -164,7 +185,10 @@ state_save() (
   while IFS= read -r disk; do
     case "$disk" in
       "$STATE_HOME/.crc/"* | "$STATE_HOME/.aap-demo/"*) ;;
-      *) state_error "Attached disk outside managed directories: $disk"; return 1 ;;
+      *)
+        state_error "Attached disk outside managed directories: $disk"
+        return 1
+        ;;
     esac
     relative="${disk#"$STATE_HOME/"}"
     format=$(qemu-img info --output=json "$disk" | jq -er '.format') || return 1
@@ -172,7 +196,10 @@ state_save() (
     rm -f "$stage/home/$relative"
     case "$format" in
       qcow2 | raw) ;;
-      *) state_error "Unsupported attached disk format: $format"; return 1 ;;
+      *)
+        state_error "Unsupported attached disk format: $format"
+        return 1
+        ;;
     esac
     qemu-img convert -f "$format" -O "$format" "$disk" "$stage/home/$relative" || return 1
     chown --reference="$disk" "$stage/home/$relative" || return 1
@@ -198,7 +225,10 @@ state_save() (
   if [ -n "$nvram" ]; then
     case "$nvram" in
       /var/lib/libvirt/qemu/nvram/crc_VARS.qcow2 | /var/lib/libvirt/qemu/nvram/crc_VARS.fd) ;;
-      *) state_error "Unexpected CRC firmware path: $nvram"; return 1 ;;
+      *)
+        state_error "Unexpected CRC firmware path: $nvram"
+        return 1
+        ;;
     esac
     cp -a "$nvram" "$stage/nvram" || return 1
     printf '%s\n' "$nvram" >"$stage/nvram-path" || return 1
@@ -228,9 +258,15 @@ state_restore() {
   latest=$(readlink -f "$STATE_ROOT/latest") || return 1
   case "$latest" in
     "$STATE_ROOT"/state-*) ;;
-    *) state_error "No valid completed backup selected"; return 1 ;;
+    *)
+      state_error "No valid completed backup selected"
+      return 1
+      ;;
   esac
-  state_verify "$latest" || { state_error "Backup verification failed; current disks left untouched"; return 1; }
+  state_verify "$latest" || {
+    state_error "Backup verification failed; current disks left untouched"
+    return 1
+  }
   jq -e --arg user "$STATE_USER" --arg home "$STATE_HOME" \
     '.version == 1 and .user == $user and .home == $home' "$latest/manifest.json" >/dev/null || return 1
   if [ "$(jq -r '.crc_shutdown // "clean"' "$latest/manifest.json")" = forced ]; then
@@ -256,7 +292,10 @@ state_restore() {
       /var/lib/libvirt/qemu/nvram/crc_VARS.qcow2 | /var/lib/libvirt/qemu/nvram/crc_VARS.fd)
         cp -a "$latest/nvram" "$nvram" || return 1
         ;;
-      *) state_error "Invalid firmware restore path"; return 1 ;;
+      *)
+        state_error "Invalid firmware restore path"
+        return 1
+        ;;
     esac
   fi
   virsh -c qemu:///system define "$latest/domain.xml" || return 1
@@ -319,27 +358,48 @@ state_activate() {
 state_install() {
   STATE_USER="$1" STATE_HOME="$2" STATE_REPO="$3" STATE_KEEP="$4"
   STATE_FORCE_STOP="${5:-false}" STATE_STOP_TIMEOUT="${6:-120}"
-  [[ "$STATE_KEEP" =~ ^[1-9][0-9]*$ ]] || { state_error "Retention must be a positive integer"; return 1; }
+  [[ "$STATE_KEEP" =~ ^[1-9][0-9]*$ ]] || {
+    state_error "Retention must be a positive integer"
+    return 1
+  }
   [[ "$STATE_FORCE_STOP" = true || "$STATE_FORCE_STOP" = false ]] \
     && [[ "$STATE_STOP_TIMEOUT" =~ ^[1-9][0-9]*$ ]] \
     && [ "${#STATE_STOP_TIMEOUT}" -le 5 ] && [ "$STATE_STOP_TIMEOUT" -le 86400 ] \
-    || { state_error "Invalid forced-stop policy or timeout (1-86400 seconds)"; return 1; }
-  [ "$(uname -s)" = Linux ] || { state_error "This service requires Linux systemd/libvirt"; return 1; }
-  [[ "$STATE_USER" =~ ^[a-z_][a-z0-9_-]*$ && "$STATE_HOME" =~ ^/[a-zA-Z0-9_./-]+$ \
-    && "$STATE_REPO" =~ ^/[a-zA-Z0-9_./-]+$ ]] || { state_error "Unsupported service user or path"; return 1; }
+    || {
+      state_error "Invalid forced-stop policy or timeout (1-86400 seconds)"
+      return 1
+    }
+  [ "$(uname -s)" = Linux ] || {
+    state_error "This service requires Linux systemd/libvirt"
+    return 1
+  }
+  [[ "$STATE_USER" =~ ^[a-z_][a-z0-9_-]*$ && "$STATE_HOME" =~ ^/[a-zA-Z0-9_./-]+$ &&
+    "$STATE_REPO" =~ ^/[a-zA-Z0-9_./-]+$ ]] || {
+    state_error "Unsupported service user or path"
+    return 1
+  }
   [ "$STATE_HOME" = "$(getent passwd "$STATE_USER" | cut -d: -f6)" ] || return 1
   [ -f "$STATE_REPO/aap-demo.sh" ] || return 1
-  [ -f "$STATE_HOME/.crc/machines/crc/config.json" ] || { state_error "Deploy CRC first"; return 1; }
+  [ -f "$STATE_HOME/.crc/machines/crc/config.json" ] || {
+    state_error "Deploy CRC first"
+    return 1
+  }
   local tool owner_pid
   for tool in rsync qemu-img xmllint virsh runuser jq sha256sum systemctl restorecon; do
-    command -v "$tool" >/dev/null || { state_error "Required tool not found: $tool"; return 1; }
+    command -v "$tool" >/dev/null || {
+      state_error "Required tool not found: $tool"
+      return 1
+    }
   done
   if [ -f /etc/aap-demo/owner ] && [ "$(cat /etc/aap-demo/owner)" != "$STATE_USER" ]; then
     state_error "The system service is already owned by another user"
     return 1
   fi
   STATE_UID=$(id -u "$STATE_USER")
-  [ "$STATE_UID" -ne 0 ] || { state_error "CRC must run as a non-root user"; return 1; }
+  [ "$STATE_UID" -ne 0 ] || {
+    state_error "CRC must run as a non-root user"
+    return 1
+  }
   if [ -f "$STATE_HOME/.aap-demo/operation.lock/owner" ]; then
     owner_pid=$(sed -n 's/^pid=//p' "$STATE_HOME/.aap-demo/operation.lock/owner")
     if [[ "$owner_pid" =~ ^[0-9]+$ ]] && [ -d "/proc/$owner_pid" ]; then
@@ -378,8 +438,11 @@ state_boot() {
 }
 
 state_mark_shutdown() {
-  (umask 077; mkdir -p "$STATE_ROOT" \
-    && cat /proc/sys/kernel/random/boot_id >"$STATE_ROOT/.shutdown-pending")
+  (
+    umask 077
+    mkdir -p "$STATE_ROOT" \
+      && cat /proc/sys/kernel/random/boot_id >"$STATE_ROOT/.shutdown-pending"
+  )
 }
 
 state_shutdown() {
@@ -390,7 +453,10 @@ state_shutdown() {
 }
 
 state_main() {
-  [ "$EUID" -eq 0 ] || { state_error "Use sudo for state-service operations"; return 1; }
+  [ "$EUID" -eq 0 ] || {
+    state_error "Use sudo for state-service operations"
+    return 1
+  }
   local action="${1:-}"
   shift || true
   if [ "$action" = install ]; then
@@ -403,7 +469,10 @@ state_main() {
   STATE_ROOT="/var/lib/aap-demo/$STATE_USER/states"
   case "$action" in
     retention)
-      [[ "${1:-}" =~ ^[1-9][0-9]*$ ]] || { state_error "Retention must be a positive integer"; return 1; }
+      [[ "${1:-}" =~ ^[1-9][0-9]*$ ]] || {
+        state_error "Retention must be a positive integer"
+        return 1
+      }
       STATE_KEEP="$1"
       state_config_write /etc/aap-demo/state.conf
       echo "Retention set to $STATE_KEEP; pruning occurs after the next completed backup."
@@ -416,7 +485,10 @@ state_main() {
       return
       ;;
     start | save) ;;
-    *) state_error "Unknown state-service operation: $action"; return 1 ;;
+    *)
+      state_error "Unknown state-service operation: $action"
+      return 1
+      ;;
   esac
   if [ -L "$STATE_HOME/.aap-demo" ] || [ -L "$STATE_HOME/.aap-demo/operation.lock" ]; then
     state_error "Service state and operation lock must not be symbolic links"

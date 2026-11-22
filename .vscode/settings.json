@@ -1,5 +1,6 @@
 {
     "python.analysis.typeCheckingMode": "basic",
     "chat.permissions.default": "autoApprove",
-    "chat.editing.autoAcceptDelay": 2
+    "chat.editing.autoAcceptDelay": 2,
+    "chatgpt.followUpQueueMode": "steer"
 }

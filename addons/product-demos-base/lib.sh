@@ -285,17 +285,11 @@ apd_discover_openshift_connection() {
 
   OPENSHIFT_BEARER_TOKEN="${OPENSHIFT_BEARER_TOKEN:-}"
   if [ -z "$OPENSHIFT_BEARER_TOKEN" ]; then
-    OPENSHIFT_BEARER_TOKEN=$(kubectl config view --minify --raw -o jsonpath='{.users[0].user.token}' 2>/dev/null || true)
-  fi
-  if [ -z "$OPENSHIFT_BEARER_TOKEN" ]; then
-    OPENSHIFT_BEARER_TOKEN=$(oc whoami -t 2>/dev/null || true)
-  fi
-  if [ -z "$OPENSHIFT_BEARER_TOKEN" ]; then
     OPENSHIFT_BEARER_TOKEN=$(apd_create_openshift_demo_token 2>/dev/null || true)
   fi
   if [ -z "$OPENSHIFT_BEARER_TOKEN" ]; then
     echo "❌ ERROR: Cannot obtain OpenShift bearer token" >&2
-    echo "  Set OPENSHIFT_BEARER_TOKEN or run: oc login" >&2
+    echo "  Ensure kubectl can create the dedicated service account token, or set OPENSHIFT_BEARER_TOKEN explicitly" >&2
     return 1
   fi
 
@@ -305,17 +299,133 @@ apd_discover_openshift_connection() {
 apd_create_openshift_demo_token() {
   local ns="${NAMESPACE:-aap-operator}"
   local sa="apd-openshift-demo"
-  local binding="apd-openshift-demo-admin"
+  local role="apd-openshift-demo-execution"
+  local binding="apd-openshift-demo-execution"
+  local legacy_binding="apd-openshift-demo-admin"
+  local legacy
 
-  kubectl get serviceaccount "$sa" -n "$ns" &>/dev/null \
-    || kubectl create serviceaccount "$sa" -n "$ns" &>/dev/null
+  # The credential is used by AAP's container group to create and monitor
+  # execution pods in this namespace.  Do not grant cluster-admin (or create
+  # a long-lived token) merely to make a local demo run.
+  kubectl apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ${sa}
+  namespace: ${ns}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ${role}
+  namespace: ${ns}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "pods/attach", "pods/exec", "pods/status"]
+    verbs: ["get", "list", "watch", "create", "delete", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch", "create", "delete", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch", "create", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts", "resourcequotas"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "delete", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ${binding}
+  namespace: ${ns}
+subjects:
+  - kind: ServiceAccount
+    name: ${sa}
+    namespace: ${ns}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ${role}
+EOF
 
-  kubectl get clusterrolebinding "$binding" &>/dev/null \
-    || kubectl create clusterrolebinding "$binding" \
-      --clusterrole=cluster-admin \
-      --serviceaccount="${ns}:${sa}" &>/dev/null
+  # Clean up only the exact broad binding created by older aap-demo releases.
+  # If an administrator repurposed it, leave it intact and report that fact.
+  legacy=$(kubectl get clusterrolebinding "$legacy_binding" -o json 2>/dev/null || true)
+  if [ -n "$legacy" ] && printf '%s' "$legacy" | jq -e \
+    --arg sa "$sa" --arg ns "$ns" '
+      .roleRef.kind == "ClusterRole"
+      and .roleRef.name == "cluster-admin"
+      and (.subjects | length == 1)
+      and .subjects[0].kind == "ServiceAccount"
+      and .subjects[0].name == $sa
+      and .subjects[0].namespace == $ns
+    ' >/dev/null 2>&1; then
+    kubectl delete clusterrolebinding "$legacy_binding" >/dev/null
+    echo "  ✓ Removed legacy cluster-admin binding for the demo execution identity" >&2
+  elif [ -n "$legacy" ]; then
+    echo "  ⚠ Legacy ${legacy_binding} was not changed because it is not the aap-demo-owned binding" >&2
+  fi
 
-  kubectl create token "$sa" -n "$ns" --duration=8760h
+  # Bound service-account tokens are renewable and deliberately short lived.
+  kubectl create token "$sa" -n "$ns" --duration=1h
+}
+
+apd_reconcile_default_execution_credential() {
+  # AAP reads a container group's Kubernetes credential before it creates an
+  # execution pod.  Reconcile it immediately before every APD launch because
+  # an APD configuration import can replace the credential inputs.
+  local group credential_id credential_type_id org_id create_result patch_result
+
+  apd_discover_openshift_connection || return 1
+  group=$(curl -sk -u "${AAP_USERNAME}:${AAP_PASSWORD}" \
+    "${AAP_API}/instance_groups/?name=default" 2>&1) || return 1
+  if ! printf '%s' "$group" | jq -e '.results[0].is_container_group == true' >/dev/null 2>&1; then
+    return 0
+  fi
+
+  credential_id=$(printf '%s' "$group" | jq -r '.results[0].credential // empty')
+  if [ -z "$credential_id" ]; then
+    credential_type_id=$(apd_controller_credential_type_id "OpenShift or Kubernetes API Bearer Token")
+    [ -n "$credential_type_id" ] || {
+      echo "❌ ERROR: OpenShift/Kubernetes bearer-token credential type is unavailable" >&2
+      return 1
+    }
+    org_id="${DEFAULT_ORG_ID:-$(apd_default_org_id)}"
+    [ -n "$org_id" ] || return 1
+    create_result=$(curl -sk -u "${AAP_USERNAME}:${AAP_PASSWORD}" \
+      -X POST -H "Content-Type: application/json" \
+      -d "$(jq -n \
+        --arg name "aap-demo Execution OpenShift" \
+        --argjson org "$org_id" \
+        --argjson type "$credential_type_id" \
+        --arg host "$OPENSHIFT_API_HOST" --arg token "$OPENSHIFT_BEARER_TOKEN" \
+        '{name: $name, organization: $org, credential_type: $type,
+          inputs: {host: $host, bearer_token: $token, verify_ssl: false}}')" \
+      "${AAP_API}/credentials/" 2>&1) || return 1
+    credential_id=$(printf '%s' "$create_result" | jq -r '.id // empty')
+    [ -n "$credential_id" ] || {
+      echo "❌ ERROR: Could not create the default execution credential" >&2
+      return 1
+    }
+    curl -sk -u "${AAP_USERNAME}:${AAP_PASSWORD}" \
+      -X PATCH -H "Content-Type: application/json" \
+      -d "{\"credential\": ${credential_id}}" \
+      "${AAP_API}/instance_groups/$(printf '%s' "$group" | jq -r '.results[0].id')/" >/dev/null || return 1
+  fi
+
+  patch_result=$(curl -sk -u "${AAP_USERNAME}:${AAP_PASSWORD}" \
+    -X PATCH -H "Content-Type: application/json" \
+    -d "$(jq -n --arg host "$OPENSHIFT_API_HOST" --arg token "$OPENSHIFT_BEARER_TOKEN" \
+      '{inputs: {host: $host, bearer_token: $token, verify_ssl: false}}')" \
+    "${AAP_API}/credentials/${credential_id}/" 2>&1) || return 1
+  printf '%s' "$patch_result" | jq -e '.id' >/dev/null || {
+    echo "❌ ERROR: Could not update the default execution credential" >&2
+    return 1
+  }
+  echo "  ✓ Default container-group credential reconciled for ${OPENSHIFT_API_HOST}"
 }
 
 apd_find_apd_credential_by_name() {
@@ -608,6 +718,10 @@ apd_install_domain_demo() {
 
   template_name=$(apd_domain_template_name "$demo")
   echo "Installing ${demo} demos (${template_name})..."
+
+  # Imports performed by a previous APD job can reset this credential.  It
+  # must be valid before the controller attempts to schedule this job.
+  apd_reconcile_default_execution_credential || return 1
 
   apd_cleanup_legacy_install_templates
   apd_cleanup_default_org_apd_projects
@@ -918,10 +1032,14 @@ apd_monitor_job() {
       echo ""
       echo "❌ ERROR: ${label} failed (ID: ${job_id})"
       echo "View job output: ${AAP_UI_URL}/#/jobs/playbook/${job_id}/output"
-      if kubectl get deployment aap-controller-web -n "$NAMESPACE" &>/dev/null; then
-        echo ""
-        echo "Last failed task(s):"
-        kubectl exec -n "$NAMESPACE" deploy/aap-controller-web -- bash -c "awx-manage shell -c \"
+      apd_report_failed_job_summary "$job_id" || true
+      if ! apd_report_failed_job_events "$job_id"; then
+        # Older AAP builds can omit job events from the controller API. Keep
+        # the in-pod fallback, but never make it the only diagnostic path.
+        if kubectl get deployment aap-controller-web -n "$NAMESPACE" &>/dev/null; then
+          echo ""
+          echo "Last failed task(s) (controller fallback):"
+          kubectl exec -n "$NAMESPACE" deploy/aap-controller-web -- bash -c "awx-manage shell -c \"
 from awx.main.models import Job
 j = Job.objects.get(id=${job_id})
 for ev in j.job_events.filter(event='runner_on_failed').order_by('-id')[:3]:
@@ -931,6 +1049,7 @@ for ev in j.job_events.filter(event='runner_on_failed').order_by('-id')[:3]:
         for line in out.splitlines()[-6:]:
             print('  ', line)
 \"" 2>/dev/null || true
+        fi
       fi
       return 1
     fi
@@ -943,4 +1062,36 @@ for ev in j.job_events.filter(event='runner_on_failed').order_by('-id')[:3]:
   echo "⚠ ${label} is still running after $((max_wait * 3)) seconds"
   echo "View progress: ${AAP_UI_URL}/#/jobs/playbook/${job_id}/output"
   return 2
+}
+
+apd_report_failed_job_summary() {
+  local job_id="$1" job details
+  job=$(curl -sk -u "${AAP_USERNAME}:${AAP_PASSWORD}" \
+    "${AAP_API}/jobs/${job_id}/" 2>/dev/null) || return 1
+  details=$(jq -r '
+    [.explanation, .job_explanation, .result_traceback]
+    | map(select(type == "string" and length > 0)) | unique | .[]
+  ' <<<"$job" 2>/dev/null) || return 1
+  [ -n "$details" ] || return 1
+  echo ""
+  echo "Controller failure detail:"
+  while IFS= read -r detail; do
+    printf '  %s\n' "$detail"
+  done <<<"$(printf '%s\n' "$details" | tail -n 12)"
+  return 0
+}
+
+apd_report_failed_job_events() {
+  local job_id="$1" events count
+  events=$(curl -sk -u "${AAP_USERNAME}:${AAP_PASSWORD}" \
+    "${AAP_API}/jobs/${job_id}/job_events/?event=runner_on_failed&order_by=-id&page_size=3" 2>/dev/null) || return 1
+  count=$(jq -r '.count // 0' <<<"$events" 2>/dev/null) || return 1
+  [[ "$count" =~ ^[1-9][0-9]*$ ]] || return 1
+  echo ""
+  echo "Last failed task(s):"
+  jq -r '.results[] |
+    (.event_data.task // .task // "Unnamed task"),
+    ((.stdout // .event_data.res.msg // .event_data.res.stderr // "") | split("\n") | .[-6:][] | "  " + .)' \
+    <<<"$events" 2>/dev/null || return 1
+  return 0
 }

@@ -27,6 +27,10 @@ esac
 EOF
 cat >"$stub_bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
+[ -z "${SYSTEMCTL_LOG:-}" ] || printf '%s\n' "$*" >>"$SYSTEMCTL_LOG"
+if [ "${FAIL_SERVICE_STOP:-false}" = true ] && [ "$*" = "--user stop aap-demo-crc-watchdog.service" ]; then
+  exit 1
+fi
 exit 0
 EOF
 # The watchdog detects VM state via virsh (libvirt), independent of the daemon.
@@ -69,5 +73,22 @@ grep -q 'recovered after daemon restart' <<<"$out"
 # VM stopped -> nothing to do
 out=$(run_real Stopped down)
 grep -q 'VM not running' <<<"$out"
+
+unit_dir="$TEST_DIR/home/.config/systemd/user"
+mkdir -p "$unit_dir"
+touch "$unit_dir/aap-demo-crc-watchdog.timer" "$unit_dir/aap-demo-crc-watchdog.service"
+if env -i HOME="$TEST_DIR/home" PATH="$stub_bin:/usr/bin:/bin" \
+  SYSTEMCTL_LOG="$TEST_DIR/systemctl.log" FAIL_SERVICE_STOP=true \
+  bash "$WATCHDOG" uninstall; then
+  echo "FAIL: watchdog uninstall hid a service stop failure" >&2
+  exit 1
+fi
+[ -f "$unit_dir/aap-demo-crc-watchdog.service" ]
+env -i HOME="$TEST_DIR/home" PATH="$stub_bin:/usr/bin:/bin" \
+  SYSTEMCTL_LOG="$TEST_DIR/systemctl.log" bash "$WATCHDOG" uninstall
+grep -q -- '--user disable --now aap-demo-crc-watchdog.timer' "$TEST_DIR/systemctl.log"
+grep -q -- '--user stop aap-demo-crc-watchdog.service' "$TEST_DIR/systemctl.log"
+[ ! -e "$unit_dir/aap-demo-crc-watchdog.timer" ]
+[ ! -e "$unit_dir/aap-demo-crc-watchdog.service" ]
 
 echo "PASS: watchdog detects a dropped forward, recovers via daemon restart, and is a no-op when healthy or stopped"

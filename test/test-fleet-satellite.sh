@@ -14,6 +14,9 @@ _fail() { echo "✗ $1"; ((FAILED++)); }
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
+export AAP_DEMO_DIR="$TMPDIR/aap-demo"
+export HOME="$TMPDIR/home"
+mkdir -p "$AAP_DEMO_DIR" "$HOME"
 
 # --- Stubs -------------------------------------------------------------------
 # fleet-access.sh sources credential-vault + fleet-stack; stub the pieces the

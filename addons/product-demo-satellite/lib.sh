@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 APD_SATELLITE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../../includes/fleet-access.sh
+source "${APD_SATELLITE_DIR}/../../includes/fleet-access.sh"
 
 apd_satellite_is_lab() {
   [ "${SATELLITE_URL:-https://${SATELLITE_LAB_HOST:-satellite.demo.lab}}" = \
@@ -12,7 +14,10 @@ apd_satellite_api() {
   if [ -z "$password" ]; then
     password=$(aap_demo_vault_get aap_demo.satellite.admin_password) || return 1
   fi
-  [ -n "$password" ] || { echo "ERROR: Satellite password is missing" >&2; return 1; }
+  [ -n "$password" ] || {
+    echo "ERROR: Satellite password is missing" >&2
+    return 1
+  }
   curl -fsS --connect-timeout 10 --max-time 60 \
     -u "${SATELLITE_USERNAME:-admin}:${password}" \
     "${SATELLITE_URL:-https://${SATELLITE_LAB_HOST:-satellite.demo.lab}}$1"
@@ -72,6 +77,9 @@ apd_install_satellite_lab() {
   curl -fsSk -u "${AAP_USERNAME}:${AAP_PASSWORD}" -X PATCH \
     -H "Content-Type: application/json" -d '{"playbook":"install-satellite-lab.yml"}' \
     "${AAP_API}/job_templates/${template_id}/" >/dev/null || return 1
+  # The base APD import may have replaced the container-group credential.
+  # Refresh it immediately before the controller schedules this lab job.
+  apd_reconcile_default_execution_credential || return 1
   job_id=$(curl -fsSk -u "${AAP_USERNAME}:${AAP_PASSWORD}" -X POST \
     "${AAP_API}/job_templates/${template_id}/launch/" | jq -er '.id') || return 1
   apd_monitor_job "$job_id" "Satellite lab demo install" 160
@@ -188,14 +196,23 @@ apd_wire_satellite_credentials() {
   if [ -z "$sat_pass" ]; then
     sat_pass=$(aap_demo_vault_get aap_demo.satellite.admin_password) || return 1
   fi
-  [ -n "$sat_pass" ] || { echo "ERROR: Satellite admin password is missing" >&2; return 1; }
+  [ -n "$sat_pass" ] || {
+    echo "ERROR: Satellite admin password is missing" >&2
+    return 1
+  }
   local org_id name credential_id
   org_id=$(apd_apd_org_id) || return 1
-  [ -n "$org_id" ] || { echo "ERROR: APD organization is missing" >&2; return 1; }
+  [ -n "$org_id" ] || {
+    echo "ERROR: APD organization is missing" >&2
+    return 1
+  }
   echo "Wiring Satellite credentials to ${sat_url}..."
   for name in "Satellite Credential" "Satellite Inventory"; do
     credential_id=$(apd_find_apd_credential_by_name "$name" "$org_id") || return 1
-    [ -n "$credential_id" ] || { echo "ERROR: $name is missing" >&2; return 1; }
+    [ -n "$credential_id" ] || {
+      echo "ERROR: $name is missing" >&2
+      return 1
+    }
     curl -fsSk -u "${AAP_USERNAME}:${AAP_PASSWORD}" -X PATCH \
       -H "Content-Type: application/json" \
       -d "$(jq -cn --arg host "$sat_url" --arg username "$sat_user" --arg password "$sat_pass" \
@@ -212,9 +229,14 @@ apd_wait_satellite_inventory() {
       "${AAP_API}/inventory_updates/${job_id}/") || return 1
     status=$(jq -er '.status' <<<"$response") || return 1
     case "$status" in
-      successful) echo "✓ Satellite inventory sync completed (ID: $job_id)"; return 0 ;;
+      successful)
+        echo "✓ Satellite inventory sync completed (ID: $job_id)"
+        return 0
+        ;;
       failed | error | canceled)
-        echo "ERROR: Satellite inventory sync ${status} (ID: $job_id)" >&2; return 1 ;;
+        echo "ERROR: Satellite inventory sync ${status} (ID: $job_id)" >&2
+        return 1
+        ;;
     esac
     sleep 3
   done
@@ -223,8 +245,15 @@ apd_wait_satellite_inventory() {
 }
 
 apd_wire_satellite_lab_machine_credential() {
-  local credential org_id payload
+  fleet_ssh_key_ready || return 1
+  local org_id
   org_id=$(apd_apd_org_id) || return 1
+  aap_demo_vault_with_file "$FLEET_SSH_VAULT_KEY" \
+    _apd_wire_satellite_lab_machine_credential_with_key "$org_id"
+}
+
+_apd_wire_satellite_lab_machine_credential_with_key() {
+  local key_path="$1" org_id="$2" credential payload
   credential=$(curl -fsSk -u "${AAP_USERNAME}:${AAP_PASSWORD}" \
     "${AAP_API}/credentials/?name=APD%20Machine%20Credential&organization=${org_id}" \
     | jq -ce 'if .count == 1 then .results[0] else error("Expected one APD machine credential") end') || return 1
@@ -233,7 +262,7 @@ apd_wire_satellite_lab_machine_credential() {
     echo "ERROR: APD Machine Credential has a custom SSH key; refusing to replace it automatically." >&2
     return 1
   fi
-  payload=$(jq -cn --rawfile key "${AAP_DEMO_DIR:-$HOME/.aap-demo}/fleet/ssh_key" '
+  payload=$(jq -cn --rawfile key "$key_path" '
     {description: "Managed by aap-demo Satellite lab",
       inputs: {username: "ansible", ssh_key_data: $key, become_method: "sudo"}}
   ') || return 1
@@ -255,7 +284,7 @@ apd_register_satellite_lab_fleet() {
 apd_complete_satellite_install() {
   local install_rc="$1" template_count
 
-  if apd_satellite_is_lab; then
+  if [ "${SATELLITE_LAB_MODE:-false}" = true ]; then
     [ "$install_rc" -eq 0 ] || return "$install_rc"
     apd_configure_satellite_lab_templates || return 1
   else
@@ -275,7 +304,7 @@ apd_complete_satellite_install() {
     return 1
   fi
   echo "  ✓ Satellite setup succeeded and ${template_count} Satellite template(s) are present"
-  if apd_satellite_is_lab; then
+  if [ "${SATELLITE_LAB_MODE:-false}" = true ]; then
     apd_register_satellite_lab_fleet || return 1
     apd_sync_satellite_lab_inventory || return 1
   fi

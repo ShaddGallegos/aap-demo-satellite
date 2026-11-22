@@ -186,7 +186,8 @@ make lint-ansible
 
 ### detect-secrets
 
-Scans for accidentally committed secrets.
+Scans for accidentally committed secrets locally, without sending candidates
+to external services for verification.
 
 **Configuration**: `.secrets.baseline`
 
@@ -196,12 +197,28 @@ Scans for accidentally committed secrets.
 # Read-only scan. Requires detect-secrets 1.5.0 and does not rewrite the baseline.
 make check-secrets
 
-# Record a new allowlist entry. This is the command that writes .secrets.baseline.
-detect-secrets scan --baseline .secrets.baseline
-
-# Audit findings
+# Review existing findings without external credential verification.
 detect-secrets audit .secrets.baseline
+
+# Prepare findings for review without rewriting the baseline.
+detect-secrets scan --no-verify --exclude-files '\.secrets\.baseline'
 ```
+
+For an actual credential, move its value into the encrypted
+`~/.ansible/conf/env.yml` and use the existing
+[credential Vault helpers](../includes/credential-vault.sh) to retrieve it
+when needed. Preserve existing Vault entries; do not print decrypted values,
+put credentials in command arguments, or commit them. Previously published
+credentials also need rotation: moving them does not remove Git history.
+Do not store documentation placeholders or synthetic test values in the Vault.
+
+The November 2026 review classified 28 additional findings as false positives:
+Vault key paths, Kubernetes resource names, redaction modes, an API URL,
+Ansible expressions, example placeholders, synthetic fixtures, a private-key
+header check, and test descriptions mistaken for tokens. These are recorded
+individually as `is_secret: false` in the baseline. Exceptions remain scoped
+to the file, detector type, and value hash; changed values and additional
+copies still require review. Do not regenerate the baseline simply to pass.
 
 **Inline allowlist**:
 

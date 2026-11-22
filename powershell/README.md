@@ -98,6 +98,12 @@ explicitly. To create without recovery, set
 `$env:AAP_DEMO_SKIP_BOOT_RECOVERY = 'true'` before running it.
 This does not enable native `create --full-demo` or Fleet support.
 
+Native `create` also registers the current-user recovery task. Hyper-V access
+and Task Scheduler are required; installation failures make `create` fail
+explicitly. To create without recovery, set
+`$env:AAP_DEMO_SKIP_BOOT_RECOVERY = 'true'` before running it.
+This does not enable native `create --full-demo` or Fleet support.
+
 After deploy, open the AAP route from `aap-demo status`. If your browser shows a
 certificate warning, trust the ingress CA from an elevated PowerShell — see
 [Ingress CA and browser TLS](#ingress-ca-and-browser-tls) below.

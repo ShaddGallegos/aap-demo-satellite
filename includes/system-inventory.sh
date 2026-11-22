@@ -26,6 +26,7 @@ _aap_demo_inventory_routes() {
     | select(
         (.metadata.namespace | test("^(openshift-|kube-)") | not)
         or (.metadata.namespace == "openshift-authentication" and .metadata.name == "oauth-openshift")
+        or (.metadata.namespace == "openshift-console" and .metadata.name == "console")
       )
     | {
         namespace: .metadata.namespace,
@@ -49,14 +50,10 @@ _aap_demo_inventory_routes() {
   printf '%s' "$routes"
 }
 
-# External routes: services that are not Kubernetes routes but should appear in
-# the dashboard Routes list. Currently the Satellite lab VM, surfaced once the
 # External namespaces: non-cluster workloads that should appear in the
-# dashboard Namespaces list. Currently the Satellite lab VM, surfaced once the
-# satellite-manifest addon is enabled and the VM exists.
+# dashboard Namespaces list. A supplied manifest does not enable its addon,
+# so discover the Satellite VM independently of manifest management.
 _aap_demo_inventory_external_namespaces() {
-  local addons_text="$1"
-  grep -qw 'satellite-manifest' <<<"$addons_text" || return 0
   command -v virsh >/dev/null 2>&1 || return 0
 
   local state ready=false
@@ -104,12 +101,8 @@ _aap_demo_inventory_v2_available() {
   return 1
 }
 
-# satellite-manifest addon is enabled and the Satellite VM exists.
+# External services are dashboard links, not Kubernetes Route resources.
 _aap_demo_inventory_external_routes() {
-  local addons_text="$1"
-  # Only when the satellite-manifest addon is enabled.
-  grep -qw 'satellite-manifest' <<<"$addons_text" || return 0
-
   local sat_host sat_ip
   sat_host="${SATELLITE_LAB_HOST:-satellite.demo.lab}"
   sat_ip=$(_aap_demo_inventory_ipv4 "$sat_host")
@@ -124,7 +117,7 @@ _aap_demo_inventory_external_routes() {
   [ "$(virsh -c qemu:///system domstate satellite 2>/dev/null)" = "running" ] || return 0
 
   local admitted=false
-  if curl -sk --connect-timeout 3 --max-time 5 -o /dev/null "https://${sat_ip}/" 2>/dev/null; then
+  if curl -fsk --connect-timeout 3 --max-time 5 -o /dev/null "https://${sat_ip}/" 2>/dev/null; then
     admitted=true
   fi
 

@@ -60,7 +60,9 @@ After installation, you'll need to configure some credentials in the AAP UI:
 
 1. **Galaxy/Automation Hub Tokens** (optional):
    - Run `aap-demo enable setup-pah` to store the offline token in the encrypted `~/.ansible/conf/env.yml`, then enable product-demos
-     (Galaxy credentials are wired automatically after the APD install job completes)
+     (Galaxy credentials are wired automatically after the APD install job completes).
+     Setup validates the token and waits for both Pulp remote sync tasks; correct
+     any reported Pulp/SSO error before retrying APD.
    - Or update "Automation Hub Certified Content" and "Automation Hub Validated Content" manually in the AAP UI
 
 2. **Machine Credential** (for connecting to managed nodes):
@@ -80,7 +82,7 @@ To use a forked or customized version of product-demos:
 
 ```bash
 PRODUCT_DEMOS_REPO=https://github.com/myorg/product-demos \
-PRODUCT_DEMOS_BRANCH=custom \
+PRODUCT_DEMOS_REF=<commit-or-tag> \
   aap-demo enable product-demos-base
 ```
 
@@ -132,7 +134,23 @@ Domain-specific addons (`product-demo-linux`, etc.) launch the same per-domain A
 templates — they do **not** run `setup_demo.yml` locally. The Product Demos EE provides
 `infra.aap_configuration` inside the cluster.
 
+### Local execution credential
+
+On a local Kubernetes cluster, AAP uses a dedicated `apd-openshift-demo` service account to
+create and observe its execution pods in the AAP namespace. The installer grants it a
+namespace-scoped `Role` and mints a renewable one-hour token immediately before APD jobs run.
+It does not grant `cluster-admin`. Each domain job refreshes this credential because an APD
+configuration import can replace its stored inputs. Supply `OPENSHIFT_BEARER_TOKEN` only when
+an intentionally broader, externally managed OpenShift credential is required.
+
 ## Troubleshooting
+
+If the APD base installer fails, the command prints the failed AAP task and the
+tail of its event output, followed by the native job URL. Run
+`aap-demo enable setup-pah` first when that task reports an Automation Hub or
+Red Hat SSO error; the Hub offline token is the separate `ah_offline_token`
+value in encrypted `~/.ansible/conf/env.yml`, not a Customer Portal/CDN value.
+Then rerun `aap-demo enable product-demos-base` or the requested domain.
 
 ### jq parse error while enabling product-demos
 
@@ -280,6 +298,8 @@ Domain-specific addons that depend on this base:
 - `product-demo-cloud` - Cloud provisioning demos
 - `product-demo-openshift` - OpenShift automation demos
 - `product-demo-satellite` - Red Hat Satellite demos
+- `product-demo-infrastructure` - separately opted-in Infrastructure templates
+- `product-demo-eda` - guarded EDA scenario (`PRODUCT_DEMOS_ENABLE_EDA=true`)
 
 ## Resources
 

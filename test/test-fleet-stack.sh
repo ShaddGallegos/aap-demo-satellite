@@ -4,8 +4,11 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_DIR=$(mktemp -d)
 trap 'rm -rf "$TEST_DIR"' EXIT
-source "$REPO_ROOT/includes/fleet-stack.sh"
+export HOME="$TEST_DIR/home" AAP_DEMO_DIR="$TEST_DIR/state"
+mkdir -p "$HOME" "$AAP_DEMO_DIR"
+source "$REPO_ROOT/includes/fleet-access.sh"
 source "$REPO_ROOT/includes/fleet-stack-remote.sh"
+fleet_ssh_key_ensure true
 lab_reconcile_ssh() { :; }
 _err() { printf 'ERROR: %s\n' "$*" >&2; }
 
@@ -19,12 +22,14 @@ test "$(grep -c '^# BEGIN AAP-DEMO STACK$' "$TEST_DIR/hosts")" = 1
 printf '# BEGIN AAP-DEMO STACK\nincomplete\n' >"$TEST_DIR/broken"
 cp "$TEST_DIR/broken" "$TEST_DIR/before"
 if fleet_stack_replace_block "$TEST_DIR/broken" new 2>/dev/null; then
-  echo "FAIL: malformed managed block was accepted" >&2; exit 1
+  echo "FAIL: malformed managed block was accepted" >&2
+  exit 1
 fi
 cmp "$TEST_DIR/before" "$TEST_DIR/broken"
 for bad in '999.0.0.1 bad.example bad' $'192.0.2.1 one.example one\n192.0.2.2 two.example one'; do
   if fleet_stack_validate_hosts <<<"$bad"; then
-    echo "FAIL: invalid/ambiguous hosts accepted" >&2; exit 1
+    echo "FAIL: invalid/ambiguous hosts accepted" >&2
+    exit 1
   fi
 done
 
@@ -41,9 +46,18 @@ kubectl() {
 }
 fleet_stack_ssh() {
   case "$2" in
-    'sudo cat /home/admin/.ssh/id_ed25519.pub') cat >/dev/null; printf 'ssh-ed25519 AAAA admin-%s\n' "$1" ;;
-    'sudo cat /etc/ssh/ssh_host_ed25519_key.pub') cat >/dev/null; printf 'ssh-ed25519 BBBB host-%s\n' "$1" ;;
-    'sudo bash -s') cat >"$TEST_DIR/apply-$1"; bash -n "$TEST_DIR/apply-$1" ;;
+    'sudo cat /home/admin/.ssh/id_ed25519.pub')
+      cat >/dev/null
+      printf 'ssh-ed25519 AAAA admin-%s\n' "$1"
+      ;;
+    'sudo cat /etc/ssh/ssh_host_ed25519_key.pub')
+      cat >/dev/null
+      printf 'ssh-ed25519 BBBB host-%s\n' "$1"
+      ;;
+    'sudo bash -s')
+      cat >"$TEST_DIR/apply-$1"
+      bash -n "$TEST_DIR/apply-$1"
+      ;;
     *) return 1 ;;
   esac
 }
@@ -57,7 +71,7 @@ grep -q '192.168.127.2 api.crc.testing api' <<<"$stack_hosts"
 grep -q '192.0.2.10 aap.apps.127.0.0.1.nip.io aap' <<<"$stack_hosts"
 grep -q 'Port 2202' <<<"$stack_config"
 ! grep -q 'Port 2203' <<<"$stack_config"
-grep -q 'StrictHostKeyChecking no' <<<"$stack_config"
+grep -q 'StrictHostKeyChecking yes' <<<"$stack_config"
 test "$(wc -l <<<"$stack_keys")" -eq 2
 grep -q 'aap-fleet-node-2.fleet.aap-demo.test ssh-ed25519 BBBB host-2202' <<<"$stack_known_hosts"
 fleet_access_inventory() {
@@ -70,21 +84,25 @@ test "$(wc -l <<<"$stack_keys")" -eq 1
 kubectl() { return 1; }
 rm "$TEST_DIR/apply-2201" "$TEST_DIR/apply-2202"
 if fleet_reconcile_stack >/dev/null 2>&1; then
-  echo "FAIL: cluster discovery failure was ignored" >&2; exit 1
+  echo "FAIL: cluster discovery failure was ignored" >&2
+  exit 1
 fi
 ! test -f "$TEST_DIR/apply-2201"
 kubectl() { printf '{"unexpected":"response"}'; }
 if fleet_reconcile_stack >/dev/null 2>&1; then
-  echo "FAIL: malformed discovery response was ignored" >&2; exit 1
+  echo "FAIL: malformed discovery response was ignored" >&2
+  exit 1
 fi
 (
-  export HOME="$TEST_DIR/home" AAP_DEMO_DIR="$TEST_DIR/state"
+  export HOME="$TEST_DIR/other-home" AAP_DEMO_DIR="$TEST_DIR/other-state"
+  mkdir -p "$HOME"
   source "$REPO_ROOT/addons/fleet/fleet.sh"
   _fleet_generate_ssh_key
-  cp "$FLEET_DIR/ssh_key" "$TEST_DIR/original-key"
+  cp "$FLEET_DIR/ssh_key.pub" "$TEST_DIR/original-public-key"
   rm "$FLEET_DIR/ssh_key.pub"
   _fleet_generate_ssh_key
-  cmp "$TEST_DIR/original-key" "$FLEET_DIR/ssh_key"
+  cmp "$TEST_DIR/original-public-key" "$FLEET_DIR/ssh_key.pub"
+  [[ ! -e "$FLEET_DIR/ssh_key" ]]
   ssh-keygen -lf "$FLEET_DIR/ssh_key.pub" >/dev/null
   fleet_reconcile_running_access() { printf 'access\n' >>"$TEST_DIR/lifecycle"; }
   fleet_reconcile_stack() { printf 'stack\n' >>"$TEST_DIR/lifecycle"; }

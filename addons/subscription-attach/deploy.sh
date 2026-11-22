@@ -8,7 +8,6 @@
 # Environment variables:
 #   REDHAT_SUBSCRIPTION_USERNAME - Red Hat account username (email)
 #   REDHAT_SUBSCRIPTION_PASSWORD - Red Hat account password
-#   REDHAT_SUBSCRIPTION_CREDENTIALS_FILE - Path to saved credentials
 #   SUBSCRIPTION_INTERACTIVE - Set to 'true' to choose subscription interactively
 #   QUIET - Skip interactive prompts (default: false)
 #
@@ -19,11 +18,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../../includes/credential-vault.sh
+source "${SCRIPT_DIR}/../../includes/credential-vault.sh"
 NAMESPACE="${NAMESPACE:-aap-operator}"
 ACTION="${1:-deploy}"
 
-# Credential file paths
-REDHAT_SUBSCRIPTION_CREDENTIALS_FILE="${REDHAT_SUBSCRIPTION_CREDENTIALS_FILE:-$HOME/.aap-demo/redhat-subscription-credentials}"
 REDHAT_SUBSCRIPTION_USERNAME="${REDHAT_SUBSCRIPTION_USERNAME:-}"
 REDHAT_SUBSCRIPTION_PASSWORD="${REDHAT_SUBSCRIPTION_PASSWORD:-}"
 
@@ -40,88 +39,58 @@ error() {
   printf '❌ ERROR: %s\n' "$*" >&2
 }
 
-# ==============================================================================
-# DELETE HANDLER
-# ==============================================================================
-
-if [ "$ACTION" = "--delete" ] || [ "$ACTION" = "delete" ]; then
-  info "Subscription remains attached to AAP - no cleanup needed"
-  exit 0
-fi
-
-# ==============================================================================
-# PREREQUISITE CHECKS
-# ==============================================================================
-
-# Check cluster connectivity
-if ! kubectl cluster-info &>/dev/null; then
-  error "Cannot connect to cluster"
-  warn "Please ensure your cluster is running: aap-demo status"
-  exit 1
-fi
-
-# Check if AAP is deployed
-if ! kubectl get aap -n "$NAMESPACE" &>/dev/null; then
-  error "AAP not found in namespace $NAMESPACE"
-  warn "Please deploy AAP first: aap-demo deploy"
-  exit 1
-fi
-
-# Check required tools
-for tool in curl jq kubectl; do
-  if ! command -v "$tool" &>/dev/null; then
-    error "Required tool not found: $tool"
-    exit 1
+subscription_preflight() {
+  if ! kubectl cluster-info &>/dev/null; then
+    error "Cannot connect to cluster"
+    warn "Please ensure your cluster is running: aap-demo status"
+    return 1
   fi
-done
-
-# No additional tool requirements - uses curl and jq (already checked above)
+  if ! kubectl get aap -n "$NAMESPACE" &>/dev/null; then
+    error "AAP not found in namespace $NAMESPACE"
+    warn "Please deploy AAP first: aap-demo deploy"
+    return 1
+  fi
+  local tool
+  for tool in curl jq kubectl; do
+    if ! command -v "$tool" &>/dev/null; then
+      error "Required tool not found: $tool"
+      return 1
+    fi
+  done
+}
 
 # ==============================================================================
 # CREDENTIAL MANAGEMENT
 # ==============================================================================
 
-load_redhat_credentials_from_file() {
-  local creds_file="$1"
+load_redhat_credentials_from_vault() {
+  # The Fleet/full-demo setup stores Red Hat CDN credentials in the encrypted
+  # shared Vault. Keep that as the canonical noninteractive source instead of
+  # asking callers to export secrets into their shell environment.
+  [ -z "${REDHAT_SUBSCRIPTION_USERNAME:-}" ] || return 1
+  [ -z "${REDHAT_SUBSCRIPTION_PASSWORD:-}" ] || return 1
 
-  if [ ! -f "$creds_file" ]; then
-    return 1
-  fi
-
-  # Parse YAML credentials file (simple key: value format)
-  if command -v yq &>/dev/null 2>&1; then
-    REDHAT_SUBSCRIPTION_USERNAME=$(yq eval '.username' "$creds_file" 2>/dev/null || echo "")
-    REDHAT_SUBSCRIPTION_PASSWORD=$(yq eval '.password' "$creds_file" 2>/dev/null || echo "")
-  elif command -v python3 &>/dev/null 2>&1; then
-    # Python fallback - safer than grep/sed for arbitrary input
-    REDHAT_SUBSCRIPTION_USERNAME=$(python3 -c "import yaml; print(yaml.safe_load(open('$creds_file')).get('username', ''))" 2>/dev/null || echo "")
-    REDHAT_SUBSCRIPTION_PASSWORD=$(python3 -c "import yaml; print(yaml.safe_load(open('$creds_file')).get('password', ''))" 2>/dev/null || echo "")
-  else
-    warn "Neither yq nor python3 available for safe credential parsing"
-    warn "Install yq (brew install yq) or ensure python3 with PyYAML is available"
-    return 1
-  fi
-
-  if [ -n "$REDHAT_SUBSCRIPTION_USERNAME" ] && [ -n "$REDHAT_SUBSCRIPTION_PASSWORD" ]; then
-    export REDHAT_SUBSCRIPTION_USERNAME REDHAT_SUBSCRIPTION_PASSWORD
+  local username password
+  username=$(aap_demo_vault_get 'aap_demo.redhat.cdn_username' 2>/dev/null || true)
+  password=$(aap_demo_vault_get 'aap_demo.redhat.cdn_password' 2>/dev/null || true)
+  if [ -n "$username" ] && [ -n "$password" ]; then
+    REDHAT_SUBSCRIPTION_USERNAME="$username"
+    REDHAT_SUBSCRIPTION_PASSWORD="$password"
+    info "Using Red Hat CDN credentials from the encrypted aap-demo Vault"
     return 0
   fi
-
   return 1
 }
 
 prompt_redhat_credentials() {
-  # 1. Check saved credentials file
-  if [ -f "$REDHAT_SUBSCRIPTION_CREDENTIALS_FILE" ]; then
-    if load_redhat_credentials_from_file "$REDHAT_SUBSCRIPTION_CREDENTIALS_FILE"; then
-      info "Red Hat credentials loaded from $REDHAT_SUBSCRIPTION_CREDENTIALS_FILE"
-      return 0
-    fi
-  fi
-
-  # 2. Check environment variables
+  # 1. Explicit environment variables override stored credentials.
   if [ -n "${REDHAT_SUBSCRIPTION_USERNAME:-}" ] && [ -n "${REDHAT_SUBSCRIPTION_PASSWORD:-}" ]; then
     info "Using Red Hat credentials from environment variables"
+    return 0
+  fi
+
+  # 2. Use the encrypted credentials configured by `aap-demo fleet auth`.
+  if load_redhat_credentials_from_vault; then
     return 0
   fi
 
@@ -171,18 +140,12 @@ prompt_redhat_credentials() {
     return 1
   fi
 
-  # 5. Save credentials securely
-  info "Saving credentials to $REDHAT_SUBSCRIPTION_CREDENTIALS_FILE"
-  (
-    umask 077
-    mkdir -p "$(dirname "$REDHAT_SUBSCRIPTION_CREDENTIALS_FILE")"
-    cat >"$REDHAT_SUBSCRIPTION_CREDENTIALS_FILE" <<EOF
-username: $REDHAT_SUBSCRIPTION_USERNAME
-password: $REDHAT_SUBSCRIPTION_PASSWORD
-EOF
-  )
-  chmod 600 "$REDHAT_SUBSCRIPTION_CREDENTIALS_FILE"
-  info "✓ Credentials saved securely"
+  if ! aap_demo_vault_set 'aap_demo.redhat.cdn_username' "$REDHAT_SUBSCRIPTION_USERNAME" \
+    || ! aap_demo_vault_set 'aap_demo.redhat.cdn_password' "$REDHAT_SUBSCRIPTION_PASSWORD"; then
+    error "Could not save Red Hat CDN credentials to the encrypted Vault"
+    return 1
+  fi
+  info "✓ Credentials saved to the encrypted aap-demo Vault"
   echo ""
 
   export REDHAT_SUBSCRIPTION_USERNAME REDHAT_SUBSCRIPTION_PASSWORD
@@ -277,10 +240,10 @@ attach_subscription() {
       subscriptions_password: $password
     }')
 
-  subscriptions_response=$(curl -sk -u "${aap_username}:${aap_password}" \
+  subscriptions_response=$(printf '%s' "$subscriptions_payload" | curl -sk -u "${aap_username}:${aap_password}" \
     -X POST \
     -H "Content-Type: application/json" \
-    -d "$subscriptions_payload" \
+    --data-binary @- \
     "${aap_url}/api/controller/v2/config/subscriptions/" 2>/dev/null || echo "")
 
   if [ -z "$subscriptions_response" ]; then
@@ -467,6 +430,11 @@ attach_subscription() {
 # ==============================================================================
 
 main() {
+  if [ "$ACTION" = "--delete" ] || [ "$ACTION" = "delete" ]; then
+    info "Subscription remains attached to AAP - no cleanup needed"
+    return 0
+  fi
+  subscription_preflight || return 1
   info "Checking AAP subscription status..."
 
   # Check if subscription already attached
@@ -492,4 +460,6 @@ main() {
   fi
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

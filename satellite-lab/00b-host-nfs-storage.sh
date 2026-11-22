@@ -5,7 +5,7 @@
 # Satellite's storage) lives on the host's larger filesystem.
 #
 # Sets up:
-#   - the NFS export (/var/lib/satlab/pulp -> 192.168.122.20, the Satellite VM)
+#   - the NFS export (a managed per-install path -> 192.168.122.20, the Satellite VM)
 #   - the nfs-server systemd unit
 #   - firewalld rules (when firewalld is active)
 #   - SELinux booleans (virt_use_nfs, nfs_export_all_rw) when SELinux is Enforcing
@@ -15,12 +15,19 @@ set -euo pipefail
 
 # ---- editable variables ---------------------------------------------------
 EXPORT_DIR="${SATLAB_NFS_DIR:-/var/lib/satlab/pulp}"
+NFS_ROOT="${SATLAB_NFS_ROOT:-/var/lib/satlab/instances}"
 SAT_IP="${SATELLITE_LAB_IP:-192.168.122.20}"   # Satellite VM NIC1 (default net)
 EXPORT_OPTS="rw,sync,no_subtree_check,no_root_squash"
 # ---------------------------------------------------------------------------
 
 [[ $EUID -eq 0 ]] || { echo "ERROR: run as root (sudo)"; exit 1; }
 command -v exportfs >/dev/null 2>&1 || { echo "ERROR: nfs-utils not installed"; exit 1; }
+if [ "${SATLAB_NFS_REQUIRE_SCOPED:-0}" = 1 ]; then
+  [[ "$EXPORT_DIR" =~ ^${NFS_ROOT}/satellite-[0-9]{8}T[0-9]{6}Z-[A-Za-z0-9]+/pulp$ ]] || {
+    echo "ERROR: managed Satellite builds require a scoped per-install NFS export" >&2
+    exit 1
+  }
+fi
 
 echo "== 1. Export directory =="
 mkdir -p "$EXPORT_DIR"

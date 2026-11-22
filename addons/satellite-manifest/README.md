@@ -34,7 +34,8 @@ RHSM management API:
 
 Selection is deliberately conservative: it recognizes subscription names beginning
 with `Red Hat Satellite Infrastructure Subscription`, `Red Hat Enterprise Linux Server`,
-or `Red Hat Enterprise Linux for Virtual Datacenters`. RHEL names must be the base
+or `Red Hat Enterprise Linux for Virtual Datacenters`, plus the exact personal-lab
+SKU `Red Hat Developer Subscription for Individuals`. RHEL names must be the base
 name or use the `Premium`, `Standard`, or `Self-support` tier, optionally followed
 by parenthesized details; extensions such as Extended Life Cycle Support are not selected.
 Pools must have at least

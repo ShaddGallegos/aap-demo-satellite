@@ -11,8 +11,8 @@ developer subscription.
 ## Features
 
 - **Automatic Subscription Lookup**: Queries Red Hat systems for available subscriptions
-- **Secure Credential Storage**: Saves credentials locally with chmod 600 permissions
-- **Multiple Input Methods**: Supports environment variables, credential files, or interactive prompts
+- **Secure Credential Storage**: Stores retained credentials in the encrypted Ansible Vault
+- **Multiple Input Methods**: Supports temporary environment variables, the Vault, or interactive prompts
 - **Non-Blocking**: Warns on failure but doesn't break AAP deployment
 - **Auto-Enabled**: Runs automatically after `aap-demo deploy` via addon-wire.sh integration
 
@@ -20,8 +20,9 @@ developer subscription.
 
 1. **After AAP Deployment**: Automatically triggered via `includes/addon-wire.sh` after AAP pods are running
 2. **Credential Discovery**: Checks for credentials in this order:
-   - Saved credentials file (`~/.aap-demo/redhat-subscription-credentials`)
    - Environment variables (`REDHAT_SUBSCRIPTION_USERNAME`, `REDHAT_SUBSCRIPTION_PASSWORD`)
+   - The encrypted aap-demo Vault (`aap_demo.redhat.cdn_username` and
+     `aap_demo.redhat.cdn_password`)
    - Interactive prompt (if terminal is interactive and not in QUIET mode)
 3. **Subscription Lookup**: Uses `infra.aap_configuration.controller_license` role with `use_lookup: true` to query
    the Red Hat subscription API
@@ -101,31 +102,23 @@ QUIET=true aap-demo deploy
 
 ## Credential Storage
 
-### File Location
+### Vault location
 
-Credentials are saved to: `~/.aap-demo/redhat-subscription-credentials`
-
-### File Format
-
-```yaml
-username: your-email@example.com
-password: your-password
-```
+Credentials are saved under the `aap_demo` namespace in the encrypted Ansible
+Vault at `~/.ansible/conf/env.yml`. The corresponding owner-only Vault password
+file is `~/.ansible/conf/.vaultpass.txt`.
 
 ### Security
 
-- File permissions: `chmod 600` (owner read/write only)
-- Directory created with `umask 077` for restrictive permissions
-- Credentials stored in plaintext (follow existing aap-demo pattern)
-- Consider using environment variables in shared/CI environments
+- Retained username and password values are never written to a plaintext
+  credential file.
+- Environment variables are temporary one-run overrides; they are not required
+  once the Vault has the CDN credentials.
+- Do not put credentials in command arguments, logs, or repository files.
 
 ### Environment Variable Override
 
-```bash
-# Use a custom credentials file location
-export REDHAT_SUBSCRIPTION_CREDENTIALS_FILE="/path/to/custom/credentials.yml"
-aap-demo deploy
-```
+The environment variables take precedence over Vault values for that invocation.
 
 ## Subscription Management
 
@@ -149,11 +142,11 @@ If automatic attachment fails, attach manually:
 3. Navigate to: **Settings → Subscription**
 4. Enter Red Hat account credentials or upload a manifest
 
-### Remove Saved Credentials
+### Update Saved Credentials
 
-```bash
-rm ~/.aap-demo/redhat-subscription-credentials
-```
+Run the add-on interactively again or provide both temporary environment
+variables. The resulting values replace only the two `aap_demo.redhat.cdn_*`
+keys in the shared encrypted Vault.
 
 ## Troubleshooting
 
@@ -169,7 +162,7 @@ If AAP already has a valid subscription, the addon skips attachment:
 
 ```
 ❌ ERROR: Red Hat authentication failed
-⚠  Check credentials in ~/.aap-demo/redhat-subscription-credentials
+⚠  Verify the Red Hat account credentials and update the encrypted Vault
 ```
 
 **Solution**: Verify credentials at [access.redhat.com](https://access.redhat.com)
@@ -257,10 +250,6 @@ addons/subscription-attach/
 ### Testing
 
 ```bash
-# Test credential prompting
-rm ~/.aap-demo/redhat-subscription-credentials
-bash addons/subscription-attach/deploy.sh
-
 # Test with environment variables
 export REDHAT_SUBSCRIPTION_USERNAME="test@example.com"
 read -r -s -p "Red Hat password: " REDHAT_SUBSCRIPTION_PASSWORD

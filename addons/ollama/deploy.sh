@@ -156,8 +156,10 @@ else
 fi
 echo "  StorageClass: ${_ollama_sc}"
 
-# Prompt for PVC size when running interactively and no explicit override was given
-if [ -z "$_ollama_storage_size_explicit" ] && [ -t 0 ]; then
+# A full-demo workflow intentionally sets QUIET=true while retaining its TTY
+# for progress rendering. Do not let that orchestration mode block on an
+# addon-specific question; callers can still set OLLAMA_STORAGE_SIZE explicitly.
+if [ -z "$_ollama_storage_size_explicit" ] && [ "${QUIET:-false}" != true ] && [ -t 0 ]; then
   read -r -p "  PVC size [${OLLAMA_STORAGE_SIZE}] (e.g. 20Gi for multiple/larger models): " _input_size
   [ -n "$_input_size" ] && OLLAMA_STORAGE_SIZE="$_input_size"
 fi

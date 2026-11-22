@@ -4,9 +4,14 @@ Everything in this folder is ready to run. The fully automatic path is
 `aap-demo create --full-demo --satellite` (or `sudo satellite-lab/build-and-configure.sh`
 for just the lab), which downloads the RHEL ISO, provisions the VM, installs
 Satellite, and configures content with no manual steps when the host is
-registered with RHSM. Adjust the variables at the top of each script
-(passwords, RHSM credentials, manifest path, versions) only if you run the
-stages individually.
+registered with RHSM. Adjust non-sensitive settings such as the manifest path
+or versions only if you run stages individually; credentials belong in the
+encrypted Vault.
+
+All retained Satellite credentials are generated or read through the encrypted
+`aap_demo` namespace in `~/.ansible/conf/env.yml`; do not add passwords to the
+scripts. The builder passes only the required values at runtime and reuses the
+same Vault values on a retry.
 
 ## Architecture
 
@@ -56,11 +61,12 @@ reach the host (and AAP's forwarded ports) through host NAT/forwarding.
 the Satellite VM that loopback is the *host's* forwarded AAP port, reached via
 the `default` gateway (`192.168.122.1`). No extra DNS wiring is needed.
 
-**Reaching the Satellite from AAP (the reverse direction):** the cluster's
-CoreDNS maps `satellite.demo.lab` to the VM's real IP (`192.168.122.20`) via a
-`hosts` block, applied by `configure_coredns` whenever the Satellite VM is
-running. This is what lets the AAP controller pods run the Satellite demo
-content. The `apps.127.0.0.1.nip.io` wildcard cannot be used for the Satellite
+**Reaching the Satellite from AAP (the reverse direction):** on MicroShift,
+`configure_coredns` maps `satellite.demo.lab` to the VM's real IP
+(`192.168.122.20`) through a CoreDNS `hosts` block when the VM is running.
+Full OpenShift retains its operator-managed DNS configuration; provide DNS
+resolution for the Satellite hostname without modifying its Corefile.
+The `apps.127.0.0.1.nip.io` wildcard cannot be used for the Satellite
 — it resolves to `127.0.0.1`, which from inside a pod is the pod itself. On the
 host, `satellite.demo.lab` is added to `/etc/hosts` so the UI is reachable at
 `https://satellite.demo.lab`.
@@ -107,6 +113,12 @@ set `SAT_ORG` if more than one organization matches.
   imports your supplied file. The addon requires the account's "View/Renew
   Subscription Information" permission; see
   [../addons/satellite-manifest/README.md](../addons/satellite-manifest/README.md).
+- The Discovery boot image is cached after its first download at
+  `/var/lib/libvirt/images/aap-demo-fdi-image-latest.tar`. On a recreated
+  Satellite VM, the builder validates and seeds that copy before
+  `satellite-installer` runs, avoiding another Internet download. A managed
+  uninstall preserves this reusable installation-media cache, just as it
+  preserves the RHEL ISO; unrelated libvirt images are also preserved.
 - **Satellite 6.17+ recommended**: RHEL 10 content support and the image-mode
   (`bootc`) host plugin land there. The Satellite *server* itself still
   installs on RHEL 9 — RHEL 10 is in scope for managed content/hosts only.
@@ -116,9 +128,32 @@ set `SAT_ORG` if more than one organization matches.
 
 **Fully automated (recommended):** `aap-demo create --full-demo --satellite`
 runs the whole build via `build-and-configure.sh` (network → manifest →
-provision → installer → content → provisioning → integrations), then installs
+provision → installer → content → sync plan → provisioning → integrations), then installs
 the Satellite Demo content in AAP. Use the manual steps below to run stages
 individually or to understand what the orchestrator does.
+
+### General Satellite-provisioned VMs
+
+Fleet remains the three QEMU demo nodes. A separate, opt-in set of general VMs
+can be created through a Satellite compute resource. Set the node count to `3`
+and provide an image already registered with the selected Satellite compute
+resource:
+
+```bash
+SATELLITE_GENERAL_NODE_COUNT=3 \
+SATELLITE_GENERAL_NODE_IMAGE=<satellite-image-name> \
+aap-demo create --satellite
+```
+
+The local `KVM-Host` resource defaults to 2 vCPU, 4096 MiB RAM, and a 15 GiB
+qcow2 disk on `satlab`; it creates persistent libvirt domains named
+`aap-demo-general-node-01` through `-03`, which are visible in Virt-Manager.
+For a cloud compute resource, set `SATELLITE_COMPUTE_RESOURCE` plus its
+provider-specific `SATELLITE_GENERAL_NODE_COMPUTE_ATTRIBUTES`,
+`SATELLITE_GENERAL_NODE_VOLUME`, and
+`SATELLITE_GENERAL_NODE_INTERFACE` values. Those values must select the same
+2 vCPU, 4096 MiB, and 15 GiB shape. The command refuses to substitute a
+kickstart/PXE build when an image name is absent.
 
 | Step | Where | Script |
 |------|-------|--------|
@@ -127,17 +162,107 @@ individually or to understand what the orchestrator does.
 | 1 | KVM host (root) | `01-provision-satellite-vm.sh` (renders `satellite-vm.ks`; runs 0b automatically) |
 | 2 | Satellite VM (root) | `02-satellite-installer.sh` |
 | 3 | Satellite VM (root) | `03-content-hammer.sh /root/manifest.zip` **or** `03-content-ansible.yml` |
+| 3b | Satellite VM (root) | `09-content-sync-plan.sh` (sync plan, Flatpak, and Ansible collections) |
 | 4 | Satellite VM (root) | `04-provisioning-kickstart.sh` |
 | 5 | Satellite VM + build host | `05-bootc-image-mode.sh` (+ `Containerfile.bootc`, `bootc-register.service`) |
-| 6 | Satellite VM (root) | `06-integrations.sh` (libvirt compute resource, rhc/Insights) |
+| 6 | Satellite VM (root) | `06-integrations.sh` (libvirt compute resource/profile, Capsule wiring, Ansible roles, rhc/Insights) |
+| 6c | Satellite VM (root) | `11-settings-baseline.sh` (safe provisioning, facts, Remote Execution, and Lightspeed settings) |
 | 6b | Satellite VM (root) | `07-fleet-activation-key.sh` (fleet activation key; run by `fleet satellite-register`) |
 | 7 | AAP controller | `aap/` (dynamic inventory + Lightspeed notes) |
 
 `build-and-configure.sh` orchestrates steps 0–6 from the host and is
-idempotent — each stage is skipped when already complete. It also trusts the
+idempotent — each stage is reconciled when already complete. It also trusts the
 Satellite's Katello CA on the host (`_stage_ca_trust`, sourcing
 `includes/satellite-ca-trust.sh`) so the UI and CLI tools stop warning about
 the self-signed cert; skip with `AAP_DEMO_TRUST_CA=false`.
+
+### Content synchronization plan and extra content
+
+Every normal Satellite reconciliation creates or reuses the daily
+`aap-demo-all-content` sync plan and attaches it to every content product in
+the selected organization. Satellite sync plans are product-scoped, so this
+covers every repository in each managed product. Existing plans retain their
+scheduled time on a repeat run. Set `SATELLITE_SYNC_PLAN_NAME` or
+`SATELLITE_SYNC_PLAN_INTERVAL` (`daily`, `weekly`, or `monthly`) before first
+creation to choose a different retained plan.
+
+### Optional RHIS report templates
+
+The RHIS Satellite template project is useful for Git-managed host reports,
+but its upstream license is GPL-3.0 while aap-demo is Apache-2.0. aap-demo
+therefore does not vendor, alter, or relicense that source. Instead, an
+explicit opt-in downloads the pinned upstream revision directly into the
+Satellite VM and imports it with an `[RHIS]` prefix:
+
+```bash
+SATELLITE_IMPORT_RHIS_TEMPLATES=true \
+SATELLITE_RHIS_TEMPLATE_LICENSE_ACCEPTED=true \
+  aap-demo create --satellite
+```
+
+The import is idempotent and runs during every Satellite reconciliation when
+enabled. It uses `parmstro/rhis-builder-satellite-templates` commit
+`2988eb2690aa3e3777dcfcc92a4f9c1b9cc37c28`; review the upstream GPL-3.0
+content before enabling it.
+
+### Capsule, compute, Ansible, and settings reconciliation
+
+Each normal reconciliation owns the local `KVM-Host` compute resource and the
+`aap-demo-general-small` compute profile. The profile specifies two vCPUs,
+4096 MiB of RAM, a 15 GiB qcow2 disk in the `default` pool, and a virtio
+interface on `satlab`. Satellite's `demo.lab` domain and `satlab` subnet are
+also reconciled with the integrated `satellite.demo.lab` DNS, DHCP, TFTP, and
+HTTPBoot Capsule. The same Capsule is added to the subnet's **Remote
+Execution** Capsule selection without removing any other existing selections.
+
+Satellite's built-in Ansible and Remote Execution proxy plugins are enabled,
+and roles from Satellite's configured Ansible paths are synchronized into the
+UI. The settings baseline keeps fact and discovery defaults in `Lab` / `Default
+Organization`, uses private host addresses for Remote Execution, retains the
+supported synchronized-content Kickstart templates, and enables automatic Red
+Hat Inventory upload and Lightspeed recommendation synchronization. It does
+not change authentication, email, root passwords, host ownership, automatic
+discovery provisioning, or data-minimization policy.
+
+Automatic Red Hat Inventory upload additionally requires the Satellite VM to
+have a valid direct RHSM identity. The reconciliation uses the encrypted
+`aap_demo.redhat.cdn_username` and `aap_demo.redhat.cdn_password` Vault values
+first (then legacy RHSM values when present); certificate-only CDN access can
+maintain packages but cannot enable Cloud Connector. Invalid credentials stop
+the connector stage with an authentication error rather than silently claiming
+that inventory reports are uploading.
+
+The local compute resource/profile is the only automatic provider profile.
+Cloud and VMware resources require a separate, explicitly configured provider
+profile and preflight; aap-demo does not infer credentials or create billable
+resources from platform detection.
+
+The same stage creates a `RHEL_Flatpak` remote for
+`https://flatpaks.redhat.io/rhel/`, scans it, mirrors every discovered remote
+repository into the dedicated `aap-demo-flatpak` product, and synchronizes it.
+It also creates the `Red Hat Ansible Collections` repository in the
+`aap-demo-ansible-collections` product and syncs all collections from
+`console.redhat.com`. Satellite needs the Automation Hub offline token for the
+collection remote; aap-demo transfers the Vault-backed `ah_offline_token` only
+to configure the guest and removes the temporary guest file immediately.
+Set `SATELLITE_FLATPAK_ENABLED=false` or `SATELLITE_COLLECTIONS_ENABLED=false`
+only when deliberately excluding those content types.
+
+The installer also creates two owned Installation Media entries from the local
+published Kickstart trees: `aap-demo RHEL 9.5 Kickstart` and `aap-demo RHEL
+10.0 Kickstart`. They use the Satellite Pulp URLs, never a CDN or generic
+Internet mirror, and are reconciled on every run.
+
+### OpenSCAP baseline
+
+The installer enables the OpenSCAP proxy plugin and loads Satellite's default
+SCAP Security Guide content. That makes **Hosts → Compliance → SCAP Content**
+useful immediately. It deliberately does not assign a compliance policy or
+enforce a profile on hosts: the Satellite-provided default content matches the
+Satellite server's RHEL minor version, while a policy needs a profile verified
+for the target host version. Fleet registration refreshes package and enabled
+repository facts so Errata reporting can populate after the Satellite receives
+the update.
 
 The manifest is an exception to stage skipping: unless you supply `MANIFEST`,
 it is refreshed and imported even when a cached file or configured content
@@ -151,6 +276,15 @@ To do just that step independently:
 ```bash
 bash satellite-lab/build-and-configure.sh --manifest-only
 ```
+
+### SSH identity after an approved rebuild
+
+Rebuilding the VM changes its SSH host keys. The builder rejects changed keys
+and stops with trust-verification guidance rather than waiting for the installation
+timeout or modifying saved trust. Verify the replacement VM's fingerprint through
+an independent channel, preserve the existing known-hosts file, and explicitly
+update only the verified VM's entry before retrying. Do not disable host-key
+checking or remove unrelated entries.
 
 ### Existing installations and maintenance
 
@@ -170,6 +304,17 @@ verified, and `satellite-maintain upgrade check/run` performs each supported
 minor upgrade in sequence. Unavailable paths and failed checks stop the build;
 there are no skipped checks or automatic OS-major migrations.
 
+On an unregistered guest using entitlement certificates, native RHSM can report
+that several repositories were enabled while retaining only the last one. If a
+native upgrade fails with only its target maintenance repository enabled, the
+wrapper reports this condition, enables BaseOS, AppStream, Satellite, and
+maintenance repositories one at a time, verifies their actual enabled state, and
+repeats native checks before one resume attempt. Registered guests and other
+repository states do not take this recovery path. Repair or retry failures stop
+the build; no vendor files, upgrade journal entries, or package checks are changed.
+Host-entitlement fallback keeps copied private keys root-readable only (mode
+`0600`); it does not make private keys world-readable alongside public certificates.
+
 Satellite's native upgrade checks require the latest supported RHEL minor
 release and may reject an RHSM minor-release pin. The builder does not change
 an existing pin; resolve a rejected pin and any repository dependency conflicts
@@ -182,11 +327,73 @@ backup volume with enough capacity. Failed backups prevent package changes.
 Backups are retained for manual restoration; failed upgrades do not trigger
 an automatic rollback.
 
+After rebuilding the OS disk, do not mount a previous installation's retained
+Pulp content over the new database. Use separate per-installation NFS exports.
+The managed `aap-demo create --satellite` flow reserves a new
+`/var/lib/satlab/instances/satellite-<install-id>/pulp` export before creating
+a missing VM. It refuses an existing export while the managed domain is absent;
+retain and inspect that data rather than pointing a new database at it.
+For an approved storage migration, stop native services, copy only the current
+installation's content and backups while preserving ownership, and verify
+checksums before changing mounts. Keep the original data and mount configuration
+until native health and HTTPS checks pass. Persist mounts in `fstab`; native
+Pulp units already use `RequiresMountsFor=/var/lib/pulp`. An NFS mount must retain
+Pulp's SELinux context; separate mounts with different contexts need
+`nosharecache`. Do not disable SELinux to make a migration succeed.
+
 Maintenance can stop services and reboot the Satellite VM. The builder waits
 for a changed boot ID, reconnects, and reruns reconciliation. Run the full demo
 only when this downtime is acceptable. A current server performs discovery and
 health checks without taking another backup or rerunning the initial installer.
 `--manifest-only` never runs maintenance.
+
+The dashboard and `aap-demo status` list a running Satellite VM under Routes even
+when a supplied manifest means the `satellite-manifest` addon is disabled.
+This is an external VM link, not an OpenShift Route resource. HTTP errors leave
+the link pending rather than reporting the application as ready.
+
+### Hosted Red Hat Lightspeed and RHC
+
+Red Hat Lightspeed, formerly Insights, provides hosted inventory and system
+recommendations. It is separate from the Ansible Lightspeed chatbot. Register
+Satellite itself directly with Red Hat; register Fleet nodes through Satellite
+using the correct organization and content activation key.
+
+**Verified handoff, 2026-11-17:** Satellite 6.18.11 has a valid Red Hat RHSM
+identity. The owner-verified manifest was imported into `Default Organization`
+and three subscriptions are listed. Both Pulp and backup paths are mounted
+over NFS. No content repositories or activation keys have been prepared.
+The three Fleet nodes remain unregistered.
+
+**Connector repair:** Invocation 1 failed because the native remote-execution
+proxy could not SSH to Satellite itself. After preserving authorized keys and
+authorizing only the native proxy public key, invocation 2 and its native task
+succeeded. `rhcd` is enabled and active, its worker configuration exists, and
+the native connector identity is populated. Hosted inventory acceptance,
+recommendation synchronization, and Fleet reporting remain unverified.
+
+Use the scoped reconciliation without repeating maintenance:
+
+```bash
+bash satellite-lab/build-and-configure.sh --cloud-connector-only
+```
+
+It reuses a healthy connector without rotating the service token; otherwise it
+waits for the exact native task and fails on unsuccessful completion or missing
+postconditions. Inspect native job output privately. The stored Vault
+organization ID also needs review; registration
+succeeded using the sole organization returned by authenticated discovery, not
+the incorrect stored value. Keep account identifiers and credentials private.
+
+Resume with [RM-04D](../docs/ROADMAP.md#rm-04d-hosted-satellite-lightspeed-and-rhc).
+Verify supported Satellite-proxied reporting before invoking `rhc connect` on
+managed nodes. Do not delete Insights registration markers or ignore client
+failures to obtain a successful-looking registration result.
+
+For travel, use the [shutdown and resume guide](../docs/guides/older-command.md#pause-for-travel-without-deleting-data).
+Preserve the current per-installation NFS data, pre-registration RHSM snapshot,
+and maintenance backups. Do not mount retained content from another installation
+over the current database.
 
 ### Shared lab SSH access
 
@@ -196,8 +403,9 @@ Satellite accounts `admin` and `root` share this identity; CRC uses its supporte
 `core` account with `sudo`, without enabling root SSH or adding CoreOS users.
 Existing private identities and unmanaged authorized keys are preserved.
 
-The generated lab aliases select forwarded Fleet ports and use
-`StrictHostKeyChecking no` with a disposable known-host store. CRC SSH traverses
+The generated lab aliases select forwarded Fleet ports and use trust on first
+use with a persistent known-host store; unexpected host-key changes are rejected.
+CRC SSH traverses
 a running Fleet QEMU node to reach the host's loopback-only CRC forward.
 CoreOS uses a separate `authorized_keys.d/aap-demo` file when its SSH key helper
 is present, leaving the MCO-owned Ignition key file untouched.

@@ -30,15 +30,29 @@ SAT_ORG="${SAT_ORG:-Demo Org}"
 SAT_ORG_LABEL="${SAT_ORG_LABEL:-Demo_Org}"
 
 _sat_ssh() {
-  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  local state_dir="${AAP_DEMO_DIR:-$HOME/.aap-demo}/satellite"
+  local known_hosts="${state_dir}/known_hosts"
+  mkdir -p "$state_dir" || return 1
+  chmod 700 "$state_dir" || return 1
+  touch "$known_hosts" || return 1
+  chmod 600 "$known_hosts" || return 1
+  ssh -o UserKnownHostsFile="$known_hosts" -o GlobalKnownHostsFile=/dev/null \
+    -o StrictHostKeyChecking=accept-new \
     -o BatchMode=yes -o ConnectTimeout=10 "root@${SAT_IP}" "$@"
 }
 
 # Ensure the Satellite has an activation key for the fleet; echo its name.
 _fleet_satellite_ensure_ak() {
-  local script_dir output
+  local script_dir output state_dir known_hosts
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes \
+  state_dir="${AAP_DEMO_DIR:-$HOME/.aap-demo}/satellite"
+  known_hosts="${state_dir}/known_hosts"
+  mkdir -p "$state_dir" || return 1
+  chmod 700 "$state_dir" || return 1
+  touch "$known_hosts" || return 1
+  chmod 600 "$known_hosts" || return 1
+  scp -o UserKnownHostsFile="$known_hosts" -o GlobalKnownHostsFile=/dev/null \
+    -o StrictHostKeyChecking=accept-new -o BatchMode=yes \
     "${script_dir}/../satellite-lab/07-fleet-activation-key.sh" "root@${SAT_IP}:/root/" >/dev/null 2>&1 || return 1
   output=$(printf '%s\t%s\t%s\t%s\n' "$SAT_ORG" "$SAT_AK_NAME" "${SAT_FLEET_CV:-RHEL9}" "${SAT_FLEET_LCE:-Library}" \
     | _sat_ssh 'IFS="$(printf "\t")" read -r SAT_ORG SAT_FLEET_AK SAT_FLEET_CV SAT_FLEET_LCE
@@ -66,7 +80,8 @@ _fleet_satellite_register_node() {
     _err "Satellite did not return a CA certificate"
     return 1
   }
-  remote=$(cat <<'REMOTE'
+  remote=$(
+    cat <<'REMOTE'
 set -euo pipefail
 # Registration parameters and the public CA arrive on stdin, not in argv.
 IFS=$'\t' read -r ak_name sat_host sat_ip org_label expected_major
@@ -156,14 +171,23 @@ if rpm -q rhc >/dev/null 2>&1; then
     || rhc connect >/dev/null 2>&1 || true
 fi
 
+# Satellite's Errata view needs both installed-package facts and enabled
+# repository facts. Registration alone does not always post them immediately.
+subscription-manager refresh >/dev/null
+subscription-manager facts --update >/dev/null
+dnf -q repolist --enabled >/dev/null
+
 subscription-manager identity | grep -Fq "org ID: $org_label"
 subscription-manager config --list | awk -v expected="$sat_host" '
   $1 == "hostname" {gsub(/[][]/, "", $3); if ($3 == expected) found=1}
   END {exit(found ? 0 : 1)}'
 REMOTE
-)
-  { printf '%s\t%s\t%s\t%s\t%s\n' "$ak_name" "$SAT_HOST" "$SAT_IP" "$SAT_ORG_LABEL" \
-      "$expected_major"; printf '%s\n' "$ca"; } \
+  )
+  {
+    printf '%s\t%s\t%s\t%s\t%s\n' "$ak_name" "$SAT_HOST" "$SAT_IP" "$SAT_ORG_LABEL" \
+      "$expected_major"
+    printf '%s\n' "$ca"
+  } \
     | fleet_stack_ssh "$port" "sudo bash -c $(
       printf '%q' "$remote"
     )"
@@ -178,7 +202,10 @@ fleet_satellite_register() {
   local nodes ak_name row index port failed=false
   nodes=$(fleet_access_inventory omit) || return 1
   nodes=$(jq -c '[.[] | select(.state == "running")]' <<<"$nodes") || return 1
-  [ "$nodes" != '[]' ] || { _err "No running Fleet nodes to register"; return 1; }
+  [ "$nodes" != '[]' ] || {
+    _err "No running Fleet nodes to register"
+    return 1
+  }
 
   echo "Preparing Satellite activation key for the fleet..."
   ak_name=$(_fleet_satellite_ensure_ak) || {

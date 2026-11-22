@@ -7,7 +7,8 @@
 # Environment variables:
 #   PRODUCT_DEMOS_DOMAINS - Space-separated domain list (default: five domains, no satellite)
 #   PRODUCT_DEMOS_REPO    - Git repository URL
-#   PRODUCT_DEMOS_BRANCH  - Git branch to use
+#   PRODUCT_DEMOS_REF     - Immutable Git revision to use (default: tested APD commit)
+#   PRODUCT_DEMOS_BRANCH  - Legacy alias for PRODUCT_DEMOS_REF
 #
 # Usage:
 #   ./deploy.sh          # Deploy base + all domain demos
@@ -23,7 +24,8 @@ NAMESPACE="${NAMESPACE:-aap-operator}"
 ACTION="${1:-deploy}"
 
 PRODUCT_DEMOS_REPO="${PRODUCT_DEMOS_REPO:-https://github.com/ansible/product-demos}"
-PRODUCT_DEMOS_BRANCH="${PRODUCT_DEMOS_BRANCH:-main}"
+PRODUCT_DEMOS_REF="${PRODUCT_DEMOS_REF:-${PRODUCT_DEMOS_BRANCH:-90dea07d34d9bf5bf59acd7b6927ab576c0cddf4}}"
+PRODUCT_DEMOS_BRANCH="$PRODUCT_DEMOS_REF"
 PRODUCT_DEMOS_EE_NAME="${PRODUCT_DEMOS_EE_NAME:-Product Demos EE}"
 PRODUCT_DEMOS_DOMAINS="${PRODUCT_DEMOS_DOMAINS:-linux windows network cloud openshift}"
 

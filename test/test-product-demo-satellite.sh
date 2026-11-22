@@ -51,6 +51,7 @@ echo "PASS: Satellite install retry and template verification propagate failures
 
 unset SATELLITE_URL
 apd_satellite_is_lab
+SATELLITE_LAB_MODE=true
 PROFILE_RESPONSE='{"subtotal":2,"results":[
   {"name":"RHEL9","repository_ids":[1,2],"version_count":1,"latest_version":"1.0","organization_id":1,
     "organization":{"id":1,"name":"Demo Org","label":"Demo_Org"}},

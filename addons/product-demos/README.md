@@ -46,7 +46,7 @@ Use a custom fork or branch (inherited by base):
 
 ```bash
 PRODUCT_DEMOS_REPO=https://github.com/myorg/product-demos \
-PRODUCT_DEMOS_BRANCH=main \
+PRODUCT_DEMOS_REF=<commit-or-tag> \
   aap-demo enable product-demos
 ```
 
@@ -73,6 +73,11 @@ Or include `satellite` in `PRODUCT_DEMOS_DOMAINS` after updating credentials.
 3. Sync the **Satellite Inventory** source on **Ansible Product Demos Inventory**.
 
 Full Satellite configuration steps: [`../product-demo-satellite/README.md`](../product-demo-satellite/README.md).
+
+The default APD source is a tested immutable commit, not a moving branch.
+`PRODUCT_DEMOS_BRANCH` remains a compatibility alias for `PRODUCT_DEMOS_REF`.
+Infrastructure and EDA scenarios remain separate opt-ins; see the
+[addon guide](../../docs/guides/addons.md#product-demos).
 
 ## Individual domains
 

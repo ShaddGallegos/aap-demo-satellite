@@ -34,4 +34,10 @@ if _fleet_aap_run_ping 2 3 >/dev/null; then
 fi
 PING_STATUS=successful
 _fleet_aap_run_ping 2 3 >/dev/null
-echo "PASS: Fleet registration uses bootstrap automation credentials and rejects failed pings"
+PING_STATUS=running
+if ! _fleet_aap_run_ping 2 3 >"$TEST_DIR/pending-output"; then
+  echo "FAIL: queued AAP ping failed an otherwise successful Fleet registration" >&2; exit 1
+fi
+test "${FLEET_AAP_PING_PENDING:-false}" = true
+grep -q 'verification remains pending' "$TEST_DIR/pending-output"
+echo "PASS: Fleet registration uses bootstrap credentials, rejects failed pings, and preserves queued verification"

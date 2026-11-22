@@ -4,6 +4,8 @@ const state = {
   sessionToken: "",
   payload: null,
   activeCategory: "All",
+  activeView: "overview",
+  activeDemo: "lightwell",
   polling: null,
   dismissedOperationId: null,
   dismissTimer: null,
@@ -15,6 +17,9 @@ const elements = {
   alert: document.querySelector("#alert"),
   addonGrid: document.querySelector("#addon-grid"),
   categoryFilter: document.querySelector("#category-filter"),
+  demoMenu: document.querySelector("#demo-menu"),
+  demoContent: document.querySelector("#demo-content"),
+  viewMenu: document.querySelector("#view-menu"),
   capacityGrid: document.querySelector("#capacity-grid"),
   capacityMessage: document.querySelector("#capacity-message"),
   capacityPanel: document.querySelector("#capacity-panel"),
@@ -168,6 +173,108 @@ function renderCategories(addons) {
   });
 }
 
+function selectView(view) {
+  if (!["overview", "demos", "addons", "access"].includes(view)) {
+    return;
+  }
+  state.activeView = view;
+  document.querySelectorAll("[data-view-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.viewPanel !== view;
+  });
+  elements.viewMenu.querySelectorAll("button[data-view]").forEach((button) => {
+    const active = button.dataset.view === view;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
+function renderDemos(payload) {
+  const demos = payload.addons.filter((addon) => addon.category === "Demo content");
+  if (!demos.some((demo) => demo.id === state.activeDemo)) {
+    state.activeDemo = demos[0]?.id;
+  }
+  elements.demoMenu.innerHTML = demos.map((demo) =>
+    `<button class="filter-button ${demo.id === state.activeDemo ? "active" : ""}" type="button" ` +
+    `data-demo="${escapeHtml(demo.id)}" aria-controls="demo-content" ` +
+    `aria-pressed="${demo.id === state.activeDemo}">${escapeHtml(demo.name)}</button>`,
+  ).join("");
+  elements.demoMenu.querySelectorAll("button[data-demo]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeDemo = button.dataset.demo;
+      renderDemos(state.payload);
+    });
+  });
+  const demo = demos.find((addon) => addon.id === state.activeDemo);
+  if (!demo) {
+    elements.demoContent.innerHTML = '<p class="empty-state">No demos are available in this checkout.</p>';
+    return;
+  }
+  const busy = payload.operation?.status === "running";
+  const routes = payload.inventory.routes;
+  const links = [];
+  const aap = routes.find((route) => route.namespace === "aap-operator" && route.name === "aap");
+  const ao = routes.find((route) => route.namespace === "automation-orchestrator" &&
+    route.name === "automation-orchestrator");
+  const satellite = routes.find((route) => route.name === "satellite" && route.external);
+  if (aap) {
+    links.push({name: "Open AAP templates and jobs", url: aap.url});
+  }
+  if (demo.id === "lightwell") {
+    if (ao) {
+      links.push({name: "Open AO workflows and approvals", url: ao.url});
+    }
+    for (const service of payload.lightwell_services || []) {
+      if (!links.some((link) => link.url === service.url)) {
+        links.push(service);
+      }
+    }
+  } else if (demo.id === "product-demo-satellite" && satellite) {
+    links.push({name: "Open Satellite hosts and content", url: satellite.url});
+    links.push({name: "Open hosted Red Hat Lightspeed", url: "https://console.redhat.com"});
+  }
+  const notice = demo.id === "lightwell"
+    ? "Patch simulation, not a real Lightwell backport service. Requires prepared Gitea/runner/repository, OpenFlake, " +
+      "and a dedicated application host. The Simulate Lightwell PR job opens a demo PR for manual review and merge. " +
+      "Launch deliberately in AAP; approve production promotion only in AO. Configuration does not prove runtime health."
+    : demo.id === "product-demo-satellite"
+    ? "Satellite content, host registration, cloud reporting, and remote remediation are separate. " +
+      "Opening a console or a configured demo does not prove current reporting or execute remediation. " +
+      "Three general 2-vCPU, 4096-MiB, 15-GiB image-provisioned VMs are opt-in; local libvirt instances appear in Virt-Manager."
+    : demo.id === "product-demo-infrastructure"
+    ? "This imports the Infrastructure setup template only. It does not launch the template or create cloud, broker, or managed-host resources."
+    : demo.id === "product-demo-eda"
+    ? "This scenario requires explicit PRODUCT_DEMOS_ENABLE_EDA=true and external event-source prerequisites. It does not create Kafka, cloud resources, credentials, event sources, or rulebook activations."
+    : "Select a domain and review inventory, credentials, and launch inputs in AAP. " +
+      "Cloud and other external demos may need separately approved resources.";
+  elements.demoContent.innerHTML = `
+    <div class="panel-heading">
+      <h3>${escapeHtml(demo.name)}</h3>
+      <span class="pill ${escapeHtml(demo.state)}">${escapeHtml(stateLabel(demo.state))}</span>
+    </div>
+    <p>${escapeHtml(demo.description)}</p>
+    <div class="demo-actions">
+      <button class="button ${demo.enabled ? "danger" : "primary"}" type="button"
+        data-demo-action="${demo.enabled ? "disable" : "enable"}"
+        ${busy || demo.supported === false ? "disabled" : ""}>
+        ${demo.enabled ? "Remove demo configuration" : demo.id === "product-demo-eda" ? "Enable guarded EDA demo" : "Configure demo"}
+      </button>
+      <button class="button secondary" type="button" data-demo-check
+        ${busy || !demo.enabled || demo.supported === false ? "disabled" : ""}>
+        Check integrations (read-only)
+      </button>
+      ${links.map((link) => `<a class="button secondary" href="${escapeHtml(link.url)}"
+        target="_blank" rel="noopener noreferrer">${escapeHtml(link.name)}</a>`).join("")}
+    </div>
+    <p class="demo-notice">${escapeHtml(notice)}</p>
+    <p class="muted">Open buttons navigate only. Run jobs and review approvals in the native application.</p>`;
+  elements.demoContent.querySelector("[data-demo-action]").addEventListener("click", (event) => {
+    toggleAddon(demo.id, event.currentTarget.dataset.demoAction);
+  });
+  elements.demoContent.querySelector("[data-demo-check]").addEventListener("click", () => {
+    checkDemo(demo.id);
+  });
+}
+
 function stateLabel(addonState) {
   return {
     running: "Running",
@@ -193,11 +300,13 @@ function renderAddons(addons) {
         ? `VM allowance: ${estimate.vm_gib ?? 0} GiB`
         : `Projected recommendation: ${addon.projected_vm_disk_gib ?? "?"} GiB` +
           (estimate.host_gib ? ` · Host-only: ${estimate.host_gib} GiB` : "");
+      const enableLabel = addon.id === "gitea" ? "Install / start VM" : "Enable";
+      const disableLabel = addon.id === "gitea" ? "Stop VM (retain data)" : "Disable";
       const button = addon.supported === false
         ? '<button class="button" type="button" disabled>Unavailable on Windows</button>'
         : addon.enabled
-        ? `<button class="button danger" type="button" data-action="disable" data-addon="${addon.id}" ${operationRunning ? "disabled" : ""}>Disable</button>`
-        : `<button class="button primary" type="button" data-action="enable" data-addon="${addon.id}" ${operationRunning ? "disabled" : ""}>Enable</button>`;
+        ? `<button class="button danger" type="button" data-action="disable" data-addon="${addon.id}" ${operationRunning ? "disabled" : ""}>${disableLabel}</button>`
+        : `<button class="button primary" type="button" data-action="enable" data-addon="${addon.id}" ${operationRunning ? "disabled" : ""}>${enableLabel}</button>`;
       return `
         <article class="addon-card">
           <div class="addon-heading">
@@ -207,7 +316,8 @@ function renderAddons(addons) {
           <p class="category">${escapeHtml(addon.category)}</p>
           <p class="description">${escapeHtml(addon.description)}</p>
           <p class="addon-meta">${escapeHtml(dependencies + availability)}</p>
-          <p class="addon-capacity">${escapeHtml(capacityText)}</p>
+          <p class="addon-capacity">${escapeHtml(addon.id === "gitea"
+            ? "Outside CRC: 2 CPUs, 2 GiB RAM, 40 GiB thin OS disk + host NFS" : capacityText)}</p>
           <div class="addon-footer">
             <span class="muted">${escapeHtml(addon.short_name || addon.id)}</span>
             ${button}
@@ -220,12 +330,15 @@ function renderAddons(addons) {
   });
 }
 
-function renderRoutes(routes, fleet = [], fleetV2 = []) {
-  if (!routes.length && !fleet.length && !fleetV2.length) {
+function renderRoutes(routes, fleet = [], fleetV2 = [], externalServices = []) {
+  const visibleRoutes = routes.filter(
+    (route) => !(route.namespace === "openshift-authentication" && route.name === "oauth-openshift"),
+  );
+  if (!visibleRoutes.length && !fleet.length && !fleetV2.length && !externalServices.length) {
     elements.routesList.innerHTML = '<p class="empty-state">No application routes found.</p>';
     return;
   }
-  elements.routesList.innerHTML = routes
+  elements.routesList.innerHTML = visibleRoutes
     .map(
       (route) => `
         <div class="route-row">
@@ -236,7 +349,14 @@ function renderRoutes(routes, fleet = [], fleetV2 = []) {
           <span class="pill ${route.admitted ? "running" : "degraded"}">${route.admitted ? "Admitted" : "Pending"}</span>
         </div>`,
     )
-    .join("") + fleet.map((node) => `
+    .join("") + externalServices.map((service) => `
+      <div class="route-row">
+        <div>
+          <a href="${escapeHtml(service.url)}" target="_blank" rel="noopener noreferrer">Open Gitea</a>
+          <span class="route-name">${escapeHtml(service.name)}</span>
+        </div>
+        <span class="pill">External VM</span>
+      </div>`).join("") + fleet.map((node) => `
       <div class="route-row">
         <div>
           <a href="/terminal?node=${encodeURIComponent(node.index)}" target="_blank" rel="noopener noreferrer">
@@ -330,7 +450,11 @@ function render(payload) {
   renderCapacity(payload.inventory);
   renderCategories(payload.addons);
   renderAddons(payload.addons);
-  renderRoutes(payload.inventory.routes, payload.inventory.fleet || [], payload.inventory.fleet_v2 || []);
+  renderDemos(payload);
+  renderRoutes(
+    payload.inventory.routes, payload.inventory.fleet || [], payload.inventory.fleet_v2 || [],
+    payload.gitea_services || [],
+  );
   renderNamespaces(payload.inventory.namespaces);
   renderOperation(payload.operation);
   elements.lastUpdated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
@@ -363,7 +487,19 @@ async function toggleAddon(addonId, action) {
   }
   if (action === "disable") {
     const confirmed = window.confirm(
-      `Disable ${addonId}? Workloads will be removed, but retained data and credentials will be preserved where supported.`,
+      addonId === "gitea"
+        ? "Stop the Gitea VM? Repositories, NFS storage and credentials will be retained. CRC is not changed."
+        : `Disable ${addonId}? Workloads will be removed, but retained data and credentials will be preserved where supported.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+  }
+  const edaDemoOptIn = addonId === "product-demo-eda" && action === "enable";
+  if (edaDemoOptIn) {
+    const confirmed = window.confirm(
+      "Enable the guarded EDA demo after you have prepared its external event source? " +
+      "This imports templates only; it will not create a broker, cloud resource, credential, event source, or rulebook activation.",
     );
     if (!confirmed) {
       return;
@@ -378,8 +514,30 @@ async function toggleAddon(addonId, action) {
     }
     await api(`/api/addons/${encodeURIComponent(addonId)}/${action}`, {
       method: "POST",
-      body: JSON.stringify({confirm: action === "disable"}),
+      body: JSON.stringify({
+        confirm: action === "disable",
+        confirm_eda_prerequisites: edaDemoOptIn,
+      }),
     });
+    await refresh();
+    startOperationPolling();
+  } catch (error) {
+    showAlert(error.message);
+  }
+}
+
+async function checkDemo(demoId) {
+  if (state.restarting) {
+    return;
+  }
+  clearAlert();
+  try {
+    state.dismissedOperationId = null;
+    if (state.dismissTimer) {
+      clearTimeout(state.dismissTimer);
+      state.dismissTimer = null;
+    }
+    await api(`/api/demos/${encodeURIComponent(demoId)}/check`, {method: "POST", body: "{}"});
     await refresh();
     startOperationPolling();
   } catch (error) {
@@ -447,6 +605,10 @@ async function restartDashboard() {
     elements.refreshButton.disabled = false;
   }
 }
+
+elements.viewMenu.querySelectorAll("button[data-view]").forEach((button) => {
+  button.addEventListener("click", () => selectView(button.dataset.view));
+});
 
 function startOperationPolling() {
   if (state.polling) {

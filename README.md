@@ -82,6 +82,7 @@ aap-demo enable              # List all addons
 aap-demo enable portal       # Installs Automation Portal
 aap-demo enable portal-operator # Installs Operator-based Portal (Technology Preview; AMD64 only)
 aap-demo enable setup-pah     # Configures Private Automation Hub Credentials
+aap-demo enable eda           # Enables AAP Event-Driven Ansible (no sources or activations)
 aap-demo enable mcp-server   # MCP server for AI assistants
 aap-demo enable ao           # Automation Orchestrator (GA; no aapctl required — see addons/ao/README.md)
 aap-demo enable lightspeed   # Ansible Lightspeed assistant, backed by the local Ollama LLM
@@ -91,6 +92,8 @@ aap-demo enable local-cache  # Caches AAP containers locally so you don't re-dow
 # Ansible Product Demos - Official demo content from ansible/product-demos
 aap-demo enable product-demos        # Five domains at once (includes base; Satellite opt-in)
 aap-demo enable product-demo-satellite  # Satellite demos (requires a Satellite server)
+aap-demo enable product-demo-infrastructure # Imports Infrastructure templates only (opt-in)
+PRODUCT_DEMOS_ENABLE_EDA=true aap-demo enable product-demo-eda # Guarded EDA scenario
 
 # Satellite lab
 aap-demo enable satellite-manifest   # Attach eligible subscriptions, create + download a manifest
@@ -105,9 +108,12 @@ aap-demo disable addon_name  # Disables addon
 ```bash
 # Deployment
 aap-demo deploy              # Deploy AAP 2.7
-aap-demo create --full-demo  # Create AAP + Ollama/AO + three RHEL 9 Fleet nodes + boot recovery + dashboard
-aap-demo create --full-demo --satellite
-                             # Also build/configure the Satellite lab and Satellite Demo
+aap-demo create --ansible    # AAP + Ollama/AO/MCP + three RHEL 9 Fleet nodes + boot recovery + dashboard
+aap-demo create --satellite  # Includes --ansible, then builds the Satellite lab and demo
+aap-demo create --lightspeed # Includes --ansible, then enables local-model Lightspeed
+aap-demo create --lightwell  # Includes Ansible, Satellite, Lightspeed, and local Gitea prerequisites
+aap-demo --gitea             # Start only the retained local Gitea VM outside CRC
+aap-demo gpu status          # Check whether an NVIDIA GPU is exposed to MicroShift
 
 # Cluster management
 aap-demo status              # Show cluster status and routes; secrets stay hidden
@@ -133,8 +139,8 @@ aap-demo help                # Full command reference
 
 `aap-demo create --full-demo` is a fail-fast demo bootstrap.
 It creates a cluster sized for the included addons, deploys AAP 2.7, configures
-Automation Hub, enables the offline-token keepalive, enables Ollama and
-Automation Orchestrator, then enables Fleet, attaches the AAP subscription, and
+Automation Hub (including both Pulp remote sync tasks), enables the offline-token keepalive, enables Ollama,
+Event-Driven Ansible, and Automation Orchestrator, then enables Fleet, attaches the AAP subscription, and
 reconciles three started and registered RHEL 9 nodes. Product Demos is installed
 after licensing succeeds. A final strict `aap-demo wire` runs after all
 components are present, then automatic boot recovery is installed and the
@@ -149,6 +155,17 @@ tokens remain separate in encrypted storage. Reruns reuse existing Fleet nodes
 instead of creating duplicates. Use `--no-open` to run the dashboard without
 opening a browser.
 
+After a successful AAP deployment or cluster-backed add-on install, aap-demo
+automatically starts (or reuses) the local dashboard and opens it when a desktop
+browser is available. Use `AAP_DEMO_DASHBOARD_AUTOSTART=false` to opt out, or
+run `aap-demo dashboard` later. Full-demo also installs a graphical-login
+autostart entry on Linux when recovery is enabled.
+
+The Satellite profile can also request three separate, minimal general VMs via
+Satellite image provisioning. They are not Fleet nodes. Provide a Satellite
+compute image explicitly; on the local KVM resource the domains appear in
+Virt-Manager. See [Satellite general VMs](satellite-lab/README.md#general-satellite-provisioned-vms).
+
 ### Dashboard
 
 `aap-demo dashboard` starts the localhost dashboard **in the background** and
@@ -161,6 +178,10 @@ and the AAP subscription selected during automatic licensing. The small
 **Restart dashboard** button reloads the dashboard server and reconnects the
 page without restarting CRC, AAP or Fleet. Restart is blocked during an active
 dashboard add-on operation.
+
+The Guarded EDA Demo asks for an explicit confirmation before it imports its
+templates. That confirmation applies only to the current dashboard operation;
+it does not create or configure external event sources.
 
 The default address is `http://127.0.0.1:8765`; set `AAP_DEMO_DASHBOARD_PORT`
 to choose another port. Logs go to `~/.aap-demo/dashboard.log` (or
@@ -203,8 +224,8 @@ and asks for a y/n confirmation. For hands-free runs, pass `--sno` or
 the unmet requirements when the host is too small):
 
 ```bash
-aap-demo create --full-demo --satellite --sno        # hands-free SNO
-aap-demo create --full-demo --satellite --microshift # hands-free MicroShift
+aap-demo create --satellite --sno        # hands-free SNO
+aap-demo create --satellite --microshift # hands-free MicroShift
 ```
 
 ### Automatic boot recovery

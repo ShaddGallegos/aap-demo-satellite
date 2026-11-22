@@ -17,6 +17,34 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
+.view-menu {
+  margin-top: 24px;
+}
+
+.demo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+a.button {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.demo-notice {
+  margin-top: 20px;
+  padding: 14px;
+  border-left: 3px solid var(--yellow);
+  color: var(--muted);
+}
+
 body {
   min-width: 320px;
   margin: 0;

@@ -71,23 +71,31 @@ _ensure_crc_ssh_ready() {
 maybe_relax_redhat_registry_signature_policy() {
   # MicroShift 4.22+ requires GPG signatures for registry.redhat.io; the operator
   # index image fails verification. Never edit MCO-owned node policy on OpenShift.
-  local _force_crio_reload="${1:-0}" ingress
+  local _force_crio_reload="${1:-0}" resources
   if ! needs_signature_policy_relaxation; then
     return 0
   fi
-  ingress=$(kubectl get ingresses.config/cluster --ignore-not-found \
-    --request-timeout=5s -o name) || {
+  resources=$(kubectl api-resources -o name --request-timeout=5s) || {
     echo "ERROR: Cannot detect the cluster preset; refusing to change node signature policy." >&2
     return 1
   }
-  if [ -n "$ingress" ]; then
+  if grep -Fxq 'ingresses.config.openshift.io' <<<"$resources"; then
     echo "  OpenShift container signature policy is MCO-managed; leaving it unchanged."
     return 0
+  fi
+  if ! grep -Fxq 'nodes' <<<"$resources" || ! grep -Fxq 'routes.route.openshift.io' <<<"$resources"; then
+    echo "ERROR: Incomplete cluster API discovery; refusing to change node signature policy." >&2
+    return 1
   fi
   if ! _ensure_crc_ssh_ready; then
     echo "  WARNING: MicroShift 4.22+ blocks unsigned registry.redhat.io images." >&2
     echo "  Ensure CRC is running (crc start) and SSH key exists under ~/.crc/machines/crc/." >&2
     echo "  Test: aap-demo ssh" >&2
+    return 1
+  fi
+  if ! ssh -p "$CRC_SSH_PORT" "${CRC_SSH_OPTS[@]}" core@127.0.0.1 \
+    'systemctl is-active --quiet microshift'; then
+    echo "ERROR: CRC guest is not confirmed as running MicroShift; refusing to change node signature policy." >&2
     return 1
   fi
   local _relax_output

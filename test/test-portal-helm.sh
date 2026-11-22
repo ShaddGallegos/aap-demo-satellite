@@ -128,5 +128,65 @@ else
 fi
 unset -f kubectl
 
+PORTAL_DIR="${TEST_DIR}/portal"
+mkdir -p "$PORTAL_DIR"
+CLUSTER_BASE_URL="apps.example.test"
+IS_ARM_CLUSTER=false
+PORTAL_LIGHTSPEED=false
+create_helm_values >/dev/null
+if ! grep -q 'aap-demo-portal-lightspeed' "$PORTAL_DIR/values.yaml"; then
+  pass "keeps_portal_ai_opt_in"
+else
+  fail "keeps_portal_ai_opt_in"
+fi
+
+PORTAL_LIGHTSPEED=true
+kubectl() {
+  case "$*" in
+    "get svc ollama "*) return 0 ;;
+    "apply -f -") cat >"${TEST_DIR}/lightspeed-secret.json" ;;
+    *) echo "Unexpected kubectl: $*" >&2; return 91 ;;
+  esac
+}
+if validate_portal_lightspeed && configure_portal_lightspeed; then
+  create_helm_values >/dev/null
+  if jq -e '.stringData.ENABLE_OLLAMA == "true" and
+    .stringData.OLLAMA_URL == "http://ollama.aap-demo-ollama.svc.cluster.local:11434/v1"
+    ' "${TEST_DIR}/lightspeed-secret.json" >/dev/null \
+    && grep -q '^  lightspeed:$' "$PORTAL_DIR/values.yaml" \
+    && grep -q '^      name: aap-demo-portal-lightspeed$' "$PORTAL_DIR/values.yaml"; then
+    pass "configures_native_portal_lightspeed_with_local_ollama"
+  else
+    fail "configures_native_portal_lightspeed_with_local_ollama"
+  fi
+else
+  fail "configures_native_portal_lightspeed_with_local_ollama"
+fi
+IS_ARM_CLUSTER=true
+if validate_portal_lightspeed >/dev/null 2>&1; then
+  fail "rejects_unvalidated_arm_ai_profile"
+else
+  pass "rejects_unvalidated_arm_ai_profile"
+fi
+IS_ARM_CLUSTER=false
+kubectl() { return 1; }
+if validate_portal_lightspeed >/dev/null 2>&1; then
+  fail "requires_local_ollama_for_portal_ai"
+else
+  pass "requires_local_ollama_for_portal_ai"
+fi
+if configure_portal_lightspeed >/dev/null 2>&1; then
+  fail "propagates_portal_ai_secret_apply_failure"
+else
+  pass "propagates_portal_ai_secret_apply_failure"
+fi
+PORTAL_LIGHTSPEED=invalid
+if validate_portal_lightspeed >/dev/null 2>&1; then
+  fail "rejects_invalid_portal_ai_selection"
+else
+  pass "rejects_invalid_portal_ai_selection"
+fi
+unset -f kubectl
+
 echo "Passed: ${PASSED}  Failed: ${FAILED}"
 [ "${FAILED}" -eq 0 ]

@@ -37,11 +37,48 @@ satellite_reboot_required() {
   esac
 }
 
+satellite_repair_offline_upgrade_repositories() {
+  local version="$1" os_major arch maintenance_repo enabled repo
+  # Native RHSM's offline multi-enable path can retain only the last repository.
+  test ! -s /etc/pki/consumer/cert.pem || return 1
+  os_major=$(. /etc/os-release; printf '%s' "${VERSION_ID%%.*}")
+  arch=$(rpm --eval '%{_arch}') || return 1
+  maintenance_repo="satellite-maintenance-${version}-for-rhel-${os_major}-${arch}-rpms"
+  enabled=$(LC_ALL=C subscription-manager repos --list-enabled) || return 1
+  enabled=$(awk '$1 == "Repo" && $2 == "ID:" {print $3}' <<<"$enabled")
+  [ "$enabled" = "$maintenance_repo" ] || return 1
+  echo "WARNING: Native offline repository setup left only $maintenance_repo enabled; repairing repository selection before one native upgrade retry." >&2
+  local required=(
+    "rhel-${os_major}-for-${arch}-baseos-rpms"
+    "rhel-${os_major}-for-${arch}-appstream-rpms"
+    "satellite-${version}-for-rhel-${os_major}-${arch}-rpms"
+    "$maintenance_repo"
+  )
+  for repo in "${required[@]}"; do
+    subscription-manager repos --enable="$repo" || return 1
+  done
+  enabled=$(LC_ALL=C subscription-manager repos --list-enabled) || return 1
+  enabled=$(awk '$1 == "Repo" && $2 == "ID:" {print $3}' <<<"$enabled")
+  for repo in "${required[@]}"; do
+    grep -Fxq "$repo" <<<"$enabled" || {
+      echo "ERROR: Required upgrade repository $repo is still disabled; refusing to retry." >&2
+      return 1
+    }
+  done
+}
+
 satellite_apply_maintenance() {
-  local operation="$1" expected="$2" actual
+  local operation="$1" expected="$2" actual rc
   if [ "$operation" = upgrade ]; then
     satellite-maintain upgrade check --assumeyes --disable-self-upgrade || return 1
-    satellite-maintain upgrade run --assumeyes --disable-self-upgrade || return 1
+    if satellite-maintain upgrade run --assumeyes --disable-self-upgrade; then
+      :
+    else
+      rc=$?
+      satellite_repair_offline_upgrade_repositories "$expected" || return "$rc"
+      satellite-maintain upgrade check --assumeyes --disable-self-upgrade || return 1
+      satellite-maintain upgrade run --assumeyes --disable-self-upgrade || return 1
+    fi
   else
     satellite-maintain update check --assumeyes --disable-self-update || return 1
     satellite-maintain update run --assumeyes --disable-self-update || return 1

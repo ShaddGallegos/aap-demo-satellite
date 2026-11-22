@@ -24,6 +24,22 @@ configuring remotes. The two tokens remain separate in encrypted storage. Red
 Hat requires the Automation Hub token to be generated interactively; the
 Customer Portal API does not provide an endpoint that can generate it.
 
+The first Certified Content sync can take several minutes. The installer emits
+the active Pulp task and elapsed time every 30 seconds, and waits for up to 30
+minutes by default. Set `PAH_SYNC_TIMEOUT_SECONDS` (at least `60`) before the
+command to extend that limit when necessary. `PAH_SYNC_POLL_SECONDS` controls
+the status interval from `1` to `30` seconds; neither setting is a secret or is
+stored in the Vault.
+
+Certified Content is required for the demo. The installer also tries to sync
+Validated Content, but some otherwise-valid subscriptions do not grant access
+to that catalog. A `401` or `403` for either catalog prompts once for a hidden
+replacement token; it is validated and written to the Vault only when valid,
+then the remote setup retries. If Validated Content still returns `401` or
+`403`, it is shown as a warning and the installation continues with Certified
+Content. An authorization failure for Certified Content after that retry remains
+fatal.
+
 ### Steps
 
 1. Log in to [Red Hat Hybrid Cloud Console](https://console.redhat.com)
@@ -72,6 +88,12 @@ The schedule is **`0 0 */4 * *`** (midnight on days 1, 5, 9, etc., in cron's
 configured timezone). This matches the requested four-day cron expression,
 but is not an exact 96-hour interval across month boundaries. Cron does not
 catch up on missed runs when the host is off.
+
+During `aap-demo create --ansible` and `aap-demo enable setup-pah`, the same
+Vault token updates the integrated Automation Hub `rh-certified` and
+`rh-validated` remotes. Setup waits for both Pulp sync tasks. A failed task,
+including a Red Hat SSO `400` caused by an expired or wrong token, stops setup
+with the Pulp error instead of being reported later in the Hub UI.
 
 The cron command invokes
 [`scripts/aap-demo-token-keepalive.sh`](../scripts/aap-demo-token-keepalive.sh)

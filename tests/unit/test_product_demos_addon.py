@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import stat
 from pathlib import Path
 
@@ -68,8 +69,15 @@ def test_pyproject_ships_every_product_demo_installer() -> None:
         assert (REPO_ROOT / "addons" / name / "deploy.sh").is_file()
 
 
-def test_enable_with_no_name_lists_fleet_and_product_demos() -> None:
-    assert names() == ["fleet", "product-demo-satellite", "product-demos"]
+def test_enable_with_no_name_lists_fleet_and_public_product_demo_addons() -> None:
+    assert names() == [
+        "eda",
+        "fleet",
+        "product-demo-eda",
+        "product-demo-infrastructure",
+        "product-demo-satellite",
+        "product-demos",
+    ]
 
 
 def test_product_demos_preflight_uses_the_cluster_and_portal_does_not() -> None:
@@ -405,7 +413,11 @@ def test_installer_marks_only_the_partial_branch() -> None:
 def test_installers_keep_the_collection_async_waits() -> None:
     """Zero async retries let workflow nodes be created before their workflow (Windows)."""
     for path in sorted(scripts_root().glob("product-demo*/**/*.sh")):
-        assert "async_retries" not in path.read_text(encoding="utf-8"), path
+        overrides = re.findall(
+            r"\b\w*async_retries\s*:\s*(-?\d+)\b",
+            path.read_text(encoding="utf-8"),
+        )
+        assert all(int(value) > 0 for value in overrides), path
 
 
 def test_an_unexpected_credential_store_error_is_not_hidden(app_ctx, monkeypatch) -> None:

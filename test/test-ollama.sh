@@ -151,6 +151,16 @@ else
   fail "deployment_allows_slow_image_pull_and_fails_incomplete_setup"
 fi
 
+# A full-demo run keeps a terminal for progress output, but must not block at
+# an addon-specific PVC-size prompt. Explicit OLLAMA_STORAGE_SIZE remains the
+# interactive override mechanism.
+# shellcheck disable=SC2016 # literal source assertion, not an expansion
+if grep -Fq '[ "${QUIET:-false}" != true ]' "$OLLAMA_DEPLOY"; then
+  pass "full_demo_quiet_mode_skips_pvc_size_prompt"
+else
+  fail "full_demo_quiet_mode_skips_pvc_size_prompt"
+fi
+
 if grep -q 'Ollama pod was found, but model' "$OLLAMA_DEPLOY" \
   && grep -q 'No Ollama pod matched label app=ollama' "$OLLAMA_DEPLOY"; then
   pass "deployment_distinguishes_missing_pod_from_model_pull_failure"

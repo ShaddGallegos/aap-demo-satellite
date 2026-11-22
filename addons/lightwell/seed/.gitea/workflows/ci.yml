@@ -1,0 +1,33 @@
+name: Local Lightwell simulation
+on:
+  push:
+    branches: [main]
+jobs:
+  validate:
+    runs-on: aap-demo-lightwell
+    steps:
+      - name: Fetch this exact private repository revision
+        env:
+          CHECKOUT_TOKEN: ${{ secrets.GITEA_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import base64, os, subprocess
+          origin = os.environ["GITEA_SERVER_URL"]
+          token = base64.b64encode(("x-access-token:" + os.environ["CHECKOUT_TOKEN"]).encode()).decode()
+          environment = dict(os.environ, GIT_CONFIG_COUNT="1",
+                             GIT_CONFIG_KEY_0=f"http.{origin}/.extraheader",
+                             GIT_CONFIG_VALUE_0="Authorization: Basic " + token)
+          for args in (["init", "."],
+                       ["fetch", origin + "/" + os.environ["GITEA_REPOSITORY"] + ".git",
+                        os.environ["GITEA_SHA"]],
+                       ["checkout", "--detach", "FETCH_HEAD"]):
+              subprocess.run(["git", *args], env=environment, check=True)
+          PY
+      - name: Check simulation inputs without installing vulnerable packages
+        run: python3 -m unittest -v test_simulation
+      - name: Notify the authenticated approval-gated AO workflow
+        env:
+          AO_ORIGIN: ${{ secrets.AO_ORIGIN }}
+          AO_CLIENT_ID: ${{ secrets.AO_CLIENT_ID }}
+          AO_CLIENT_SECRET: ${{ secrets.AO_CLIENT_SECRET }}
+        run: python3 notify.py

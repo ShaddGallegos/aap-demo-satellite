@@ -24,7 +24,7 @@ tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
 # scan without --baseline prints JSON and leaves the baseline file alone.
-detect-secrets scan --exclude-files '\.secrets\.baseline' >"$tmp"
+detect-secrets scan --no-verify --exclude-files '\.secrets\.baseline' >"$tmp"
 
 python3 scripts/compare_secrets.py "$tmp" .secrets.baseline
 

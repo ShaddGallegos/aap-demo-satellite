@@ -106,8 +106,8 @@ done
 for detail in \
   rh-status deploy-all \
   --kubeconfig --context --backend --reset --skip-cache --ai kube-native \
-  --no-import local-cache portal-operator ao-pr-testing apme-eap \
-  product-demo-satellite AAP_DEMO_ALLOW_REMOTE_KUBECONFIG \
+  --no-import local-cache portal-operator ao-pr-testing apme-eap eda \
+  product-demo-satellite product-demo-infrastructure product-demo-eda AAP_DEMO_ALLOW_REMOTE_KUBECONFIG \
   AAP_PERSISTENT_IMAGE_STORE AAP_IMAGE_STORE_DISK must-gather.local \
   'pull-secret.txt'; do
   if ! printf '%s\n' "$help_output" | grep -q -- "$detail"; then
@@ -147,7 +147,9 @@ example_commands=$(printf '%s\n' "$examples" | awk '
 examples_ok=true
 for example in \
   'aap-demo create' \
-  'aap-demo create --full-demo --satellite --sno' \
+  'aap-demo create --satellite --sno' \
+  'aap-demo create --lightwell --microshift' \
+  'aap-demo --gitea' \
   'aap-demo deploy' \
   'aap-demo status' \
   'aap-demo enable portal' \
@@ -159,6 +161,7 @@ for example in \
   'aap-demo fleet auth' \
   'aap-demo fleet register' \
   'aap-demo fleet ssh 1' \
+  'aap-demo gpu status' \
   'aap-demo wire'; do
   if ! grep -Fxq "$example" <<<"$example_commands"; then
     echo "  missing example: $example"
@@ -171,6 +174,10 @@ if ! awk '
   END {if(!warned) exit 1}
 ' <<<"$examples"; then
   echo "  destructive examples must follow a data-loss warning"
+  examples_ok=false
+fi
+if ! grep -Fqx '    PRODUCT_DEMOS_ENABLE_EDA=true aap-demo enable product-demo-eda' <<<"$examples"; then
+  echo "  missing guarded EDA example"
   examples_ok=false
 fi
 if [ "$examples_ok" = true ]; then

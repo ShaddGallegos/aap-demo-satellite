@@ -72,10 +72,25 @@
       "host_gib": 0,
       "description": "Demo projects, execution content, and related container image growth."
     },
+    "eda": {
+      "vm_gib": 4,
+      "host_gib": 0,
+      "description": "Event-Driven Ansible service, worker images, and activation capacity; event sources are external."
+    },
     "product-demo-satellite": {
       "vm_gib": 1,
       "host_gib": 0,
       "description": "Configuration and project content; the Satellite server itself is external."
+    },
+    "product-demo-infrastructure": {
+      "vm_gib": 1,
+      "host_gib": 0,
+      "description": "Imported Infrastructure demo project and templates; no external infrastructure is provisioned automatically."
+    },
+    "product-demo-eda": {
+      "vm_gib": 1,
+      "host_gib": 0,
+      "description": "Guarded EDA demo template and project content; Kafka, cloud, and other event sources remain external."
     },
     "opa": {
       "vm_gib": 2,

@@ -430,7 +430,10 @@ def test_bash_fleet_prefers_an_installed_python_aap_demo(
     # The stand-in body is shell: a python3 shim on PATH runs it with sh, so
     # only the first line decides whether bash treats it as the Python CLI.
     shim = bindir / "python3"
-    shim.write_text('#!/bin/sh\nexec /bin/sh "$@"\n', encoding="utf-8")
+    shim.write_text(
+        '#!/bin/sh\n[ "$1" = "-c" ] && exit 1\nexec /bin/sh "$@"\n',
+        encoding="utf-8",
+    )
     shim.chmod(0o755)
     root = _bare_checkout(tmp_path)
     result = subprocess.run(

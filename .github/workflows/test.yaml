@@ -96,6 +96,9 @@ jobs:
       - name: Run all non-live unit tests
         run: ./test/run-unit-tests.sh
 
+      - name: Test dashboard routes
+        run: node test/test-dashboard-routes.js
+
       - name: Run plaibook EE CI configuration test
         run: bash ./test/test-plaibook-ee-ci.sh
 

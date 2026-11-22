@@ -13,7 +13,8 @@
 #
 # Environment variables:
 #   PRODUCT_DEMOS_REPO   - Git repository URL (default: https://github.com/ansible/product-demos)
-#   PRODUCT_DEMOS_BRANCH - Git branch to use (default: main)
+#   PRODUCT_DEMOS_REF    - Immutable Git revision to use (default: tested APD commit)
+#   PRODUCT_DEMOS_BRANCH - Legacy alias for PRODUCT_DEMOS_REF
 #
 # Usage:
 #   ./deploy.sh          # Deploy Windows demos
@@ -30,7 +31,8 @@ DEMO_CATEGORY="windows"
 
 # Product demos configuration
 PRODUCT_DEMOS_REPO="${PRODUCT_DEMOS_REPO:-https://github.com/ansible/product-demos}"
-PRODUCT_DEMOS_BRANCH="${PRODUCT_DEMOS_BRANCH:-main}"
+PRODUCT_DEMOS_REF="${PRODUCT_DEMOS_REF:-${PRODUCT_DEMOS_BRANCH:-90dea07d34d9bf5bf59acd7b6927ab576c0cddf4}}"
+PRODUCT_DEMOS_BRANCH="$PRODUCT_DEMOS_REF"
 
 # ==============================================================================
 # DELETE HANDLER

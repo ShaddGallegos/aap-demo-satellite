@@ -2,6 +2,24 @@
  "schema_version": 1,
  "addons": [
   {
+   "id": "gitea",
+   "name": "Local Gitea VM",
+   "category": "Infrastructure",
+   "description": "Install/start an independent Fedora 45 Git server outside CRC. Repositories and files use NFS on this host. Disable stops the VM and retains data; no CI runner is installed.",
+   "dependencies": [],
+   "availability": "Linux x86_64, KVM/system libvirt and an active host NFS server required; 2 CPUs, 2 GiB RAM",
+   "health": {"type": "configured"}
+  },
+  {
+   "id": "lightwell",
+   "name": "Lightwell CI/CD Demo",
+   "category": "Demo content",
+   "description": "Configure pinned upstream CI/CD templates and an approval-gated AO workflow. Lightwell is a patch simulation, not a backport service; AO automatically enables the EDA service but creates no event source or rulebook activation. Requires prepared Gitea, OpenFlake and one dedicated RHEL host.",
+   "dependencies": [{"id": "ao"}, {"id": "eda"}, {"id": "fleet"}],
+   "availability": "Prepared external services and AAP credentials required; enabling launches no deployment jobs",
+   "health": {"type": "configured"}
+  },
+  {
    "id": "mcp-server",
    "name": "AAP MCP Server",
    "category": "AI and orchestration",
@@ -21,6 +39,9 @@
    "dependencies": [
     {
      "id": "mcp-server"
+    },
+    {
+     "id": "eda"
     },
     {
      "id": "ollama",
@@ -126,12 +147,46 @@
    }
   },
   {
+   "id": "eda",
+   "name": "Event-Driven Ansible",
+   "category": "AAP configuration",
+   "description": "Enable AAP Event-Driven Ansible. This does not create an event source, external broker, or rulebook activation.",
+   "dependencies": [],
+   "health": {
+    "type": "configured"
+   }
+  },
+  {
    "id": "product-demo-satellite",
    "name": "Satellite Demo",
    "category": "Demo content",
-   "description": "Install Satellite demo content using an external Satellite server.",
+   "description": "Install Satellite demo content using the local lab or an external Satellite server. The local lab can optionally image-provision three small general VMs through its selected Satellite compute resource.",
    "dependencies": [],
-   "availability": "Requires external Satellite",
+   "availability": "Requires a managed local Satellite lab or an external Satellite server",
+   "health": {
+    "type": "configured"
+   }
+  },
+  {
+   "id": "product-demo-infrastructure",
+   "name": "Infrastructure Demo",
+   "category": "Demo content",
+   "description": "Import the upstream Infrastructure setup template only. It is separately opted in and is never launched automatically.",
+   "dependencies": [],
+   "availability": "Cloud, broker, and managed-host prerequisites are supplied by the operator before launching the template.",
+   "health": {
+    "type": "configured"
+   }
+  },
+  {
+   "id": "product-demo-eda",
+   "name": "Guarded EDA Demo",
+   "category": "Demo content",
+   "description": "Import the Event-Driven Ansible scenario only with PRODUCT_DEMOS_ENABLE_EDA=true; no external broker, cloud resource, or rulebook activation is created.",
+   "dependencies": [
+    {"id": "eda"}
+   ],
+   "availability": "Explicit opt-in plus configured external event-source prerequisites required.",
    "health": {
     "type": "configured"
    }
@@ -140,7 +195,7 @@
    "id": "setup-pah",
    "name": "Private Automation Hub Setup",
    "category": "AAP configuration",
-   "description": "Configure Private Automation Hub credentials and remotes.",
+   "description": "Validate the Vault-backed Automation Hub offline token, configure both Red Hat remotes, and wait for their Pulp sync tasks to complete.",
    "dependencies": [],
    "health": {
     "type": "configured"

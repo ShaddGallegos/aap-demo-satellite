@@ -4,6 +4,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_DIR=$(mktemp -d)
 trap 'rm -rf "$TEST_DIR"' EXIT
+# The builder records a private workflow journal. Keep this non-live test
+# entirely inside its fixture rather than falling back to the caller's
+# ~/.aap-demo state (which may be absent or intentionally read-only).
+export AAP_DEMO_DIR="$TEST_DIR/aap-demo"
 # shellcheck source=../addons/satellite-manifest/deploy.sh
 source "$REPO_ROOT/addons/satellite-manifest/deploy.sh"
 LOG="$TEST_DIR/calls"
@@ -126,12 +130,31 @@ cat >"$POOLS" <<'EOF'
 EOF
 if main >"$TEST_DIR/output" 2>&1; then fail "ambiguous pools accepted"; fi
 grep -Fq 'Expected one eligible RHEL server pool; found 2' "$TEST_DIR/output"
+grep -Fq 'Allocation pool products: Red Hat Satellite Infrastructure Subscription [available 1]' "$TEST_DIR/output"
 if grep -qE '^POST |^export$' "$LOG"; then fail "ambiguous plan mutated allocation or exported"; fi
 
 reset_case
 printf '%s' '[{"id":"sat","subscriptionName":"Red Hat Satellite Infrastructure Subscription","entitlementsAvailable":0}]' >"$POOLS"
 if main >"$TEST_DIR/output" 2>&1; then fail "exhausted pools accepted"; fi
 if grep -qE '^POST |^export$' "$LOG"; then fail "exhausted plan mutated allocation or exported"; fi
+
+reset_case
+printf '%s' '[{"id":"sat","subscriptionName":"Red Hat Satellite Infrastructure Subscription","entitlementsAvailable":-1}]' >"$POOLS"
+if main >"$TEST_DIR/output" 2>&1; then fail "missing RHEL pool accepted"; fi
+grep -Fq 'Allocation pool products: Red Hat Satellite Infrastructure Subscription [available unlimited]' "$TEST_DIR/output"
+if grep -qE '^POST |^export$' "$LOG"; then fail "missing RHEL plan mutated allocation or exported"; fi
+
+reset_case
+cat >"$POOLS" <<'EOF'
+[
+  {"id":"sat","subscriptionName":"Red Hat Satellite Infrastructure Subscription","entitlementsAvailable":1},
+  {"id":"developer","subscriptionName":"Red Hat Developer Subscription for Individuals","entitlementsAvailable":16}
+]
+EOF
+main >"$TEST_DIR/output"
+grep -Fxq 'POST /allocations/lab/entitlements?pool=sat&quantity=1' "$LOG"
+grep -Fxq 'POST /allocations/lab/entitlements?pool=developer&quantity=1' "$LOG"
+grep -Fq 'Verified Satellite and RHEL subscriptions' "$TEST_DIR/output"
 
 reset_case
 DENIED=true

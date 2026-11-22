@@ -1,0 +1,2 @@
+# Simulation metadata only; this deliberately fictional build is never installed.
+aiohttp==3.9.2.rhlw-00001

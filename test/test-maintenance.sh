@@ -21,6 +21,18 @@ if output=$(QUIET=true "$AAP_DEMO_SH" status --reconfigure 2>&1); then
 fi
 grep -Fq -- "--reconfigure is supported only by maintenance uninstall" <<<"$output"
 
+if output=$(QUIET=true "$AAP_DEMO_SH" status --zero 2>&1); then
+  echo "FAIL: --zero was accepted outside maintenance uninstall"
+  exit 1
+fi
+grep -Fq -- "--zero is supported only by maintenance uninstall" <<<"$output"
+
+if output=$(QUIET=true "$AAP_DEMO_SH" maintenance uninstall --zero 2>&1); then
+  echo "FAIL: --zero was accepted without --apply"
+  exit 1
+fi
+grep -Fq -- "--zero requires maintenance uninstall --apply" <<<"$output"
+
 if output=$(
   QUIET=true bash -c '
     set -euo pipefail
@@ -46,6 +58,7 @@ preview_default=$(
 grep -Fq "aap_demo credentials, so rebuilds do not re-prompt" <<<"$preview_default"
 grep -Fq "Managed Satellite lab VM" <<<"$preview_default"
 grep -Fq "host-side Satellite NFS content/backups" <<<"$preview_default"
+grep -Fq "Off-VM recovery checkpoints" <<<"$preview_default"
 if grep -Fq "entries are stripped" <<<"$preview_default"; then
   echo "FAIL: default uninstall preview advertises Vault stripping"
   exit 1
@@ -60,6 +73,104 @@ preview_reconfigure=$(
   ' _ "${SCRIPT_DIR}/.."
 )
 grep -Fq "only the aap_demo entries are stripped" <<<"$preview_reconfigure"
+grep -Fq "Independent Gitea VM" <<<"$preview_default"
+
+preview_zero=$(
+  HOME=/nonexistent QUIET=true bash -c '
+    set -euo pipefail
+    SCRIPT_DIR=$1
+    source "$SCRIPT_DIR/includes/maintenance.sh"
+    _maintenance_uninstall_preview false true
+  ' _ "${SCRIPT_DIR}/.."
+)
+grep -Fq "complete encrypted credential Vault" <<<"$preview_zero"
+grep -Fq "including credentials unrelated to aap-demo" <<<"$preview_zero"
+if grep -Fq "Unrelated keys" <<<"$preview_zero"; then
+  echo "FAIL: zero preview incorrectly preserves unrelated Vault keys"
+  exit 1
+fi
+
+if output=$(
+  QUIET=true bash -c '
+    set -euo pipefail
+    SCRIPT_DIR=$1
+    source "$SCRIPT_DIR/includes/maintenance.sh"
+    virsh() { printf "aap-demo-gitea\n"; }
+    _maintenance_remove_state_service() { echo UNEXPECTED_MUTATION; }
+    _maintenance_uninstall_apply() { echo UNEXPECTED_MUTATION; }
+    _maintenance_uninstall true true
+  ' _ "${SCRIPT_DIR}/.." 2>&1
+); then
+  echo "FAIL: reconfigure allowed stripping credentials for retained Gitea"
+  exit 1
+fi
+grep -Fq 'would remove credentials for the retained Gitea VM' <<<"$output"
+if grep -Fq UNEXPECTED_MUTATION <<<"$output"; then
+  echo "FAIL: reconfigure mutated state before protecting Gitea credentials"
+  exit 1
+fi
+
+if output=$(
+  QUIET=true AAP_DEMO_UNINSTALL_CONFIRM=UNINSTALL bash -c '
+    set -euo pipefail
+    SCRIPT_DIR=$1
+    source "$SCRIPT_DIR/includes/maintenance.sh"
+    _maintenance_uninstall_preview() { :; }
+    _maintenance_remove_state_service() { echo UNEXPECTED_MUTATION; }
+    _maintenance_uninstall_apply() { echo UNEXPECTED_MUTATION; }
+    _maintenance_uninstall true false true
+  ' _ "${SCRIPT_DIR}/.." 2>&1
+); then
+  echo "FAIL: --zero accepted without its separate confirmation"
+  exit 1
+fi
+grep -Fq 'AAP_DEMO_ZERO_CONFIRM=ZERO' <<<"$output"
+if grep -Fq UNEXPECTED_MUTATION <<<"$output"; then
+  echo "FAIL: --zero mutated state before its separate confirmation"
+  exit 1
+fi
+
+output=$(QUIET=true AAP_DEMO_UNINSTALL_CONFIRM=UNINSTALL AAP_DEMO_ZERO_CONFIRM=ZERO bash -c '
+  set -euo pipefail
+  SCRIPT_DIR=$1
+  source "$SCRIPT_DIR/includes/maintenance.sh"
+  _maintenance_uninstall_preview() { :; }
+  _maintenance_remove_state_service() { :; }
+  _maintenance_uninstall_apply() { printf "zero-apply reconfigure=%s zero=%s\\n" "$1" "$2"; }
+  _maintenance_uninstall true false true
+' _ "${SCRIPT_DIR}/..")
+grep -Fqx 'zero-apply reconfigure=false zero=true' <<<"$output"
+
+zero_vault_home=$(mktemp -d)
+trap 'rm -rf "$zero_vault_home"' EXIT
+mkdir -p "$zero_vault_home/.ansible/conf"
+for path in env.yml .vaultpass.txt env-aap-demo.yml .vaultpass-aap-demo.txt env_microshift.yml .vaultpass_microshift.txt; do
+  printf 'test\n' >"$zero_vault_home/.ansible/conf/$path"
+done
+HOME="$zero_vault_home" QUIET=true bash -c '
+  set -euo pipefail
+  SCRIPT_DIR=$1
+  source "$SCRIPT_DIR/includes/maintenance.sh"
+  _maintenance_remove_zero_vault
+' _ "${SCRIPT_DIR}/.." >/dev/null
+if find "$zero_vault_home/.ansible" -type f -print -quit | grep -q .; then
+  echo "FAIL: --zero did not remove all supported Vault lineage files"
+  exit 1
+fi
+
+mkdir -p "$zero_vault_home/custom"
+printf 'test\n' >"$zero_vault_home/custom/env.yml"
+if HOME="$zero_vault_home" AAP_DEMO_VAULT_FILE="$zero_vault_home/custom/env.yml" \
+  QUIET=true bash -c '
+    set -euo pipefail
+    SCRIPT_DIR=$1
+    source "$SCRIPT_DIR/includes/maintenance.sh"
+    _maintenance_remove_zero_vault
+  ' _ "${SCRIPT_DIR}/.." >/dev/null 2>&1; then
+  echo "FAIL: --zero accepted an arbitrary Vault path override"
+  exit 1
+fi
+[ -f "$zero_vault_home/custom/env.yml" ]
 
 grep -Fq 'crictl ps -a --state Exited -q' "$MAINTENANCE_SH"
 grep -Fq 'crictl rmi --prune' "$MAINTENANCE_SH"
@@ -112,21 +223,31 @@ trap 'rm -rf "$mock_dir"' EXIT
         [ "$failure" != undefine ] || return 1
         vm_state=absent
         ;;
-      *) echo "Unexpected virsh command: $*" >&2; return 1 ;;
+      *)
+        echo "Unexpected virsh command: $*" >&2
+        return 1
+        ;;
     esac
   }
   sudo() {
     case "$1" in
-      virsh) shift; virsh "$@" ;;
+      virsh)
+        shift
+        virsh "$@"
+        ;;
       rm)
         [[ "$*" == 'rm -f -- /var/lib/libvirt/images/satellite.qcow2' ]] || {
-          echo "FAIL: attempted removal of an unmanaged disk: $*" >&2; return 1;
+          echo "FAIL: attempted removal of an unmanaged disk: $*" >&2
+          return 1
         }
         printf '%s\n' "$*" >>"$mock_dir/satellite.log"
         [ "$failure" != disk ] || return 1
         disk_removed=true
         ;;
-      *) echo "Unexpected privileged command: $*" >&2; return 1 ;;
+      *)
+        echo "Unexpected privileged command: $*" >&2
+        return 1
+        ;;
     esac
   }
   reset_satellite_case
@@ -151,7 +272,8 @@ trap 'rm -rf "$mock_dir"' EXIT
       nics) valid_nics=false ;;
     esac
     if _maintenance_remove_satellite >"$mock_dir/satellite-output" 2>&1; then
-      echo "FAIL: removed Satellite with unrecognized $unsafe" >&2; exit 1
+      echo "FAIL: removed Satellite with unrecognized $unsafe" >&2
+      exit 1
     fi
     [ "$disk_removed" = false ] && [ "$vm_state" = running ]
     ! grep -Eq '^virsh (destroy|autostart|undefine) ' "$mock_dir/satellite.log"
@@ -160,7 +282,8 @@ trap 'rm -rf "$mock_dir"' EXIT
     reset_satellite_case
     failure="$failure_case"
     if _maintenance_remove_satellite >"$mock_dir/satellite-output" 2>&1; then
-      echo "FAIL: Satellite cleanup ignored $failure failure" >&2; exit 1
+      echo "FAIL: Satellite cleanup ignored $failure failure" >&2
+      exit 1
     fi
     [ "$vm_state" != absent ]
     if [ "$failure" != undefine ]; then [ "$disk_removed" = false ]; fi
@@ -272,6 +395,15 @@ cat >"$mock_dir/systemctl" <<EOF
 #!/usr/bin/env bash
 echo "systemctl \$*" >>"$mock_dir/uninstall.log"
 EOF
+cat >"$mock_dir/crontab" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = -l ]; then
+  echo "no crontab for test-user" >&2
+  exit 1
+fi
+exit 0
+EOF
+chmod +x "$mock_dir/crontab"
 cat >"$mock_dir/virsh" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
@@ -298,6 +430,9 @@ fi
 ! grep -q 'environment uninstalled' "$mock_dir/failed-uninstall"
 
 # shellcheck disable=SC2031
+mkdir -p "$uninstall_home/.config/systemd/user"
+touch "$uninstall_home/.config/systemd/user/aap-demo-crc-watchdog.timer" \
+  "$uninstall_home/.config/systemd/user/aap-demo-crc-watchdog.service"
 HOME="$uninstall_home" PATH="$mock_dir:$PATH" QUIET=true \
   AAP_DEMO_UNINSTALL_CONFIRM=UNINSTALL \
   AAP_DEMO_SYSTEMD_UNIT_FILE="$uninstall_home/system/aap-demo.service" \
@@ -323,11 +458,14 @@ HOME="$uninstall_home" PATH="$mock_dir:$PATH" QUIET=true \
 [ ! -e "$uninstall_home/.aap-demo/fleet" ]
 [ ! -e "$uninstall_home/.aap-demo" ]
 [ ! -e "$uninstall_home/.crc" ]
+[ ! -e "$uninstall_home/.config/systemd/user/aap-demo-crc-watchdog.timer" ]
+[ ! -e "$uninstall_home/.config/systemd/user/aap-demo-crc-watchdog.service" ]
+grep -q 'systemctl --user stop aap-demo-crc-watchdog.service' "$mock_dir/uninstall.log"
 [ ! -e "$uninstall_home/system/aap-demo.service" ]
 [ ! -e "$uninstall_home/system/etc/aap-demo" ]
 [ ! -e "$uninstall_home/system/libexec/aap-demo-state" ]
 [ ! -e "$uninstall_home/system/libexec/aap-demo-operation-lock.sh" ]
-[ ! -e "$uninstall_home/system/var/aap-demo/$(id -un)" ]
+[ -e "$uninstall_home/system/var/aap-demo/$(id -un)/states/state-1/COMPLETE" ]
 # Default uninstall preserves the shared credential Vault for rebuilds.
 [ ! -e "$uninstall_home/managed-credentials-removed" ]
 [ ! -e "$uninstall_home/.local/bin/aap-demo" ]
@@ -346,7 +484,11 @@ fi
 grep -Fq 'crc delete -f' "$mock_dir/uninstall.log"
 grep -Fq 'crc cleanup' "$mock_dir/uninstall.log"
 grep -Fq 'claude mcp remove aap-demo --scope user' "$mock_dir/uninstall.log"
-grep -Fq 'systemctl disable --now aap-demo.service' "$mock_dir/uninstall.log"
+grep -Fq 'systemctl disable aap-demo.service' "$mock_dir/uninstall.log"
+if grep -Fq 'systemctl disable --now aap-demo.service' "$mock_dir/uninstall.log"; then
+  echo "FAIL: uninstall must not trigger a recovery checkpoint while deleting the managed demo"
+  exit 1
+fi
 grep -Fq 'systemctl daemon-reload' "$mock_dir/uninstall.log"
 
 # --reconfigure strips the aap_demo Vault entries (files themselves are kept).
