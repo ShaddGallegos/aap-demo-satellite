@@ -719,16 +719,6 @@ _stage_settings_baseline() {
   $SAT_SSH "$remote_env bash /root/11-settings-baseline.sh"
 }
 
-_stage_rhis_report_templates() {
-  _log "▸ Stage: optional RHIS Satellite report templates"
-  $SAT_SCP "${SCRIPT_DIR}/12-rhis-report-templates.sh" "root@${SAT_IP}:/root/" || return 1
-  local remote_env
-  printf -v remote_env 'SAT_ORG=%q SATELLITE_IMPORT_RHIS_TEMPLATES=%q SATELLITE_RHIS_TEMPLATE_LICENSE_ACCEPTED=%q' \
-    "${SAT_ORG:-Default Organization}" "${SATELLITE_IMPORT_RHIS_TEMPLATES:-false}" \
-    "${SATELLITE_RHIS_TEMPLATE_LICENSE_ACCEPTED:-false}"
-  $SAT_SSH "$remote_env bash /root/12-rhis-report-templates.sh"
-}
-
 _stage_general_nodes() {
   local count prefix resource profile image attrs volume interface remote_env
   count="${SATELLITE_GENERAL_NODE_COUNT:-0}"
@@ -839,7 +829,6 @@ main() {
   workflow_phase installation-media _stage_installation_media || return 1
   workflow_phase sync-plan _stage_sync_plan || return 1
   workflow_phase openscap _stage_openscap || return 1
-  workflow_phase rhis-report-templates _stage_rhis_report_templates || return 1
   workflow_phase general-nodes _stage_general_nodes || return 1
   workflow_phase ca-trust _stage_ca_trust || return 1
   workflow_finish || return 1

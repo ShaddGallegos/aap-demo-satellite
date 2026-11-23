@@ -116,6 +116,18 @@ and its data in place. `maintenance uninstall --reconfigure --apply` is refused
 while the Gitea VM exists, because stripping shared Vault entries would destroy
 its retained administrator and SSH credentials.
 
+`aap-demo maintenance uninstall --apply --zero` is the deliberate factory-reset
+exception. After its separate `UNINSTALL` and `ZERO` confirmations, it removes
+this verified managed VM, its OS disk, NFS export/repositories, locally imported
+CA trust, local state, all aap-demo caches and the complete Vault. It never
+removes an unowned Gitea VM or mismatched data/export. Shared OS packages,
+libvirt networks, source checkout and unrelated VMs remain outside that reset
+scope.
+
+If a zero reset is interrupted after the VM is removed but before retained data
+is purged, rerun the same zero-reset command. Normal `create` deliberately
+refuses to replace a recorded, provisioned VM in that state.
+
 If provisioning is interrupted, rerun enable. A changed host key, CA, UID/GID,
 unowned VM, conflicting reservation, failed mount or failed native operation
 stops reconciliation explicitly. Never overlay retained repositories onto a

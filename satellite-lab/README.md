@@ -186,25 +186,6 @@ scheduled time on a repeat run. Set `SATELLITE_SYNC_PLAN_NAME` or
 `SATELLITE_SYNC_PLAN_INTERVAL` (`daily`, `weekly`, or `monthly`) before first
 creation to choose a different retained plan.
 
-### Optional RHIS report templates
-
-The RHIS Satellite template project is useful for Git-managed host reports,
-but its upstream license is GPL-3.0 while aap-demo is Apache-2.0. aap-demo
-therefore does not vendor, alter, or relicense that source. Instead, an
-explicit opt-in downloads the pinned upstream revision directly into the
-Satellite VM and imports it with an `[RHIS]` prefix:
-
-```bash
-SATELLITE_IMPORT_RHIS_TEMPLATES=true \
-SATELLITE_RHIS_TEMPLATE_LICENSE_ACCEPTED=true \
-  aap-demo create --satellite
-```
-
-The import is idempotent and runs during every Satellite reconciliation when
-enabled. It uses `parmstro/rhis-builder-satellite-templates` commit
-`2988eb2690aa3e3777dcfcc92a4f9c1b9cc37c28`; review the upstream GPL-3.0
-content before enabling it.
-
 ### Capsule, compute, Ansible, and settings reconciliation
 
 Each normal reconciliation owns the local `KVM-Host` compute resource and the

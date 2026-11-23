@@ -85,6 +85,7 @@ preview_zero=$(
 )
 grep -Fq "complete encrypted credential Vault" <<<"$preview_zero"
 grep -Fq "including credentials unrelated to aap-demo" <<<"$preview_zero"
+grep -Fq "managed Gitea VM, OS disk, NFS export/repositories, CA trust, and local state" <<<"$preview_zero"
 if grep -Fq "Unrelated keys" <<<"$preview_zero"; then
   echo "FAIL: zero preview incorrectly preserves unrelated Vault keys"
   exit 1
@@ -104,7 +105,7 @@ if output=$(
   echo "FAIL: reconfigure allowed stripping credentials for retained Gitea"
   exit 1
 fi
-grep -Fq 'would remove credentials for the retained Gitea VM' <<<"$output"
+grep -Fq 'reconfigure would remove credentials for the retained Gitea VM' <<<"$output"
 if grep -Fq UNEXPECTED_MUTATION <<<"$output"; then
   echo "FAIL: reconfigure mutated state before protecting Gitea credentials"
   exit 1
@@ -140,6 +141,31 @@ output=$(QUIET=true AAP_DEMO_UNINSTALL_CONFIRM=UNINSTALL AAP_DEMO_ZERO_CONFIRM=Z
   _maintenance_uninstall true false true
 ' _ "${SCRIPT_DIR}/..")
 grep -Fqx 'zero-apply reconfigure=false zero=true' <<<"$output"
+
+output=$(QUIET=true AAP_DEMO_UNINSTALL_CONFIRM=UNINSTALL AAP_DEMO_ZERO_CONFIRM=ZERO bash -c '
+  set -euo pipefail
+  SCRIPT_DIR=$1
+  source "$SCRIPT_DIR/includes/maintenance.sh"
+  virsh() { printf "aap-demo-gitea\\n"; }
+  _maintenance_uninstall_preview() { :; }
+  _maintenance_remove_state_service() { :; }
+  _maintenance_uninstall_apply() { printf "zero-allowed-with-gitea\\n"; }
+  _maintenance_uninstall true false true
+' _ "${SCRIPT_DIR}/..")
+grep -Fqx 'zero-allowed-with-gitea' <<<"$output"
+
+gitea_zero_home=$(mktemp -d)
+mkdir -p "$gitea_zero_home/.local/share/aap-demo/gitea"
+output=$(HOME="$gitea_zero_home" QUIET=true bash -c '
+  set -euo pipefail
+  SCRIPT_DIR=$1
+  source "$SCRIPT_DIR/includes/maintenance.sh"
+  uname() { printf Linux; }
+  python3() { printf "gitea-zero-helper:%s %s\\n" "$1" "$2"; }
+  _maintenance_remove_zero_gitea
+' _ "${SCRIPT_DIR}/..")
+grep -Fq 'gitea-zero-helper:' <<<"$output"
+rm -rf "$gitea_zero_home"
 
 zero_vault_home=$(mktemp -d)
 trap 'rm -rf "$zero_vault_home"' EXIT

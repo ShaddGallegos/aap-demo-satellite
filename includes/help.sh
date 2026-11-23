@@ -145,8 +145,7 @@ Notes
                       group, installs its guest runtime/device plugin, then verifies
                       Kubernetes advertises nvidia.com/gpu. Default: status.
   create --ansible    Build AAP, Product Demos, AO/Ollama/EDA, Fleet, and dashboard
-  create --satellite  Adds the Satellite lab/demo; interactive runs offer optional
-                      RHIS GPL-3.0 report-template import
+  create --satellite  Adds the Satellite lab/demo
   create --lightwell  Adds Satellite, Lightspeed, retained Gitea, and Lightwell
   fleet               add, list, remove, destroy
                       --backend qemu|kube-native|all
@@ -207,10 +206,6 @@ Examples
     Satellite requires Red Hat subscriptions and a Linux KVM/libvirt host.
     Reruns reuse Satellite, but maintenance can stop services and reboot its VM.
     Ensure there is room for the required backup before rerunning with --satellite.
-    Interactive Satellite profiles ask before importing optional GPL-3.0 RHIS reports.
-    Automation: set SATELLITE_IMPORT_RHIS_TEMPLATES=true and
-    SATELLITE_RHIS_TEMPLATE_LICENSE_ACCEPTED=true only after accepting that license.
-
   Optional addons, after AAP is deployed (choose only what you need)
     aap-demo enable                       # List the available addons
     aap-demo enable portal                # Add the self-service portal

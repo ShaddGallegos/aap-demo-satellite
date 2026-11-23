@@ -72,11 +72,7 @@ aap-demo --gitea                       # Start only the retained Gitea VM outsid
 ```
 
 `--full-demo` remains a compatibility alias for `--ansible`; it is not needed
-alongside the newer profile flags. Interactive Satellite profiles ask whether
-to import the optional, externally sourced GPL-3.0 RHIS report templates. For
-unattended runs, set both `SATELLITE_IMPORT_RHIS_TEMPLATES=true` and
-`SATELLITE_RHIS_TEMPLATE_LICENSE_ACCEPTED=true` only after accepting that
-upstream license. See the [Satellite lab guide](../../satellite-lab/README.md#optional-rhis-report-templates).
+alongside the newer profile flags.
 
 On a Linux MicroShift host with an isolated NVIDIA device, inspect availability
 with `aap-demo gpu status`. `aap-demo gpu enable --apply` changes PCI passthrough

@@ -120,6 +120,7 @@ _maintenance_uninstall_preview() {
   if [ "$zero" = true ]; then
     echo "  • The complete encrypted credential Vault: $HOME/.ansible/conf/env.yml and .vaultpass.txt"
     echo "    (including credentials unrelated to aap-demo)"
+    echo "  • The managed Gitea VM, OS disk, NFS export/repositories, CA trust, and local state"
     echo "  • The aap-demo Satellite Discovery-image cache and off-VM recovery checkpoints"
   elif [ "$reconfigure" = true ]; then
     echo "  • The aap_demo entries in the encrypted credential Vault (Vault files are kept)"
@@ -135,13 +136,14 @@ _maintenance_uninstall_preview() {
   echo ""
   echo "Preserved:"
   echo "  • Source repository: ${SCRIPT_DIR}"
-  echo "  • Independent Gitea VM, OS disk, host NFS exports/data, local CA and service state"
   if [ "$zero" = true ]; then
-    echo "  • No credential Vault files or aap-demo recovery/cache state"
+    echo "  • No aap-demo credential Vault files, Gitea data, recovery state, or caches"
   elif [ "$reconfigure" = true ]; then
+    echo "  • Independent Gitea VM, OS disk, host NFS exports/data, local CA and service state"
     echo "  • Vault files env.yml and .vaultpass.txt (shared with other products/projects;"
     echo "    only the aap_demo entries are stripped)"
   else
+    echo "  • Independent Gitea VM, OS disk, host NFS exports/data, local CA and service state"
     echo "  • Encrypted credential Vault env.yml and .vaultpass.txt, including the"
     echo "    aap_demo credentials, so rebuilds do not re-prompt (use --reconfigure to strip them)"
   fi
@@ -149,9 +151,14 @@ _maintenance_uninstall_preview() {
     echo "  • Unrelated keys in $HOME/.ansible/conf/env.yml"
   fi
   echo "  • Shared OS packages, command-line tools, and libvirt group membership"
+  [ "$zero" != true ] || echo "    (system-wide resources are not safely attributable to aap-demo)"
   echo "  • External Satellite servers, additional VM disks, shared libvirt networks,"
-  echo "    ISO files, cached Satellite Discovery image, and host-side Satellite NFS content/backups"
-  echo "  • Off-VM recovery checkpoints: ${AAP_DEMO_STATE_BACKUP_DIR:-/var/lib/aap-demo/$(id -un)}"
+  if [ "$zero" = true ]; then
+    echo "    ISO files, and host-side Satellite NFS content/backups"
+  else
+    echo "    ISO files, cached Satellite Discovery image, and host-side Satellite NFS content/backups"
+    echo "  • Off-VM recovery checkpoints: ${AAP_DEMO_STATE_BACKUP_DIR:-/var/lib/aap-demo/$(id -un)}"
+  fi
   echo ""
   du -sh "$data_dir" "$crc_dir" 2>/dev/null | sed 's/^/  /' || true
 }
@@ -360,6 +367,25 @@ _maintenance_remove_zero_state_and_cache() {
   echo "  Removed aap-demo recovery checkpoints and Satellite Discovery cache"
 }
 
+_maintenance_remove_zero_gitea() {
+  local expected_root="${XDG_DATA_HOME:-$HOME/.local/share}/aap-demo/gitea"
+  local configured_root="${AAP_DEMO_GITEA_DIR:-$expected_root}"
+
+  # The hidden zero reset must never turn an arbitrary environment override
+  # into a recursive deletion primitive. The managed default is the only
+  # Gitea state root eligible for factory cleanup.
+  [ "$configured_root" = "$expected_root" ] || {
+    echo "ERROR: --zero only removes the standard Gitea state path; unset AAP_DEMO_GITEA_DIR first." >&2
+    return 1
+  }
+  [ "$(uname -s)" = Linux ] || return 0
+  [ -f "${SCRIPT_DIR}/addons/gitea/manage.py" ] || {
+    echo "ERROR: Gitea zero-reset helper is unavailable" >&2
+    return 1
+  }
+  AAP_DEMO_GITEA_DIR="$expected_root" python3 "${SCRIPT_DIR}/addons/gitea/manage.py" purge || return 1
+}
+
 _maintenance_remove_satellite() {
   local disk=/var/lib/libvirt/images/satellite.qcow2 domains interfaces disks active
   local -x LC_ALL=C
@@ -429,6 +455,9 @@ _maintenance_uninstall_apply() {
 
   _maintenance_stop_dashboard || return 1
   _maintenance_remove_satellite || return 1
+  if [ "$zero" = true ]; then
+    _maintenance_remove_zero_gitea || return 1
+  fi
 
   if command -v claude >/dev/null 2>&1; then
     claude mcp remove aap-demo --scope user >/dev/null 2>&1 || true
@@ -530,7 +559,7 @@ _maintenance_uninstall_apply() {
   if [ "$zero" != true ]; then
     echo "  Preserved shared tools and unrelated Vault content"
   else
-    echo "  Preserved source repository and shared OS packages/tools"
+    echo "  Preserved shared OS packages/tools and unrelated host resources"
   fi
 }
 
@@ -544,7 +573,7 @@ _maintenance_uninstall() {
     return 0
   fi
 
-  if { [ "$reconfigure" = true ] || [ "$zero" = true ]; } \
+  if [ "$reconfigure" = true ] \
     && command -v virsh >/dev/null 2>&1; then
     local domains
     domains=$(virsh -c qemu:///system list --all --name) || {
@@ -552,7 +581,7 @@ _maintenance_uninstall() {
       return 1
     }
     if grep -Fxq aap-demo-gitea <<<"$domains"; then
-      echo "ERROR: --reconfigure/--zero would remove credentials for the retained Gitea VM." >&2
+      echo "ERROR: --reconfigure would remove credentials for the retained Gitea VM." >&2
       echo "Use default uninstall to preserve its encrypted administrator/SSH credentials." >&2
       return 1
     fi

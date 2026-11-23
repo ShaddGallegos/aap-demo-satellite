@@ -101,12 +101,6 @@ _full_demo_gitea_preflight() {
   [ "${FAIL_GITEA_PREFLIGHT:-false}" != true ]
 }
 
-# The test evaluates cmd_full_demo in isolation.  Keep interactive prompts out
-# of the orchestration-order assertions; their presence is checked below.
-_full_demo_prompt_rhis_templates() {
-  :
-}
-
 full_demo_function=$(sed -n '/^cmd_full_demo()/,/^}$/p' "$AAP_DEMO_SH")
 # cmd_full_demo references FULL_DEMO_SATELLITE (set by aap-demo.sh arg parsing);
 # default it here so the extracted function runs under `set -u`.
@@ -352,8 +346,6 @@ if QUIET=true "$AAP_DEMO_SH" status --lightwell >"$LOG_FILE.output" 2>&1; then
 fi
 grep -Fq -- '--lightwell is supported only by create' "$LOG_FILE.output"
 parser=$(sed -n '/^# Parse command line arguments$/,/^# Check for unprocessed pending flag$/p' "$AAP_DEMO_SH")
-grep -Fq '_full_demo_prompt_rhis_templates' "$AAP_DEMO_SH"
-grep -Fq 'Type RHIS-GPL to accept the upstream GPL-3.0 license' "$AAP_DEMO_SH"
 while IFS='|' read -r args expected; do
   output=$(bash -s -- $args <<EOF
 $parser

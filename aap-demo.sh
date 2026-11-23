@@ -2225,44 +2225,6 @@ _full_demo_lightwell_preflight() {
   fi
 }
 
-_full_demo_prompt_rhis_templates() {
-  # The RHIS reports are GPL-3.0 external content. Do not silently download
-  # them into Satellite: interactive users choose explicitly; automation must
-  # set both environment variables deliberately.
-  [ "${FULL_DEMO_SATELLITE:-false}" = true ] || return 0
-  [ -n "${SATELLITE_IMPORT_RHIS_TEMPLATES+x}" ] && return 0
-  [ "${QUIET:-false}" = true ] && return 0
-  [ -t 0 ] || return 0
-
-  echo ""
-  echo "Optional RHIS Satellite report templates"
-  echo "  Imports pinned GPL-3.0 report templates from parmstro/rhis-builder-satellite-templates."
-  printf "  Import them into this Satellite lab? [y/N]: "
-  local choice acceptance
-  read -r choice || true
-  case "$choice" in
-    y | Y | yes | YES)
-      printf "  Type RHIS-GPL to accept the upstream GPL-3.0 license: "
-      read -r acceptance || true
-      if [ "$acceptance" = RHIS-GPL ]; then
-        SATELLITE_IMPORT_RHIS_TEMPLATES=true
-        SATELLITE_RHIS_TEMPLATE_LICENSE_ACCEPTED=true
-        export SATELLITE_IMPORT_RHIS_TEMPLATES SATELLITE_RHIS_TEMPLATE_LICENSE_ACCEPTED
-        echo "  ✓ RHIS report templates will be imported during Satellite setup"
-      else
-        SATELLITE_IMPORT_RHIS_TEMPLATES=false
-        export SATELLITE_IMPORT_RHIS_TEMPLATES
-        echo "  RHIS report-template import skipped (license not accepted)"
-      fi
-      ;;
-    *)
-      SATELLITE_IMPORT_RHIS_TEMPLATES=false
-      export SATELLITE_IMPORT_RHIS_TEMPLATES
-      echo "  RHIS report-template import skipped"
-      ;;
-  esac
-}
-
 _full_demo_lightwell_enable() {
   local configuration="${AAP_DEMO_LIGHTWELL_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/aap-demo/lightwell}/config.json"
   local marker='Managed by aap-demo lightwell' index node
@@ -2322,7 +2284,6 @@ cmd_full_demo() {
   local caller_quiet="${QUIET:-false}" profile='aap-demo create --ansible'
   local ADDONS="mcp-server,setup-pah,product-demos,ollama,eda,ao,fleet"
   local cluster_state
-  _full_demo_prompt_rhis_templates
   if [ "${FULL_DEMO_GITEA:-false}" = true ]; then
     _full_demo_gitea_preflight || return 1
     ADDONS+=",gitea"

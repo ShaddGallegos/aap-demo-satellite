@@ -132,7 +132,6 @@ for text in \
   "dashboard [--no-open]" \
   "create --full-demo" \
   "create --lightwell" \
-  "SATELLITE_RHIS_TEMPLATE_LICENSE_ACCEPTED=true" \
   "PRODUCT_DEMOS_ENABLE_EDA=true aap-demo enable product-demo-eda" \
   "aap-demo gpu enable --apply" \
   "AO_LLM_PROVIDER=ollama|external|none" \

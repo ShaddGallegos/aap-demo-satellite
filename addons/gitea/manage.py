@@ -370,6 +370,145 @@ def trust_ca(root: Path) -> None:
         print("WARNING: certutil unavailable; browser CA trust was not imported.", flush=True)
 
 
+def purge(root: Path, state: dict) -> None:
+    """Remove every owned Gitea artifact for maintenance --zero only."""
+    identity = state["uuid"]
+    expected_disk = DISKS / f"{identity}.qcow2"
+    expected_seed = DISKS / f"{identity}.iso"
+    expected_export = Path("/var/lib/aap-demo-gitea/instances") / identity
+    recorded_export = state.get("nfs_export", str(expected_export))
+    if recorded_export != str(expected_export):
+        raise RuntimeError("Gitea NFS ownership state does not match the managed export")
+
+    network = ET.fromstring(virsh("net-dumpxml", "default"))
+    reservations = [
+        host
+        for host in network.findall("./ip/dhcp/host")
+        if host.get("mac") == state["mac"] or host.get("name") == DOMAIN
+    ]
+    if reservations:
+        if len(reservations) != 1:
+            raise RuntimeError("Gitea DHCP reservation is ambiguous; refusing zero reset")
+        reservation = reservations[0]
+        expected_ip = state.get("ip")
+        if (
+            reservation.get("mac") != state["mac"]
+            or reservation.get("name") != DOMAIN
+            or (expected_ip and reservation.get("ip") != expected_ip)
+        ):
+            raise RuntimeError("Gitea DHCP reservation is not owned by this installation")
+        virsh(
+            "net-update",
+            "default",
+            "delete",
+            "ip-dhcp-host",
+            ET.tostring(reservation, encoding="unicode"),
+            "--live",
+            "--config",
+        )
+
+    domains = virsh("list", "--all", "--name").splitlines()
+    if DOMAIN in domains:
+        xml = virsh("dumpxml", DOMAIN)
+        check_domain(xml, state)
+        domain = ET.fromstring(xml)
+        file_sources = {
+            source.get("file")
+            for source in domain.findall("./devices/disk/source")
+            if source.get("file")
+        }
+        if not file_sources.issubset({str(expected_disk), str(expected_seed)}):
+            raise RuntimeError("Gitea VM has an unexpected file-backed device; refusing zero reset")
+        if virsh("domstate", DOMAIN) != "shut off":
+            print("Stopping managed Gitea VM for zero reset...", flush=True)
+            virsh("shutdown", DOMAIN)
+            deadline = time.monotonic() + 120
+            while virsh("domstate", DOMAIN) != "shut off":
+                if time.monotonic() >= deadline:
+                    print("Gitea did not shut down gracefully; force-stopping the verified managed VM...", flush=True)
+                    virsh("destroy", DOMAIN)
+                    break
+                time.sleep(3)
+            if virsh("domstate", DOMAIN) != "shut off":
+                raise RuntimeError("Gitea VM did not stop; preserving zero-reset artifacts for retry")
+        virsh("autostart", DOMAIN, "--disable")
+        virsh("undefine", DOMAIN, "--managed-save", "--nvram", "--snapshots-metadata", "--checkpoints-metadata")
+
+    export_marker = f"# aap-demo:gitea:{identity}"
+    export_file = Path("/etc/exports.d") / f"aap-demo-gitea-{identity}.exports"
+    if export_file.exists():
+        if export_file.read_text(encoding="utf-8").splitlines()[0:1] != [export_marker]:
+            raise RuntimeError("Gitea NFS export is not owned by this installation; refusing zero reset")
+        run("sudo", "-n", "rm", "-f", str(export_file))
+        run("sudo", "-n", "exportfs", "-ra")
+
+    if expected_export.exists():
+        marker = expected_export / ".aap-demo-owner"
+        try:
+            marker_value = run("sudo", "-n", "cat", str(marker))
+        except RuntimeError:
+            marker_value = ""
+        if marker_value != identity:
+            raise RuntimeError("Gitea NFS data is not owned by this installation; refusing zero reset")
+        run("sudo", "-n", "rm", "-rf", "--", str(expected_export))
+    for path in (expected_disk, expected_seed):
+        run("sudo", "-n", "rm", "-f", "--", str(path))
+    try:
+        run("sudo", "-n", "rmdir", "--ignore-fail-on-non-empty", str(DISKS))
+    except RuntimeError:
+        pass
+    try:
+        run("sudo", "-n", "rmdir", "--ignore-fail-on-non-empty", "/var/lib/aap-demo-gitea/instances")
+        run("sudo", "-n", "rmdir", "--ignore-fail-on-non-empty", "/var/lib/aap-demo-gitea")
+    except RuntimeError:
+        pass
+
+    # Remove only the named CA anchors and browser nicknames owned by this VM.
+    updated_trust = False
+    for anchor, update in (
+        (Path("/etc/pki/ca-trust/source/anchors/aap-demo-gitea.crt"), "update-ca-trust"),
+        (Path("/usr/local/share/ca-certificates/aap-demo-gitea.crt"), "update-ca-certificates"),
+    ):
+        if anchor.exists():
+            run("sudo", "-n", "rm", "-f", str(anchor))
+            if not updated_trust:
+                run("sudo", "-n", update)
+                updated_trust = True
+    if shutil.which("certutil"):
+        databases = [Path.home() / ".pki/nssdb", Path.home() / ".local/share/pki/nssdb"]
+        databases.extend((Path.home() / ".mozilla/firefox").glob("*/"))
+        for directory in databases:
+            if (directory / "cert9.db").is_file():
+                subprocess.run(
+                    ["certutil", "-d", f"sql:{directory}", "-D", "-n", "aap-demo-gitea"],
+                    capture_output=True,
+                    check=False,
+                )
+    address = state.get("ip")
+    if address and shutil.which("firewall-cmd") and shutil.which("ip"):
+        active = subprocess.run(
+            ["systemctl", "is-active", "--quiet", "firewalld"], capture_output=True, check=False
+        )
+        if active.returncode == 0:
+            route = run("ip", "-4", "route", "get", address)
+            fields = route.split()
+            interface = fields[fields.index("dev") + 1] if "dev" in fields else ""
+            zone = run("firewall-cmd", "--get-zone-of-interface", interface) if interface else ""
+            if zone:
+                rule = f'rule family="ipv4" source address="{address}/32" port port="2049" protocol="tcp" accept'
+                for permanent in (False, True):
+                    options = [f"--zone={zone}"] + (["--permanent"] if permanent else [])
+                    present = subprocess.run(
+                        ["firewall-cmd", *options, "--query-rich-rule", rule],
+                        capture_output=True,
+                        check=False,
+                    )
+                    if present.returncode == 0:
+                        run("sudo", "-n", "firewall-cmd", *options, "--remove-rich-rule", rule)
+    shutil.rmtree(root)
+    print("Removed the managed Gitea VM, disks, NFS data/export, CA trust, and local state.", flush=True)
+
+
 def api(root: Path, url: str, path: str, password: str) -> dict:
     credential = base64.b64encode(f"aap-demo:{password}".encode()).decode()
     request = urllib.request.Request(
@@ -420,7 +559,9 @@ def deploy(root: Path, state: dict, key: str) -> None:
     if DOMAIN not in domains:
         if state.get("provisioned"):
             raise RuntimeError(
-                "Recorded Gitea VM is missing; refusing to replace its data automatically"
+                "Recorded Gitea VM is missing; refusing to replace its data automatically. "
+                "If a factory reset was interrupted, rerun 'aap-demo maintenance uninstall --apply --zero' "
+                "to complete it; otherwise restore the managed VM/data."
             )
         public = run("ssh-keygen", "-y", "-f", key)
         create_vm(root, state, public)
@@ -523,14 +664,20 @@ def deploy(root: Path, state: dict, key: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ssh-key")
-    parser.add_argument("action", choices=("deploy", "stop", "preflight"))
+    parser.add_argument("action", choices=("deploy", "stop", "preflight", "purge"))
     args = parser.parse_args()
     os.umask(0o077)
-    preflight()
+    if args.action != "purge":
+        preflight()
     if args.action == "preflight":
         print("Gitea VM prerequisites passed (no resources changed)")
         return
     root = data_root()
+    if args.action == "purge" and not root.exists():
+        if DOMAIN in virsh("list", "--all", "--name").splitlines():
+            raise RuntimeError("An unowned Gitea VM exists; refusing zero reset")
+        print("No managed Gitea VM state; nothing to remove")
+        return
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     with (root / "operation.lock").open("w") as lock:
         try:
@@ -544,7 +691,7 @@ def main() -> None:
                 raise RuntimeError("Invalid Gitea ownership state")
         elif DOMAIN in virsh("list", "--all", "--name").splitlines():
             raise RuntimeError("An unowned Gitea VM already exists; refusing to adopt it")
-        elif args.action == "stop":
+        elif args.action in ("stop", "purge"):
             print("No managed Gitea VM; nothing to stop")
             return
         else:
@@ -570,6 +717,8 @@ def main() -> None:
                     time.sleep(3)
             virsh("autostart", DOMAIN, "--disable")
             print("Gitea stopped; VM disk, repositories, credentials and CA retained outside CRC.")
+        elif args.action == "purge":
+            purge(root, state)
         else:
             if not args.ssh_key:
                 raise RuntimeError("An encrypted-Vault SSH key must be supplied by deploy.sh")
