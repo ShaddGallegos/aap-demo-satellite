@@ -55,8 +55,12 @@ resource_is_owned_or_absent() {
 }
 
 package_channel() {
-  kubectl get packagemanifest "$PACKAGE_NAME" -n "$CATALOG_NAMESPACE" \
-    -o jsonpath='{.status.defaultChannel}' 2>/dev/null || true
+  local manifest catalog channel
+  manifest=$(kubectl get packagemanifest "$PACKAGE_NAME" -n "$CATALOG_NAMESPACE" -o json 2>/dev/null) || return 1
+  catalog=$(jq -r '.metadata.labels.catalog // ""' <<<"$manifest") || return 1
+  [ "$catalog" = "$CATALOG_SOURCE" ] || return 1
+  channel=$(jq -r '.status.defaultChannel // ""' <<<"$manifest") || return 1
+  printf '%s\n' "$channel"
 }
 
 wait_for_subscription() {
@@ -122,8 +126,7 @@ preflight() {
 deploy() {
   local channel rendered
   preflight || return 1
-  channel=$(package_channel)
-  [ -n "$channel" ] || {
+  channel=$(package_channel) || {
     echo "ERROR: Package ${PACKAGE_NAME} is not available from ${CATALOG_SOURCE}" >&2
     return 1
   }

@@ -34,7 +34,13 @@ case "$*" in
     fi
     exit 1
     ;;
-  *'get packagemanifest rhacs-operator'*'jsonpath='*) printf stable ;;
+  *'get packagemanifest rhacs-operator'*'-o json')
+    if [ "${AAP_DEMO_WRONG_CATALOG:-false}" = true ]; then
+      printf '%s\n' '{"metadata":{"labels":{"catalog":"other-catalog"}},"status":{"defaultChannel":"stable"}}'
+      exit 0
+    fi
+    printf '%s\n' '{"metadata":{"labels":{"catalog":"redhat-operators"}},"status":{"defaultChannel":"stable"}}'
+    ;;
   *'apply -f -') cat >/dev/null ;;
   *'get subscription aap-demo-rhacs-operator'*'installedCSV'*) printf rhacs.v1 ;;
   *'get csv rhacs.v1'*'jsonpath='*) printf Succeeded ;;
@@ -58,6 +64,17 @@ fi
 grep -Fq 'Refusing to change an unowned RHACS Subscription' "$TEST_DIR/unowned-output"
 if grep -Fq 'apply -f -' "$TEST_DIR/unowned-calls"; then
   echo "FAIL: resources were applied after an ownership failure" >&2
+  exit 1
+fi
+
+if PATH="$TEST_DIR/bin:$PATH" AAP_DEMO_TEST_LOG="$TEST_DIR/catalog-calls" \
+  AAP_DEMO_WRONG_CATALOG=true RHACS_WAIT_SECONDS=5 "$ADDON/deploy.sh" >"$TEST_DIR/catalog-output" 2>&1; then
+  echo "FAIL: a package from an unexpected CatalogSource was accepted" >&2
+  exit 1
+fi
+grep -Fq 'is not available from redhat-operators' "$TEST_DIR/catalog-output"
+if grep -Fq 'apply -f -' "$TEST_DIR/catalog-calls"; then
+  echo "FAIL: resources were applied after a CatalogSource mismatch" >&2
   exit 1
 fi
 

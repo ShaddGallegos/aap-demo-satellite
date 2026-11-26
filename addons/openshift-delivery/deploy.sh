@@ -46,9 +46,11 @@ subscription_owner_is_safe() {
 }
 
 package_is_available() {
-  local package="$1" channel
-  channel=$(kubectl get packagemanifest "$package" -n "$CATALOG_NAMESPACE" \
-    -o jsonpath='{.status.defaultChannel}' 2>/dev/null || true)
+  local package="$1" manifest channel catalog
+  manifest=$(kubectl get packagemanifest "$package" -n "$CATALOG_NAMESPACE" -o json 2>/dev/null) || return 1
+  catalog=$(jq -r '.metadata.labels.catalog // ""' <<<"$manifest") || return 1
+  [ "$catalog" = "$CATALOG_SOURCE" ] || return 1
+  channel=$(jq -r '.status.defaultChannel // ""' <<<"$manifest") || return 1
   [ -n "$channel" ] || return 1
   printf '%s\n' "$channel"
 }
