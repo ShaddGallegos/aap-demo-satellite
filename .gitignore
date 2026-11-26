@@ -14,6 +14,9 @@ test/testing-framework/
 # Generated local environment reports
 /docs/aap-demo-system-info.md
 /docs/aap-demo-system-info.json
+/FIX_TRACKING.md
+/weekly-health-report.html
+/weekly-health-report.txt
 /addons/apme-eap/apme-portal-deployment-*.md
 
 # Local credential stores and exports

@@ -45,7 +45,7 @@ if output=$(
   echo "FAIL: --reconfigure was accepted without the uninstall action"
   exit 1
 fi
-grep -Fq -- "--reconfigure is supported only by maintenance uninstall" <<<"$output"
+grep -Fq -- "--reconfigure and --zero are supported only by maintenance uninstall" <<<"$output"
 
 preview_default=$(
   HOME=/nonexistent QUIET=true bash -c '

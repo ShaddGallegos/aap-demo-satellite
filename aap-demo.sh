@@ -53,6 +53,10 @@ source "${SCRIPT_DIR}/includes/cmd-status.sh"
 source "${SCRIPT_DIR}/includes/workflow-journal.sh"
 # shellcheck source=includes/integration-check.sh
 source "${SCRIPT_DIR}/includes/integration-check.sh"
+# shellcheck source=includes/steward.sh
+source "${SCRIPT_DIR}/includes/steward.sh"
+# shellcheck source=includes/reports.sh
+source "${SCRIPT_DIR}/includes/reports.sh"
 # shellcheck source=includes/help.sh
 source "${SCRIPT_DIR}/includes/help.sh"
 # shellcheck source=includes/cmd-fleet.sh
@@ -328,7 +332,7 @@ for arg in "$@"; do
     --backend)
       PENDING_FLAG="backend"
       ;;
-    deploy | deploy-all | repair | trust-ca | clean | maintenance | credentials | stop | restart | service | setup | create | storage | watch | update | config | redeploy | redeploy-all | redhat-status | rh-status | kubeconfig | idle | preflight | diagnose | check-integrations | must-gather | enable | disable | wire | system-info | dashboard | console | keycloak | gpu | v2 | version | help | --help | -h | --version | -V)
+    deploy | deploy-all | repair | trust-ca | clean | maintenance | credentials | stop | restart | service | setup | create | storage | watch | update | config | redeploy | redeploy-all | redhat-status | rh-status | kubeconfig | idle | preflight | diagnose | check-integrations | steward | reports | must-gather | enable | disable | wire | system-info | dashboard | console | keycloak | gpu | v2 | version | help | --help | -h | --version | -V)
       if [ "$COMMAND" = "gpu" ]; then
         EXTRA_ARGS+=("$arg")
       elif [ "$COMMAND" = "credentials" ]; then
@@ -344,7 +348,14 @@ for arg in "$@"; do
             if [ -z "$COMMAND" ]; then COMMAND="keycloak"; else EXTRA_ARGS+=("$arg"); fi
             ;;
           --help | -h)
-            if [ "$COMMAND" = "enable" ]; then
+            if [ "$COMMAND" = "enable" ] || [ "$COMMAND" = "steward" ] || [ "$COMMAND" = "reports" ]; then
+              EXTRA_ARGS+=("$arg")
+            else
+              COMMAND="help"
+            fi
+            ;;
+          help)
+            if [ "$COMMAND" = "steward" ] || [ "$COMMAND" = "reports" ]; then
               EXTRA_ARGS+=("$arg")
             else
               COMMAND="help"
@@ -426,7 +437,7 @@ for arg in "$@"; do
       if [ "$COMMAND" = "must-gather" ] || [ "$COMMAND" = "clean" ] \
         || [ "$COMMAND" = "fleet" ] || [ "$COMMAND" = "maintenance" ] \
         || [ "$COMMAND" = "credentials" ] || [ "$COMMAND" = "keycloak" ] \
-        || [ "$COMMAND" = "storage" ]; then
+        || [ "$COMMAND" = "storage" ] || [ "$COMMAND" = "steward" ] || [ "$COMMAND" = "reports" ]; then
         EXTRA_ARGS+=("$arg")
       elif [ -n "$COMMAND" ]; then
         echo "Unknown argument for '$COMMAND': $arg"
@@ -489,8 +500,8 @@ if [ "$REDACT" = true ] && [ "$COMMAND" != system-info ]; then
   echo "ERROR: --redact is supported only by system-info" >&2
   exit 1
 fi
-if [ -n "$SYSTEM_INFO_OUTPUT" ] && [ "$COMMAND" != system-info ]; then
-  echo "ERROR: --output is supported only by system-info" >&2
+if [ -n "$SYSTEM_INFO_OUTPUT" ] && [ "$COMMAND" != system-info ] && [ "$COMMAND" != steward ]; then
+  echo "ERROR: --output is supported only by system-info and steward" >&2
   exit 1
 fi
 if [ "$DASHBOARD_NO_OPEN" = true ] \
@@ -525,8 +536,8 @@ if [ "$MAINTENANCE_APPLY" = true ] && [ "$COMMAND" != maintenance ] && [ "$COMMA
   echo "ERROR: --apply is supported only by maintenance and gpu" >&2
   exit 1
 fi
-if [ "$MAINTENANCE_RECONFIGURE" = true ] && [ "$COMMAND" != maintenance ]; then
-  echo "ERROR: --reconfigure is supported only by maintenance uninstall" >&2
+if [ "$MAINTENANCE_RECONFIGURE" = true ] && [ "$COMMAND" != maintenance ] && [ "$COMMAND" != reports ]; then
+  echo "ERROR: --reconfigure is supported only by maintenance uninstall and reports" >&2
   exit 1
 fi
 if [ "$MAINTENANCE_ZERO" = true ] && [ "$COMMAND" != maintenance ]; then
@@ -2280,6 +2291,28 @@ _full_demo_gitea_preflight() {
   bash "${SCRIPT_DIR}/addons/gitea/deploy.sh" --preflight
 }
 
+# Validate the exact registry scope Satellite uses before its quiet workflow
+# begins. Credentials stay in a mode-0600 temporary netrc file rather than
+# the process command line, and no response body or secret is printed.
+# Returns: 0 authorized, 1 rejected, 2 unavailable/transient network failure.
+_full_demo_flatpak_registry_credentials_valid() {
+  local username="$1" token="$2" netrc http_code curl_rc
+  command -v curl >/dev/null 2>&1 || return 2
+  case "$username:$token" in
+    *[[:space:]]*) return 1 ;;
+  esac
+  netrc=$(mktemp) || return 2
+  chmod 600 "$netrc" || { rm -f -- "$netrc"; return 2; }
+  printf 'machine registry.redhat.io login %s password %s\n' "$username" "$token" >"$netrc"
+  http_code=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+    --netrc-file "$netrc" --connect-timeout 10 --max-time 30 \
+    'https://registry.redhat.io/auth/realms/rhcc/protocol/redhat-docker-v2/auth?service=docker-registry&scope=repository:rhel10/firefox-flatpak:pull')
+  curl_rc=$?
+  rm -f -- "$netrc"
+  [ "$curl_rc" -eq 0 ] || return 2
+  [ "$http_code" = 200 ]
+}
+
 cmd_full_demo() {
   local caller_quiet="${QUIET:-false}" profile='aap-demo create --ansible'
   local ADDONS="mcp-server,setup-pah,product-demos,ollama,eda,ao,fleet"
@@ -2309,7 +2342,7 @@ cmd_full_demo() {
   printf "\033[1m%s\033[0m - Building complete local demo...\n" "$profile"
   echo ""
   echo "Workflow:"
-  echo "  1. Configure Red Hat Customer Portal and CDN credentials"
+  echo "  1. Configure Red Hat Portal, CDN, Automation Hub, and registry credentials"
   if [ "$FULL_DEMO_GITEA" = true ]; then
     echo "  1a. Start the retained local Gitea service"
   fi
@@ -2355,6 +2388,104 @@ cmd_full_demo() {
       return 1
     }
   fi
+
+  if [ "${FULL_DEMO_SATELLITE:-false}" = true ]; then
+    local registry_username registry_token cdn_username cdn_password
+    local registry_credentials_valid=false registry_validation_rc=0 registry_credential_source=""
+    # Reuse the Customer Portal/CDN pair already in the Vault before asking
+    # for any separate registry secret. A Registry Service Account is only the
+    # fallback for organizations that reject the Customer Portal scope.
+    cdn_username=$(aap_demo_vault_get 'aap_demo.redhat.cdn_username' 2>/dev/null || true)
+    cdn_password=$(aap_demo_vault_get 'aap_demo.redhat.cdn_password' 2>/dev/null || true)
+    if [ -n "$cdn_username" ] && [ -n "$cdn_password" ]; then
+      if _full_demo_flatpak_registry_credentials_valid "$cdn_username" "$cdn_password"; then
+        registry_username="$cdn_username"
+        registry_token="$cdn_password"
+        registry_credentials_valid=true
+        registry_credential_source=cdn
+      else
+        registry_validation_rc=$?
+        if [ "$registry_validation_rc" -eq 2 ]; then
+          # Do not discard a known Vault secret on a transient host-side
+          # network failure; Satellite will perform the authoritative check.
+          echo "⚠ Unable to pre-validate CDN credentials for registry.redhat.io; Satellite will validate them during sync." >&2
+          registry_username="$cdn_username"
+          registry_token="$cdn_password"
+          registry_credentials_valid=true
+          registry_credential_source=cdn
+        fi
+      fi
+    fi
+    if [ "$registry_credentials_valid" != true ]; then
+      registry_username=$(aap_demo_vault_get 'aap_demo.redhat.registry_username' 2>/dev/null || true)
+      registry_token=$(aap_demo_vault_get 'aap_demo.redhat.registry_token' 2>/dev/null || true)
+      if [ -n "$registry_username" ] && [ -n "$registry_token" ]; then
+        if _full_demo_flatpak_registry_credentials_valid "$registry_username" "$registry_token"; then
+          registry_credentials_valid=true
+          registry_credential_source=service-account
+        else
+          registry_validation_rc=$?
+          if [ "$registry_validation_rc" -eq 2 ]; then
+            echo "⚠ Unable to pre-validate registry.redhat.io credentials; Satellite will validate them during sync." >&2
+            registry_credentials_valid=true
+            registry_credential_source=service-account
+          fi
+        fi
+      fi
+    fi
+    if [ "$registry_credentials_valid" != true ]; then
+      local secret_prompt_device secret_prompt_output
+      secret_prompt_device="${AAP_DEMO_SECRET_PROMPT_DEVICE:-}"
+      secret_prompt_output="${AAP_DEMO_SECRET_PROMPT_OUTPUT:-/dev/tty}"
+      if [ "$caller_quiet" = true ] || [ -z "$secret_prompt_device" ] || [ ! -r "$secret_prompt_device" ]; then
+        echo "ERROR: Satellite Flatpak mirroring requires registry.redhat.io credentials." >&2
+        echo "  Run this command interactively once to store them in the encrypted Vault." >&2
+        return 1
+      fi
+      echo ""
+      echo "Satellite Flatpak mirroring could not authorize the saved CDN credentials."
+      if [ -n "$cdn_username" ] || [ -n "$cdn_password" ] || [ -n "$registry_username" ] || [ -n "$registry_token" ]; then
+        echo "The saved registry credentials are not authorized for the RHEL Flatpak registry and will be replaced."
+      fi
+      echo "Create or select a Registry Service Account, then use its username and token/password:"
+      echo "  https://access.redhat.com/RegistryAuthentication#creating-registry-service-accounts-6"
+      exec 9<"$secret_prompt_device"
+      printf 'registry.redhat.io service-account username: ' >"$secret_prompt_output"
+      IFS= read -r registry_username <&9
+      printf 'registry.redhat.io service-account token/password: ' >"$secret_prompt_output"
+      IFS= read -r -s registry_token <&9
+      exec 9<&-
+      printf '\n' >"$secret_prompt_output"
+      if [ -z "$registry_username" ] || [ -z "$registry_token" ]; then
+        echo "ERROR: registry.redhat.io username and token must not be empty." >&2
+        return 1
+      fi
+      aap_demo_vault_set 'aap_demo.redhat.registry_username' "$registry_username" || return 1
+      aap_demo_vault_set 'aap_demo.redhat.registry_token' "$registry_token" || return 1
+      registry_credential_source=service-account
+      if ! _full_demo_flatpak_registry_credentials_valid "$registry_username" "$registry_token"; then
+        registry_validation_rc=$?
+        if [ "$registry_validation_rc" -ne 2 ]; then
+          echo "ERROR: The registry.redhat.io service account is not authorized for the RHEL Flatpak registry." >&2
+          echo "  Create or select a service account with registry access, then rerun this command to replace the saved pair." >&2
+          return 1
+        fi
+        echo "⚠ Unable to pre-validate the new registry credentials; Satellite will validate them during sync." >&2
+      fi
+    fi
+    AAP_DEMO_FLATPAK_CREDENTIAL_SOURCE="$registry_credential_source"
+    export AAP_DEMO_FLATPAK_CREDENTIAL_SOURCE
+    unset registry_username registry_token cdn_username cdn_password
+  fi
+
+  # Validate all credentials before the workflow enables quiet mode. This keeps
+  # setup-pah from stopping behind a progress spinner to request a secret.
+  if ! ensure_galaxy_credentials; then
+    echo "ERROR: Automation Hub credential setup did not complete." >&2
+    echo "  Run interactively: aap-demo enable setup-pah" >&2
+    return 1
+  fi
+  echo "✓ Automation Hub authentication: valid"
 
   AAP_DEMO_WORKFLOW_ENVIRONMENT="${profile}; cluster=${CRC_PRESET:-auto}" \
     workflow_begin full-demo || return 1
@@ -3789,6 +3920,24 @@ if [ "$COMMAND" = "enable" ]; then
   done
 fi
 
+# Steward report/help use only private local state. A scan is the only steward
+# action that reads the local cluster, and it still uses the remote-context guard.
+_STEWARD_NEEDS_KUBECONFIG=false
+if [ "$COMMAND" = steward ]; then
+  case "${EXTRA_ARGS[0]:-scan}" in
+    scan) _STEWARD_NEEDS_KUBECONFIG=true ;;
+  esac
+fi
+
+_REPORTS_NEEDS_KUBECONFIG=false
+if [ "$COMMAND" = reports ]; then
+  if [ "$MAINTENANCE_RECONFIGURE" != true ]; then
+    case "${EXTRA_ARGS[0]:-generate}" in
+      generate | send) _REPORTS_NEEDS_KUBECONFIG=true ;;
+    esac
+  fi
+fi
+
 if aap_demo_command_requires_lock "$COMMAND" \
   && [ "$_ENABLE_HELP" != true ] \
   && ! { [ "$COMMAND" = maintenance ] \
@@ -3829,6 +3978,16 @@ case "$COMMAND" in
     ;;
   check-integrations)
     setup_kubeconfig_read_only
+    ;;
+  steward)
+    if [ "$_STEWARD_NEEDS_KUBECONFIG" = true ]; then
+      setup_kubeconfig_read_only
+    fi
+    ;;
+  reports)
+    if [ "$_REPORTS_NEEDS_KUBECONFIG" = true ]; then
+      setup_kubeconfig_read_only
+    fi
     ;;
   *)
     setup_kubeconfig
@@ -3959,6 +4118,12 @@ case "$COMMAND" in
     ;;
   check-integrations)
     cmd_check_integrations || exit $?
+    ;;
+  steward)
+    cmd_steward "${EXTRA_ARGS[@]}" || exit $?
+    ;;
+  reports)
+    cmd_reports "${EXTRA_ARGS[@]}" || exit $?
     ;;
   must-gather)
     cmd_must_gather "${EXTRA_ARGS[0]:-}"

@@ -15,7 +15,7 @@ function element() {
     classList: {toggle() {}},
   };
 }
-const viewPanels = ["overview", "demos", "addons", "access"].map((name) => ({
+const viewPanels = ["overview", "demos", "addons", "access", "mail"].map((name) => ({
   dataset: {viewPanel: name}, hidden: name !== "overview",
 }));
 const document = {
@@ -84,11 +84,13 @@ assert.match(demoHtml, /Check integrations \(read-only\)/);
 assert.match(demoHtml, /opens a demo PR for manual review and merge/);
 assert.doesNotMatch(demoHtml, /Admitted|data-launch/);
 context.selectView("demos");
-assert.deepEqual(viewPanels.map((panel) => panel.hidden), [true, false, true, true]);
+assert.deepEqual(viewPanels.map((panel) => panel.hidden), [true, false, true, true, true]);
 context.selectView("untrusted-command");
-assert.deepEqual(viewPanels.map((panel) => panel.hidden), [true, false, true, true]);
+assert.deepEqual(viewPanels.map((panel) => panel.hidden), [true, false, true, true, true]);
 context.selectView("access");
-assert.deepEqual(viewPanels.map((panel) => panel.hidden), [true, true, true, false]);
+assert.deepEqual(viewPanels.map((panel) => panel.hidden), [true, true, true, false, true]);
+context.selectView("mail");
+assert.deepEqual(viewPanels.map((panel) => panel.hidden), [true, true, true, true, false]);
 demoPayload.addons[0].enabled = false;
 context.renderDemos(demoPayload);
 demoHtml = elements.get("#demo-content").innerHTML;
@@ -99,3 +101,6 @@ context.renderDemos(demoPayload);
 assert.match(elements.get("#demo-content").innerHTML, /href="https:\/\/satellite\.demo\.lab"/);
 assert.match(elements.get("#demo-content").innerHTML, /https:\/\/console\.redhat\.com/);
 console.log("PASS: demo submenus, scoped buttons, escaping, and no implicit job launches");
+context.renderMail({messages: [{id: "20261125T010203Z", subject: "AAP <report>", created: "fixture"}]});
+assert.match(elements.get("#mail-list").innerHTML, /AAP &lt;report&gt;/);
+console.log("PASS: dashboard renders local captured mail as escaped text");

@@ -40,6 +40,24 @@ fi
 
 echo "PASS: preflight is recognized as a top-level command"
 
+if ! output=$(HOME="$test_home" QUIET=true "$AAP_DEMO_SH" steward help 2>&1) \
+  || ! grep -Fq 'Usage: aap-demo steward' <<<"$output"; then
+  echo "FAIL: steward help should not require a kubeconfig"
+  echo "$output"
+  exit 1
+fi
+
+echo "PASS: steward help is a local command"
+
+if ! output=$(HOME="$test_home" QUIET=true "$AAP_DEMO_SH" reports help 2>&1) \
+  || ! grep -Fq 'Usage: aap-demo reports' <<<"$output"; then
+  echo "FAIL: reports help should not require a kubeconfig"
+  echo "$output"
+  exit 1
+fi
+
+echo "PASS: reports help is a local command"
+
 if output=$(HOME="$test_home" QUIET=true "$AAP_DEMO_SH" fleet auth status 2>&1); then
   echo "FAIL: unconfigured fleet auth status unexpectedly succeeded"
   exit 1
@@ -96,7 +114,7 @@ fi
 echo "PASS: structured-output options are validated"
 
 help_output=$(QUIET=true "$AAP_DEMO_SH" --help)
-for command in deploy status watch clean redeploy redeploy-all idle preflight diagnose \
+for command in deploy status watch clean redeploy redeploy-all idle preflight diagnose steward reports \
   must-gather wire config redhat-status update version help create destroy stop start \
   repair setup ssh kubeconfig system-info dashboard maintenance; do
   if ! grep -Eq "^[[:space:]]+${command}([[:space:]|]|\$)" <<<"$help_output"; then
@@ -129,9 +147,12 @@ for text in \
   "AAP_DEMO_UNINSTALL_CONFIRM=UNINSTALL" \
   "status --json" \
   "system-info [--redact] [--json] [--output FILE]" \
+  "steward [scan|report] [--output FILE]" \
+  "reports [generate|send] [--reconfigure]" \
   "dashboard [--no-open]" \
   "create --full-demo" \
   "create --lightwell" \
+  "LIGHTWELL_APP_NODE=4 aap-demo enable lightwell --prepare" \
   "PRODUCT_DEMOS_ENABLE_EDA=true aap-demo enable product-demo-eda" \
   "aap-demo gpu enable --apply" \
   "AO_LLM_PROVIDER=ollama|external|none" \

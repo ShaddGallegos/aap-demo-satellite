@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import email
 import errno
 import json
 import os
@@ -21,6 +22,7 @@ import threading
 import time
 import webbrowser
 from dataclasses import dataclass, field
+from email import policy
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -32,6 +34,8 @@ from urllib.request import ProxyHandler, build_opener
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 MAX_BODY_BYTES = 4096
+MAX_MAIL_BYTES = 1024 * 1024
+MAX_MAIL_TEXT_BYTES = 12000
 OPERATION_TIMEOUT_SECONDS = 3600
 TERMINAL_IDLE_SECONDS = 300
 # aap-demo status --json takes ~30s against a settling MicroShift cluster. A
@@ -434,6 +438,84 @@ class DashboardApp:
         self._inventory_cache_at = 0.0
         self._inventory_lock = threading.Lock()
 
+    @staticmethod
+    def _reports_root() -> Path:
+        return Path(os.environ.get("AAP_DEMO_DIR", Path.home() / ".aap-demo")) / "reports"
+
+    def report_preferences(self) -> dict[str, bool]:
+        path = self._reports_root() / "preferences.json"
+        if not path.exists():
+            return {"configured": False, "capture_enabled": False}
+        try:
+            if path.stat().st_size > MAX_BODY_BYTES:
+                raise ValueError("preferences are too large")
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(value, dict) or type(value.get("capture_enabled")) is not bool:
+                raise ValueError("invalid preferences")
+            return {"configured": True, "capture_enabled": value["capture_enabled"]}
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            raise RuntimeError("Cannot read report preferences; reconfigure the local environment") from error
+
+    def set_report_preferences(self, capture_enabled: bool) -> dict[str, bool]:
+        if type(capture_enabled) is not bool:
+            raise ValueError("capture_enabled must be a boolean")
+        root = self._reports_root()
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(root, 0o700)
+        path = root / "preferences.json"
+        descriptor, temporary_name = tempfile.mkstemp(prefix=".preferences.", dir=root)
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                json.dump({"capture_enabled": capture_enabled}, stream)
+                stream.write("\n")
+            os.chmod(temporary, 0o600)
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return {"configured": True, "capture_enabled": capture_enabled}
+
+    def mail_payload(self) -> dict[str, list[dict[str, str]]]:
+        outbox = self._reports_root() / "outbox"
+        if not outbox.is_dir():
+            return {"messages": []}
+        messages = []
+        for path in sorted(outbox.glob("*.eml"), reverse=True)[:50]:
+            if not re.fullmatch(r"[0-9]{8}T[0-9]{6}Z\.eml", path.name):
+                continue
+            try:
+                if path.stat().st_size > MAX_MAIL_BYTES:
+                    continue
+                messages.append({
+                    "id": path.stem,
+                    "subject": "AAP Demo weekly health report",
+                    "created": path.stem.replace("T", " ").removesuffix("Z") + " UTC",
+                })
+            except OSError:
+                continue
+        return {"messages": messages}
+
+    def mail_message(self, message_id: str) -> dict[str, str]:
+        if not re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", message_id):
+            raise ValueError("Invalid local mail message ID")
+        path = self._reports_root() / "outbox" / f"{message_id}.eml"
+        try:
+            raw = path.read_bytes()
+            if len(raw) > MAX_MAIL_BYTES:
+                raise ValueError("message is too large")
+            parsed = email.message_from_bytes(raw, policy=policy.default)
+            part = parsed.get_body(preferencelist=("plain",))
+            text = part.get_content() if part is not None else ""
+            if not isinstance(text, str):
+                raise ValueError("message has no text body")
+            return {
+                "id": message_id,
+                "subject": "AAP Demo weekly health report",
+                "text": redact_output(text)[:MAX_MAIL_TEXT_BYTES],
+            }
+        except (OSError, ValueError, UnicodeError) as error:
+            raise RuntimeError("Cannot read the captured local message") from error
+
     def reap_terminals(self, *, all_sessions: bool = False) -> None:
         with self.terminal_lock:
             for session_id, terminal in list(self.terminals.items()):
@@ -833,6 +915,20 @@ def create_handler(app: DashboardApp) -> type[BaseHTTPRequestHandler]:
                         HTTPStatus.SERVICE_UNAVAILABLE,
                         {"error": str(error)},
                     )
+            elif path == "/api/mail":
+                self.json_response(HTTPStatus.OK, app.mail_payload())
+            elif path == "/api/report-preferences":
+                try:
+                    self.json_response(HTTPStatus.OK, app.report_preferences())
+                except RuntimeError as error:
+                    self.json_response(HTTPStatus.CONFLICT, {"error": str(error)})
+            elif mail_message := re.fullmatch(r"/api/mail/([0-9]{8}T[0-9]{6}Z)", path):
+                try:
+                    self.json_response(HTTPStatus.OK, app.mail_message(mail_message[1]))
+                except ValueError as error:
+                    self.json_response(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                except RuntimeError as error:
+                    self.json_response(HTTPStatus.NOT_FOUND, {"error": str(error)})
             elif path == "/api/operation":
                 self.json_response(HTTPStatus.OK, app.operation.snapshot())
             else:
@@ -865,6 +961,15 @@ def create_handler(app: DashboardApp) -> type[BaseHTTPRequestHandler]:
                 return
             if not isinstance(body, dict):
                 self.json_response(HTTPStatus.BAD_REQUEST, {"error": "Expected a JSON object"})
+                return
+
+            if urlparse(self.path).path == "/api/report-preferences":
+                try:
+                    self.json_response(HTTPStatus.OK, app.set_report_preferences(body.get("capture_enabled")))
+                except ValueError as error:
+                    self.json_response(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                except OSError:
+                    self.json_response(HTTPStatus.CONFLICT, {"error": "Cannot save report preferences"})
                 return
 
             fleet_power = re.fullmatch(r"/api/fleet/([1-9][0-9]*)/power", urlparse(self.path).path)

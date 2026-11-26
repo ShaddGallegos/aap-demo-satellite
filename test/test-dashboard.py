@@ -95,6 +95,30 @@ def fixture_inventory() -> dict[str, Any]:
 
 
 class DashboardUnitTests(unittest.TestCase):
+    def test_local_mail_and_preferences_are_private_and_do_not_render_html(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            with patch.dict(os.environ, {"AAP_DEMO_DIR": home}, clear=False):
+                app = dashboard.DashboardApp(REPO_ROOT, 0)
+                self.assertEqual(app.report_preferences(), {"configured": False, "capture_enabled": False})
+                self.assertTrue(app.set_report_preferences(True)["capture_enabled"])
+                preferences = Path(home) / "reports/preferences.json"
+                self.assertEqual(preferences.stat().st_mode & 0o777, 0o600)
+                outbox = Path(home) / "reports/outbox"
+                outbox.mkdir()
+                message = outbox / "20261125T010203Z.eml"
+                message.write_text(
+                    "Subject: ignored\nMIME-Version: 1.0\nContent-Type: text/plain\n\n"
+                    "password=fixture-secret\n<script>ignored</script>\n",
+                    encoding="utf-8",
+                )
+                payload = app.mail_payload()
+                self.assertEqual(payload["messages"][0]["id"], "20261125T010203Z")
+                rendered = app.mail_message("20261125T010203Z")
+                self.assertNotIn("fixture-secret", rendered["text"])
+                self.assertIn("<script>ignored</script>", rendered["text"])
+                with self.assertRaises(ValueError):
+                    app.mail_message("../outside")
+
     def test_gitea_link_is_allowlisted_and_exposes_no_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"

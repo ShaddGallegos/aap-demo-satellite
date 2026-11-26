@@ -50,6 +50,28 @@ cmd_credentials() {
   printf 'credentials %s\n' "$*" >>"$LOG_FILE"
 }
 
+ensure_galaxy_credentials() {
+  printf 'galaxy credentials\n' >>"$LOG_FILE"
+  [ "${GALAXY_AUTH_CONFIGURED:-true}" = true ]
+}
+
+# Satellite profiles require a scoped registry service-account credential for
+# Flatpak mirroring. Keep it mocked here so orchestration tests stay offline
+# and never exercise an interactive secret prompt.
+aap_demo_vault_get() {
+  case "${1:-}" in
+    aap_demo.redhat.cdn_username) printf 'test-cdn-user' ;;
+    aap_demo.redhat.cdn_password) printf 'test-cdn-password' ;;
+    aap_demo.redhat.registry_username) printf 'test-registry-user' ;;
+    aap_demo.redhat.registry_token) printf 'test-registry-token' ;;
+    *) return 1 ;;
+  esac
+}
+
+_full_demo_flatpak_registry_credentials_valid() {
+  return 0
+}
+
 # shellcheck disable=SC2329
 fleet_count() {
   printf '0'
@@ -108,6 +130,8 @@ FULL_DEMO_SATELLITE="${FULL_DEMO_SATELLITE:-false}"
 FULL_DEMO_GITEA="${FULL_DEMO_GITEA:-false}"
 FULL_DEMO_LIGHTSPEED="${FULL_DEMO_LIGHTSPEED:-false}"
 FULL_DEMO_LIGHTWELL="${FULL_DEMO_LIGHTWELL:-false}"
+AAP_DEMO_SECRET_PROMPT_DEVICE="${AAP_DEMO_SECRET_PROMPT_DEVICE:-}"
+AAP_DEMO_SECRET_PROMPT_OUTPUT="${AAP_DEMO_SECRET_PROMPT_OUTPUT:-/dev/null}"
 eval "$full_demo_function"
 managed_guard=$(sed -n '/^if aap_demo_service_managed; then$/,/^fi$/p' "$AAP_DEMO_SH")
 _err() { printf 'ERROR: %s\n' "$*" >&2; }
@@ -129,6 +153,7 @@ cmd_full_demo >/dev/null
 
 cat >"$LOG_FILE.expected" <<'EOF'
 fleet auth status
+galaxy credentials
 create quiet=true addons=mcp-server,setup-pah,product-demos,ollama,eda,ao,fleet
 deploy skip_ao=true
 enable setup-pah provider=unset
@@ -163,6 +188,7 @@ rm -f "$LOG_FILE.expected"
 FULL_DEMO_SATELLITE=true SATELLITE_VM_EXISTS=false cmd_full_demo >/dev/null
 cat >"$LOG_FILE.expected" <<'EOF'
 fleet auth status
+galaxy credentials
 create quiet=true addons=mcp-server,setup-pah,product-demos,ollama,eda,ao,fleet
 deploy skip_ao=true
 enable setup-pah provider=unset
@@ -200,6 +226,21 @@ grep -Fq 'enable product-demo-satellite' "$LOG_FILE" || {
   echo "FAIL: satellite demo content was not installed with an existing VM"
   exit 1
 }
+
+# Hub credentials are collected before workflow_begin, before quiet phases can
+# show a spinner while waiting for a hidden secret prompt.
+: >"$LOG_FILE"
+if GALAXY_AUTH_CONFIGURED=false cmd_full_demo >"$LOG_FILE.output" 2>&1; then
+  echo "FAIL: full demo continued without Automation Hub credentials"
+  exit 1
+fi
+grep -Fq 'ERROR: Automation Hub credential setup did not complete' "$LOG_FILE.output"
+grep -Fxq 'galaxy credentials' "$LOG_FILE"
+if grep -Fq 'create quiet=true' "$LOG_FILE"; then
+  echo "FAIL: full demo entered quiet phases without Automation Hub credentials"
+  exit 1
+fi
+
 : >"$LOG_FILE"
 if FULL_DEMO_SATELLITE=true SATELLITE_VM_EXISTS=true FAIL_SATELLITE_BUILD=true \
   cmd_full_demo >"$LOG_FILE.output" 2>&1; then
@@ -277,11 +318,12 @@ cat >"$LOG_FILE.auth.expected" <<'EOF'
 fleet auth status
 fleet auth configure
 fleet auth status
+galaxy credentials
 create quiet=true addons=mcp-server,setup-pah,product-demos,ollama,eda,ao,fleet
 EOF
-if ! head -4 "$LOG_FILE" | cmp -s - "$LOG_FILE.auth.expected"; then
+if ! head -5 "$LOG_FILE" | cmp -s - "$LOG_FILE.auth.expected"; then
   echo "FAIL: full demo did not configure missing Fleet credentials first"
-  diff -u "$LOG_FILE.auth.expected" <(head -4 "$LOG_FILE") || true
+  diff -u "$LOG_FILE.auth.expected" <(head -5 "$LOG_FILE") || true
   rm -f "$LOG_FILE.auth.expected" "$prompt_device"
   exit 1
 fi

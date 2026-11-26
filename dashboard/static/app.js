@@ -11,6 +11,8 @@ const state = {
   dismissTimer: null,
   restarting: false,
   refreshing: false,
+  mail: {messages: []},
+  selectedMail: null,
 };
 
 const elements = {
@@ -29,6 +31,9 @@ const elements = {
   clusterSummary: document.querySelector("#cluster-summary"),
   environmentOs: document.querySelector("#environment-os"),
   lastUpdated: document.querySelector("#last-updated"),
+  mailContent: document.querySelector("#mail-content"),
+  mailList: document.querySelector("#mail-list"),
+  mailSubject: document.querySelector("#mail-subject"),
   namespaceList: document.querySelector("#namespace-list"),
   operationDetails: document.querySelector("#operation-details"),
   operationDismiss: document.querySelector("#operation-dismiss"),
@@ -174,7 +179,7 @@ function renderCategories(addons) {
 }
 
 function selectView(view) {
-  if (!["overview", "demos", "addons", "access"].includes(view)) {
+  if (!["overview", "demos", "addons", "access", "mail"].includes(view)) {
     return;
   }
   state.activeView = view;
@@ -186,6 +191,36 @@ function selectView(view) {
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
   });
+}
+
+function renderMail(mail) {
+  const messages = Array.isArray(mail?.messages) ? mail.messages : [];
+  if (!messages.length) {
+    elements.mailList.innerHTML = '<p class="empty-state">No captured local messages yet.</p>';
+    elements.mailSubject.textContent = "No message selected";
+    elements.mailContent.textContent = "Run ‘aap-demo reports send’ to capture a weekly report locally.";
+    return;
+  }
+  if (!messages.some((message) => message.id === state.selectedMail)) {
+    state.selectedMail = messages[0].id;
+  }
+  const selected = messages.find((message) => message.id === state.selectedMail);
+  elements.mailList.innerHTML = messages.map((message) => `
+    <button class="mail-item ${message.id === state.selectedMail ? "active" : ""}" type="button" data-mail-id="${escapeHtml(message.id)}">
+      ${escapeHtml(message.subject)}<span>${escapeHtml(message.created)}</span>
+    </button>`).join("");
+  elements.mailList.querySelectorAll("button[data-mail-id]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.selectedMail = button.dataset.mailId;
+      try {
+        const message = await api(`/api/mail/${encodeURIComponent(state.selectedMail)}`);
+        state.mail.messages = state.mail.messages.map((item) => item.id === message.id ? message : item);
+        renderMail(state.mail);
+      } catch (error) { showAlert(error.message); }
+    });
+  });
+  elements.mailSubject.textContent = selected?.subject || "Captured message";
+  elements.mailContent.textContent = selected?.text || "Select this message to load its plain-text content.";
 }
 
 function renderDemos(payload) {
@@ -456,6 +491,7 @@ function render(payload) {
     payload.gitea_services || [],
   );
   renderNamespaces(payload.inventory.namespaces);
+  renderMail(state.mail);
   renderOperation(payload.operation);
   elements.lastUpdated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
 }
@@ -471,6 +507,7 @@ async function refresh() {
   elements.refreshButton.disabled = true;
   try {
     const payload = await api("/api/status");
+    state.mail = await api("/api/mail").catch(() => ({messages: []}));
     clearAlert();
     render(payload);
   } catch (error) {
@@ -633,6 +670,15 @@ async function initialize() {
   try {
     const session = await api("/api/session");
     state.sessionToken = session.token;
+    const preferences = await api("/api/report-preferences");
+    if (!preferences.configured) {
+      const captureEnabled = window.confirm(
+        "Set up the local weekly-report capture mailbox? It stores sanitized reports only on this computer and never sends email externally.",
+      );
+      await api("/api/report-preferences", {
+        method: "POST", body: JSON.stringify({capture_enabled: captureEnabled}),
+      });
+    }
     await refresh();
     if (state.payload?.operation?.status === "running") {
       startOperationPolling();

@@ -233,6 +233,45 @@ p {
   background: rgb(17 21 29 / 88%);
 }
 
+.mail-panel {
+  margin-top: 32px;
+  padding: 24px;
+  border-radius: 15px;
+}
+
+.mail-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 2fr);
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.mail-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.mail-item {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface-raised);
+  cursor: pointer;
+  text-align: left;
+}
+
+.mail-item.active { border-color: var(--blue); }
+.mail-item span { display: block; color: var(--muted); font-size: 12px; margin-top: 4px; }
+.mail-message { min-height: 260px; padding: 16px; border: 1px solid var(--border); border-radius: 8px; }
+.mail-message pre { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); }
+
+@media (width <= 800px) {
+  .mail-layout { grid-template-columns: 1fr; }
+}
+
 .capacity-panel {
   margin-top: 16px;
   padding: 24px;

@@ -142,7 +142,9 @@ fi
 echo "Test 2a3: help retains beginner examples and warns before destructive examples"
 examples=$(printf '%s\n' "$help_output" | awk '/^Examples$/{inside=1;next} /^Requirements$/{exit} inside')
 example_commands=$(printf '%s\n' "$examples" | awk '
-  /^    aap-demo / {sub(/ +#.*/, ""); sub(/^ +/, ""); print}
+  /^    ([[:alnum:]_]+=[^[:space:]]+[[:space:]]+)?aap-demo / {
+    sub(/ +#.*/, ""); sub(/^ +/, ""); print
+  }
 ')
 examples_ok=true
 for example in \
@@ -153,6 +155,7 @@ for example in \
   'aap-demo deploy' \
   'aap-demo status' \
   'aap-demo enable portal' \
+  'LIGHTWELL_APP_NODE=4 aap-demo enable lightwell --prepare' \
   'aap-demo enable fleet' \
   'aap-demo fleet add 3 --image rhel9' \
   'aap-demo redeploy-all' \

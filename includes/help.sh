@@ -51,6 +51,10 @@ Health
   preflight         Read-only tools, capacity, storage, and catalog checks
   diagnose          Check environment health
   check-integrations Inspect enabled integration connections without running jobs
+  steward [scan|report]
+                    Track sanitized read-only findings; no AI, repair, or ticket actions
+  reports [generate|send] [--reconfigure]
+                    Create a weekly HTML report and local captured email; no external delivery
   must-gather       Collect AAP and cluster diagnostics
   redhat-status     Check Red Hat registry status
 
@@ -122,6 +126,10 @@ Notes
   status --json       Emit machine-readable status without secret values
   system-info [--redact] [--json] [--output FILE]
                       Export redacted, JSON, or custom-path inventory
+  steward [scan|report] [--output FILE]
+                      Record read-only findings in FIX_TRACKING.md; no repair or external action
+  reports [generate|send] [--reconfigure]
+                      Write polished HTML/text reports and a local captured email; no SMTP relay
   dashboard [--no-open]
                       Start the localhost dashboard without opening a browser
   console [--no-open] Show the console URL without opening a browser
@@ -205,7 +213,7 @@ Examples
     aap-demo --gitea                      # Start only the retained local Gitea VM
     Satellite requires Red Hat subscriptions and a Linux KVM/libvirt host.
     Reruns reuse Satellite, but maintenance can stop services and reboot its VM.
-    Ensure there is room for the required backup before rerunning with --satellite.
+    Maintenance uses one managed libvirt checkpoint, retained only on failure.
   Optional addons, after AAP is deployed (choose only what you need)
     aap-demo enable                       # List the available addons
     aap-demo enable portal                # Add the self-service portal
@@ -213,6 +221,8 @@ Examples
     aap-demo enable ollama                # Add the local language-model service
     aap-demo enable eda                   # Add Event-Driven Ansible; no event source/activation
     aap-demo enable ao                    # Add Automation Orchestrator
+    LIGHTWELL_APP_NODE=4 aap-demo enable lightwell --prepare
+                                         # Prepare Lightwell resources for dedicated Fleet node 4
     aap-demo enable product-demos         # Install the non-Satellite demo content
     PRODUCT_DEMOS_ENABLE_EDA=true aap-demo enable product-demo-eda
                                          # Import guarded EDA templates after external prerequisites

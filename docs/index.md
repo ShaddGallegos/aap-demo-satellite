@@ -25,8 +25,12 @@ The [project home page](../README.md) is the short start. These pages are the re
   Shut down Fleet, CRC, and Satellite without deleting data.
 - [Assistant skills](guides/assistant-skills.md) - Task-focused validation, recovery, and publication workflows.
 - [Local AI integrations](guides/ai-integrations.md) - MCP, Ollama, and supported product integration paths.
+- [Operations steward](operations-steward.md) - Local, redacted, read-only issue tracking and safe future-agent boundaries.
+- [Weekly health reports](weekly-reports.md) - Styled local HTML reports and captured email, without an SMTP relay.
 - [Collection authentication](collection-authentication.md) - Keep the separate
   Automation Hub token in the encrypted Vault and diagnose Pulp sync failures.
+- [Credential Vault](credential-vault.md) - Managed secret locations, ownership,
+  and safe configuration paths.
 - [Lightwell CI/CD simulation](../addons/lightwell/README.md) -
   Prepared-service integration, human approvals, and dashboard links.
 - [Local Gitea VM](../addons/gitea/README.md) -
@@ -43,6 +47,8 @@ The [project home page](../README.md) is the short start. These pages are the re
 
 - [Commands](reference/commands.md) - What each command does.
 - [Settings](reference/settings.md) - Memory, disk, channels, and file locations.
+- [Security policy and local trust controls](SECURITY.md) - Report issues and pin
+  first-use SSH trust when the default local-lab model is not appropriate.
 - [Roadmap and agent prompt](ROADMAP.md) - Selectable tasks, priorities, safeguards, and acceptance criteria.
 
 ## Examples

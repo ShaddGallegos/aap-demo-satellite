@@ -12,7 +12,7 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">LOCAL DEVELOPMENT CONTROL PLANE</p>
-          <h1>Ansible Automation Platform - MicroShift Demo</h1>
+          <h1>Ansible Automation Platform - Single Node/Micro Shift Demo</h1>
         </div>
         <div class="topbar-actions">
           <span id="last-updated" class="muted">Loading...</span>
@@ -34,6 +34,8 @@
             aria-controls="addons-view" aria-pressed="false">Add-ons</button>
           <button class="filter-button" type="button" data-view="access"
             aria-controls="access-view" aria-pressed="false">Services and Fleet</button>
+          <button class="filter-button" type="button" data-view="mail"
+            aria-controls="mail-view" aria-pressed="false">Local mail</button>
         </nav>
 
         <div id="overview-view" data-view-panel="overview">
@@ -134,6 +136,21 @@
             </div>
             <div id="namespace-list" class="namespace-list"></div>
           </article>
+        </section>
+
+        <section id="mail-view" data-view-panel="mail" class="mail-panel panel" hidden aria-labelledby="mail-heading">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">LOCAL CAPTURE MAILBOX</p>
+              <h2 id="mail-heading">Weekly health messages</h2>
+              <p class="muted">Messages are local only. No SMTP relay or external delivery is configured.</p>
+            </div>
+          </div>
+          <div class="mail-layout">
+            <div id="mail-list" class="mail-list" aria-label="Captured messages"></div>
+            <article class="mail-message"><h3 id="mail-subject">Select a message</h3><pre id="mail-content"></pre></article>
+          </div>
+          <p class="muted">Create one with <code>aap-demo reports send</code>. Preferences are asked once and reset by a reconfigure or zero reset.</p>
         </section>
       </main>
 
