@@ -1,6 +1,6 @@
 # Makefile for aap-demo linting and quality checks
 
-.PHONY: lint-help install-hooks lint lint-shell lint-shell-format lint-yaml lint-markdown lint-ansible format test test-python test-dashboard validate-manifests check-secrets clean-lint pre-commit verify ci update-hooks
+.PHONY: lint-help install-hooks lint lint-shell lint-shell-format lint-yaml lint-markdown lint-ansible verify-ansible format test test-python test-dashboard validate-manifests check-secrets clean-lint pre-commit verify ci update-hooks
 
 lint-help: ## Show linting help
 	@echo ""
@@ -41,6 +41,8 @@ lint-ansible: ## Lint Ansible content with ansible-lint
 	@echo "Running ansible-lint..."
 	@ansible-lint --force-color --offline
 	@echo "✓ ansible-lint passed"
+
+verify-ansible: lint-ansible ## Run dependency-bound Ansible lint after installing required collections
 
 format: ## Auto-format shell scripts and markdown
 	@echo "Formatting shell scripts with shfmt..."
@@ -90,7 +92,7 @@ pre-commit: ## Run pre-commit on all files
 	@pre-commit run --all-files
 	@echo "✓ Pre-commit checks passed"
 
-verify: lint test test-python test-dashboard validate-manifests check-secrets ## Run the complete non-live validation suite
+verify: lint-shell lint-shell-format lint-yaml lint-markdown test test-python test-dashboard validate-manifests check-secrets ## Run the complete non-live validation suite
 	@echo "✓ Complete non-live validation passed"
 
 ci: verify ## Backward-compatible alias for the complete local validation suite

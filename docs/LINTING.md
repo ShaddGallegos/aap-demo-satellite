@@ -305,9 +305,10 @@ validator.
 
 The lint, shell/unit-test, Python-unit-test, version, commitlint, and PR
 metadata workflows run on pull requests. Run `make verify` locally for the
-same complete non-live validation gate. Publishing, host-trust, badge, and
-CodeQL workflows remain explicitly started from the repository's **Actions**
-tab.
+same complete non-live validation gate. Run
+`make verify-ansible` in an environment with the required vendor collections.
+Publishing, host-trust, badge, CodeQL, and dependency-bound Ansible lint remain
+explicitly started from the repository's **Actions** tab.
 
 ### 1. Lint Workflow (`.github/workflows/lint.yaml`)
 

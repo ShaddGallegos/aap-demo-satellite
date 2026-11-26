@@ -47,11 +47,12 @@ Use **non-destructive CLI integration tests** that validate the command surface 
 
 `.github/workflows/test.yaml`, `.github/workflows/lint.yaml`, and
 `.github/workflows/python-tests.yaml` run safe, non-live checks on pull
-requests. `make verify` provides the equivalent complete local gate. Hosted
-workflows that publish, alter a host trust store, update badges, or perform
-scheduled security analysis remain manually started. The lint workflow runs
-shellcheck, yamllint, ansible-lint, and markdownlint via `lint.mk` /
-pre-commit.
+requests. `make verify` provides the equivalent non-live local gate.
+`make verify-ansible` and its workflow job remain manual because Satellite and
+controller content needs vendor collections. Hosted workflows that publish,
+alter a host trust store, update badges, or perform scheduled security analysis
+also remain manual. The lint workflow runs shellcheck, yamllint, ansible-lint,
+and markdownlint via `lint.mk` / pre-commit.
 
 ### Test patterns
 

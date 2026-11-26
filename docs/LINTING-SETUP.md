@@ -165,7 +165,9 @@ Check the version format locally:
 grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$' VERSION
 ```
 
-`make verify` is the complete non-live local gate. The following checks run
+`make verify` is the complete non-live local gate. Run
+`make verify-ansible` separately where the required vendor collections are
+installed. The following checks run
 automatically on pull requests and can also be started from the repository's
 **Actions** tab. For a manually started `pr-checks.yaml`, provide the pull
 request number.
@@ -178,7 +180,7 @@ The pull-request checks are:
 4. **Test workflow**: Shell syntax checks, dry-run tests, link validation
 5. **PR checks workflow**: Metadata validation, size check, conflict detection
 
-Publishing, host-trust, badge, and CodeQL workflows remain manually started.
+Publishing, host-trust, badge, CodeQL, and dependency-bound Ansible lint remain manually started.
 All required checks must pass before merging.
 
 ## Commit Message Format

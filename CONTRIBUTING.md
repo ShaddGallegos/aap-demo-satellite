@@ -48,10 +48,11 @@ python -m ruff format --check src tests
 python -m aap_demo --help
 ```
 
-For a complete local, non-destructive gate, run `make verify`. Tests marked
-`integration` need a real cluster and are excluded from the pull-request
-workflows. Publishing, host-trust tests, badges, and CodeQL stay manually
-started from the repository's **Actions** tab.
+For a complete non-destructive gate, run `make verify`. Run
+`make verify-ansible` separately in an environment that has the required
+vendor collections. Tests marked `integration` need a real cluster and are
+excluded from the pull-request workflows. Publishing, host-trust tests,
+badges, and CodeQL stay manually started from the repository's **Actions** tab.
 
 For a documentation change, lint the Markdown files you edited:
 

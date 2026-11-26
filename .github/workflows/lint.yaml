@@ -121,6 +121,10 @@ jobs:
 
   ansible-lint:
     name: Ansible Lint
+    # Satellite and controller content needs licensed/vendor collections. The
+    # self-contained pull-request gate validates everything else; run this
+    # job manually in an environment with those collections installed.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
