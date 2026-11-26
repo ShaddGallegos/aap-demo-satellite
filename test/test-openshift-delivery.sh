@@ -27,7 +27,13 @@ case "$*" in
   'get crd subscriptions.operators.coreos.com') exit 0 ;;
   'get catalogsource redhat-operators -n openshift-marketplace') exit 0 ;;
   'get namespace openshift-operators') exit 0 ;;
-  *'get subscription aap-demo-openshift-gitops'*'-o json') exit 1 ;;
+  *'get subscription aap-demo-openshift-gitops'*'-o json')
+    if [ "${AAP_DEMO_UNOWNED:-false}" = true ]; then
+      printf '%s\n' '{"metadata":{"labels":{}}}'
+      exit 0
+    fi
+    exit 1
+    ;;
   *'get subscription aap-demo-openshift-pipelines'*'-o json') exit 1 ;;
   *'get packagemanifest openshift-gitops-operator'*'-o json')
     if [ "${AAP_DEMO_WRONG_CATALOG:-false}" = true ]; then
@@ -65,6 +71,17 @@ fi
 grep -Fq 'is not available from redhat-operators' "$TEST_DIR/catalog-output"
 if grep -Fq 'apply -f -' "$TEST_DIR/catalog-calls"; then
   echo "FAIL: resources were applied after a CatalogSource mismatch" >&2
+  exit 1
+fi
+
+if PATH="$TEST_DIR/bin:$PATH" AAP_DEMO_TEST_LOG="$TEST_DIR/unowned-calls" \
+  AAP_DEMO_UNOWNED=true OPENSHIFT_DELIVERY_WAIT_SECONDS=5 "$ADDON/deploy.sh" >"$TEST_DIR/unowned-output" 2>&1; then
+  echo "FAIL: an unowned GitOps Subscription was accepted" >&2
+  exit 1
+fi
+grep -Fq 'Refusing to change an unowned GitOps Subscription' "$TEST_DIR/unowned-output"
+if grep -Fq 'apply -f -' "$TEST_DIR/unowned-calls"; then
+  echo "FAIL: resources were applied after an ownership failure" >&2
   exit 1
 fi
 

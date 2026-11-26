@@ -38,11 +38,19 @@ validate_settings() {
   done
 }
 
-subscription_owner_is_safe() {
-  local name="$1" namespace="$2" existing
-  existing=$(kubectl get subscription "$name" -n "$namespace" \
-    -o json 2>/dev/null | jq -r '.metadata.labels["aap-demo/openshift-delivery"] // ""' 2>/dev/null || true)
-  [ -z "$existing" ] || [ "$existing" = managed ]
+resource_is_owned_or_absent() {
+  local resource="$1" name="$2" namespace="${3:-}" manifest owner
+  if [ -n "$namespace" ]; then
+    if ! manifest=$(kubectl get "$resource" "$name" -n "$namespace" -o json 2>/dev/null); then
+      return 0
+    fi
+  else
+    if ! manifest=$(kubectl get "$resource" "$name" -o json 2>/dev/null); then
+      return 0
+    fi
+  fi
+  owner=$(jq -r '.metadata.labels["aap-demo/openshift-delivery"] // ""' <<<"$manifest") || return 1
+  [ "$owner" = managed ]
 }
 
 package_is_available() {
@@ -105,11 +113,11 @@ preflight() {
     echo "ERROR: Shared operator namespace ${PIPELINES_NAMESPACE} is unavailable" >&2
     return 1
   }
-  subscription_owner_is_safe aap-demo-openshift-gitops "$GITOPS_NAMESPACE" || {
+  resource_is_owned_or_absent subscription aap-demo-openshift-gitops "$GITOPS_NAMESPACE" || {
     echo "ERROR: Refusing to change an unowned GitOps Subscription" >&2
     return 1
   }
-  subscription_owner_is_safe aap-demo-openshift-pipelines "$PIPELINES_NAMESPACE" || {
+  resource_is_owned_or_absent subscription aap-demo-openshift-pipelines "$PIPELINES_NAMESPACE" || {
     echo "ERROR: Refusing to change an unowned Pipelines Subscription" >&2
     return 1
   }
@@ -149,22 +157,19 @@ deploy() {
 }
 
 remove() {
-  local owner
   command -v jq >/dev/null 2>&1 || {
     echo "ERROR: jq is required for safe ownership checks" >&2
     return 1
   }
   if kubectl get subscription aap-demo-openshift-pipelines -n "$PIPELINES_NAMESPACE" >/dev/null 2>&1; then
-    subscription_owner_is_safe aap-demo-openshift-pipelines "$PIPELINES_NAMESPACE" || {
+    resource_is_owned_or_absent subscription aap-demo-openshift-pipelines "$PIPELINES_NAMESPACE" || {
       echo "ERROR: Refusing to delete an unowned Pipelines Subscription" >&2
       return 1
     }
     kubectl delete subscription aap-demo-openshift-pipelines -n "$PIPELINES_NAMESPACE" --ignore-not-found >/dev/null
   fi
   if kubectl get namespace "$GITOPS_NAMESPACE" >/dev/null 2>&1; then
-    owner=$(kubectl get namespace "$GITOPS_NAMESPACE" \
-      -o json 2>/dev/null | jq -r '.metadata.labels["aap-demo/openshift-delivery"] // ""' 2>/dev/null || true)
-    [ "$owner" = managed ] || {
+    resource_is_owned_or_absent namespace "$GITOPS_NAMESPACE" || {
       echo "ERROR: Refusing to delete unowned namespace ${GITOPS_NAMESPACE}" >&2
       return 1
     }
