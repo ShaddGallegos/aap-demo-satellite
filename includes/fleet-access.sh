@@ -7,6 +7,8 @@ FLEET_ACCESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${FLEET_ACCESS_DIR}/credential-vault.sh"
 # shellcheck source=fleet-stack.sh
 source "${FLEET_ACCESS_DIR}/fleet-stack.sh"
+# shellcheck source=ssh-trust.sh
+source "${FLEET_ACCESS_DIR}/ssh-trust.sh"
 
 FLEET_SSH_VAULT_KEY="aap_demo.fleet.ssh_private_key"
 FLEET_LEGACY_SSH_VAULT_KEY="aap_demo.fleet.legacy_ssh_private_key"
@@ -136,12 +138,22 @@ fleet_ssh_key_ensure() (
 )
 
 _fleet_ssh_with_key() {
-  local key_file="$1"
+  local key_file="$1" port=22 option previous="" arg
   shift
+  for arg in "$@"; do
+    if [ "$previous" = -p ]; then
+      port="$arg"
+      break
+    fi
+    case "$arg" in
+      -p[0-9]*) port="${arg#-p}"; break ;;
+    esac
+    previous="$arg"
+  done
+  aap_demo_ssh_prepare_trust "${AAP_DEMO_DIR:-$HOME/.aap-demo}/fleet/known_hosts" 127.0.0.1 "$port" || return 1
   ssh -i "$key_file" \
     -o IdentitiesOnly=yes \
-    -o StrictHostKeyChecking=accept-new \
-    -o UserKnownHostsFile="${AAP_DEMO_DIR:-$HOME/.aap-demo}/fleet/known_hosts" \
+    "${AAP_DEMO_SSH_TRUST_OPTS[@]}" \
     -o LogLevel=ERROR -o ConnectTimeout=10 -o BatchMode=yes "$@"
 }
 

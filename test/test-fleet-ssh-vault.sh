@@ -104,13 +104,19 @@ fi
 
 ssh-keygen -q -t ed25519 -N '' -f "$AAP_DEMO_DIR/fleet/ssh_key"
 cp "$AAP_DEMO_DIR/fleet/ssh_key" "$TEST_DIR/mismatched-key"
-if fleet_ssh_key_ensure false; then
-  echo "FAIL: a mismatched legacy identity was accepted" >&2
+if ! fleet_ssh_key_ensure false; then
+  echo "FAIL: a distinct legacy identity was not archived and removed" >&2
   exit 1
 fi
-cmp "$TEST_DIR/mismatched-key" "$AAP_DEMO_DIR/fleet/ssh_key"
+[[ ! -e "$AAP_DEMO_DIR/fleet/ssh_key" ]]
 cmp "$TEST_DIR/expected-key" <(aap_demo_vault_get_file \
   "$FLEET_SSH_VAULT_KEY" "$TEST_DIR/readback" >/dev/null && cat "$TEST_DIR/readback")
+cmp "$TEST_DIR/mismatched-key" <(aap_demo_vault_get_file \
+  "$FLEET_LEGACY_SSH_VAULT_KEY" "$TEST_DIR/legacy-readback" >/dev/null && cat "$TEST_DIR/legacy-readback")
+
+# An unreadable Vault must not alter a newly discovered local legacy key.
+ssh-keygen -q -t ed25519 -N '' -f "$AAP_DEMO_DIR/fleet/ssh_key"
+cp "$AAP_DEMO_DIR/fleet/ssh_key" "$TEST_DIR/unreadable-vault-key"
 
 printf 'unreadable-vault-password\n' >"$AAP_DEMO_VAULT_PASSWORD_FILE"
 chmod 600 "$AAP_DEMO_VAULT_PASSWORD_FILE"
@@ -118,7 +124,7 @@ if fleet_ssh_key_ensure true; then
   echo "FAIL: unreadable Vault was treated as a missing identity" >&2
   exit 1
 fi
-cmp "$TEST_DIR/mismatched-key" "$AAP_DEMO_DIR/fleet/ssh_key"
+cmp "$TEST_DIR/unreadable-vault-key" "$AAP_DEMO_DIR/fleet/ssh_key"
 
 (
   export HOME="$TEST_DIR/nodes-home" AAP_DEMO_DIR="$TEST_DIR/nodes-state"

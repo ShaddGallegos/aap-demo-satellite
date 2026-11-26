@@ -17,6 +17,16 @@
       "host_gib": 25,
       "description": "Fleet QCOW2 images and node overlays are stored on the host, outside the CRC VM."
     },
+    "gitea": {
+      "vm_gib": 0,
+      "host_gib": 40,
+      "description": "The retained Gitea VM OS disk is thin-provisioned on the host; repository and database growth needs additional host capacity."
+    },
+    "lightwell": {
+      "vm_gib": 0,
+      "host_gib": 15,
+      "description": "Lightwell's retained OpenFlake and CI runner data live on the independent Gitea VM/host storage; application-host capacity is accounted by Fleet."
+    },
     "mcp-server": {
       "vm_gib": 3,
       "host_gib": 0,

@@ -21,6 +21,8 @@ _FLEET_SATELLITE_LOADED=1
 
 # shellcheck source=fleet-access.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fleet-access.sh"
+# shellcheck source=ssh-trust.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ssh-trust.sh"
 
 SAT_HOST="${SATELLITE_LAB_HOST:-satellite.demo.lab}"
 SAT_IP="${SATELLITE_LAB_IP:-192.168.122.20}"
@@ -32,12 +34,8 @@ SAT_ORG_LABEL="${SAT_ORG_LABEL:-Demo_Org}"
 _sat_ssh() {
   local state_dir="${AAP_DEMO_DIR:-$HOME/.aap-demo}/satellite"
   local known_hosts="${state_dir}/known_hosts"
-  mkdir -p "$state_dir" || return 1
-  chmod 700 "$state_dir" || return 1
-  touch "$known_hosts" || return 1
-  chmod 600 "$known_hosts" || return 1
-  ssh -o UserKnownHostsFile="$known_hosts" -o GlobalKnownHostsFile=/dev/null \
-    -o StrictHostKeyChecking=accept-new \
+  aap_demo_ssh_prepare_trust "$known_hosts" "$SAT_IP" 22 || return 1
+  ssh "${AAP_DEMO_SSH_TRUST_OPTS[@]}" \
     -o BatchMode=yes -o ConnectTimeout=10 "root@${SAT_IP}" "$@"
 }
 
@@ -47,12 +45,8 @@ _fleet_satellite_ensure_ak() {
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   state_dir="${AAP_DEMO_DIR:-$HOME/.aap-demo}/satellite"
   known_hosts="${state_dir}/known_hosts"
-  mkdir -p "$state_dir" || return 1
-  chmod 700 "$state_dir" || return 1
-  touch "$known_hosts" || return 1
-  chmod 600 "$known_hosts" || return 1
-  scp -o UserKnownHostsFile="$known_hosts" -o GlobalKnownHostsFile=/dev/null \
-    -o StrictHostKeyChecking=accept-new -o BatchMode=yes \
+  aap_demo_ssh_prepare_trust "$known_hosts" "$SAT_IP" 22 || return 1
+  scp "${AAP_DEMO_SSH_TRUST_OPTS[@]}" -o BatchMode=yes \
     "${script_dir}/../satellite-lab/07-fleet-activation-key.sh" "root@${SAT_IP}:/root/" >/dev/null 2>&1 || return 1
   output=$(printf '%s\t%s\t%s\t%s\n' "$SAT_ORG" "$SAT_AK_NAME" "${SAT_FLEET_CV:-RHEL9}" "${SAT_FLEET_LCE:-Library}" \
     | _sat_ssh 'IFS="$(printf "\t")" read -r SAT_ORG SAT_FLEET_AK SAT_FLEET_CV SAT_FLEET_LCE

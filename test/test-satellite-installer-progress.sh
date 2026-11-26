@@ -27,5 +27,13 @@ grep -Fq 'DNF: Downloading Packages:' <<<"$output"
 
 grep -Fq '_satellite_seed_discovery_image || return 1' \
   "$REPO_ROOT/satellite-lab/build-and-configure.sh"
+grep -Fq 'Streaming cached Discovery image to the Satellite VM' \
+  "$REPO_ROOT/satellite-lab/build-and-configure.sh"
+grep -Fq 'Could not seed a verified Discovery image on the Satellite VM' \
+  "$REPO_ROOT/satellite-lab/build-and-configure.sh"
+if grep -Fq 'guest_seed=$(mktemp)' "$REPO_ROOT/satellite-lab/build-and-configure.sh"; then
+  echo 'FAIL: Discovery image seeding must not create a second host-sized temporary copy' >&2
+  exit 1
+fi
 
 echo "PASS: Satellite installer reports resource and transfer progress"

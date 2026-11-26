@@ -11,6 +11,14 @@ satellite_cloud_ready() { [ "${READY:-false}" = true ] || [ -f "$temp/ready" ]; 
 hammer() {
   echo "$*" >>"$temp/calls"
   case "$*" in
+    *'settings list'*'allow_auto_inventory_upload'*)
+      jq -cn --arg value "${INVENTORY_UPLOAD:-true}" \
+        '[{Name: "allow_auto_inventory_upload", Value: $value}]'
+      ;;
+    'settings set --name allow_auto_inventory_upload --value true')
+      [ "${INVENTORY_UPLOAD_SET_FAIL:-false}" != true ] || return 1
+      INVENTORY_UPLOAD=true
+      ;;
     'insights cloud-connector enable '*)
       [ "${ENABLE_FAIL:-false}" != true ] || return 1
       printf 'Task id: %s\n' "${TASK_ID:-492bfb45-0a70-4288-9620-8031a276d4e1}"
@@ -25,14 +33,20 @@ hammer() {
     *) return 1 ;;
   esac
 }
-reset_case() { : >"$temp/calls"; rm -f "$temp/ready"; }
+reset_case() { : >"$temp/calls"; rm -f "$temp/ready"; INVENTORY_UPLOAD=true; }
 reset_case
 READY=true satellite_cloud_main >"$temp/out"
-[ ! -s "$temp/calls" ]
+grep -q 'settings list.*allow_auto_inventory_upload' "$temp/calls"
+if grep -q '^settings set ' "$temp/calls"; then
+  echo 'FAIL: an already-enabled inventory upload setting was changed' >&2
+  exit 1
+fi
 reset_case
+INVENTORY_UPLOAD=false
 satellite_cloud_main >"$temp/out"
 grep -q '^ssh$' "$temp/calls"
 grep -q '^insights cloud-connector enable --organization Default Organization$' "$temp/calls"
+grep -q '^settings set --name allow_auto_inventory_upload --value true$' "$temp/calls"
 grep -q 'Verified:' "$temp/out"
 for failure in registration enable malformed failed paused incomplete; do
   reset_case

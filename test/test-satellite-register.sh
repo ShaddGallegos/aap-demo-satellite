@@ -29,6 +29,13 @@ printf '%s\n' "$functions" | grep -q '_stage_repos()' \
   || fail "_stage_repos is defined"
 printf '%s\n' "$functions" | grep -q '_stage_register_host_certs()' \
   || fail "_stage_register_host_certs is defined"
+printf '%s\n' "$functions" | grep -q '_satellite_register_with_credentials()' \
+  || fail "secure CDN registration helper is defined"
+printf '%s\n' "$functions" | grep -q 'rpm -q --qf' \
+  || fail "repository selection detects the installed Satellite release"
+if printf '%s\n' "$functions" | grep -Fq 'password="$(cat)"'; then
+  fail "CDN password must never be embedded in the SSH command"
+fi
 
 # --- Mock harness -------------------------------------------------------------
 LOG="$TEST_DIR/calls.log"
@@ -75,7 +82,7 @@ case "$remote" in
     [ "$SSH_REGISTERED" = true ] ;;
   "dnf list satellite >/dev/null 2>&1")
     [ "$SSH_SAT_VISIBLE" = true ] ;;
-  subscription-manager\ register*)
+  *subscription-manager\ register*)
     [ "$SSH_REGISTER_OK" = true ] ;;
   subscription-manager\ repos*)
     [ "$SSH_REGISTER_OK" = true ] || [ "$SSH_SAT_VISIBLE" = true ] || [ "$SSH_REGISTERED" = true ] ;;
@@ -134,6 +141,18 @@ if grep -q "username='user@example.com'" "$LOG"; then
 fi
 echo "PASS: activation key is preferred over username/password"
 
+# --- Test 3b: repository failures cannot be reported as registration success -
+: >"$LOG"
+SSH_REGISTERED=true
+_stage_repos() { return 1; }
+if _stage_register; then
+  fail "repository reconciliation failure must fail registration"
+fi
+echo "PASS: registration propagates repository reconciliation failures"
+eval "$functions"
+SSH_REGISTERED=false
+SSH_REGISTER_OK=true
+
 # --- Test 4: username/password falls back to host certs on failure ------------
 : >"$LOG"
 SSH_REGISTER_OK=false
@@ -142,8 +161,11 @@ VAULT_RHSM_ORG=""
 # The fallback's repo-enable step fails in this mock (no real certs), which is
 # fine — we only assert the fallback was attempted.
 _stage_register || true
-grep -q "username='user@example.com'" "$LOG" \
+grep -q "username=user@example.com" "$LOG" \
   || fail "username/password is attempted when no activation key"
+if grep -Fq 'secret' "$LOG"; then
+  fail "CDN password must not appear in the SSH command"
+fi
 grep -q "host entitlement" "$LOG" \
   || fail "failed username/password registration falls back to host certs"
 echo "PASS: failed username/password registration falls back to host certs"

@@ -66,6 +66,8 @@ VIRSH="virsh -c qemu:///system"
 SAT_DISCOVERY_IMAGE_URL="${SATELLITE_DISCOVERY_IMAGE_URL:-https://downloads.theforeman.org/discovery/releases/latest/fdi-image-latest.tar}"
 SAT_DISCOVERY_IMAGE_CACHE="${SATELLITE_DISCOVERY_IMAGE_CACHE:-/var/lib/libvirt/images/aap-demo-fdi-image-latest.tar}"
 SAT_DISCOVERY_IMAGE_GUEST_PATH="/var/lib/tftpboot/boot/fdi-image-latest.tar"
+SATELLITE_MAINTENANCE_SNAPSHOT_PREFIX="${SATELLITE_MAINTENANCE_SNAPSHOT_PREFIX:-aap-demo-maintenance}"
+SATELLITE_MAINTENANCE_SNAPSHOT=""
 
 _err() { printf 'ERROR: %s\n' "$*" >&2; }
 _log() { printf '  %s\n' "$*"; }
@@ -95,6 +97,47 @@ _sat_install_state() {
   $SAT_SSH 'if rpm -q satellite >/dev/null 2>&1; then echo installed; else echo absent; fi'
 }
 _sat_content_done() { $SAT_SSH 'hammer content-view list 2>/dev/null | grep -q RHEL9' 2>/dev/null; }
+
+_satellite_create_maintenance_snapshot() {
+  local name old
+  [ -n "$SATELLITE_MAINTENANCE_SNAPSHOT" ] && return 0
+  [[ "$SATELLITE_MAINTENANCE_SNAPSHOT_PREFIX" =~ ^[A-Za-z0-9._-]+$ ]] || {
+    _err "Invalid SATELLITE_MAINTENANCE_SNAPSHOT_PREFIX"
+    return 1
+  }
+  # Keep one aap-demo checkpoint at most; never touch an administrator's
+  # libvirt snapshot. A failed maintenance run keeps this checkpoint for a
+  # deliberate manual rollback; the next retry replaces it.
+  while IFS= read -r old; do
+    case "$old" in
+      "${SATELLITE_MAINTENANCE_SNAPSHOT_PREFIX}"-*)
+        $VIRSH snapshot-delete satellite "$old" >/dev/null || {
+          _err "Cannot remove prior managed Satellite checkpoint $old"
+          return 1
+        }
+        ;;
+    esac
+  done < <($VIRSH snapshot-list satellite --name 2>/dev/null || true)
+  name="${SATELLITE_MAINTENANCE_SNAPSHOT_PREFIX}-$(date -u +%Y%m%dT%H%M%SZ)"
+  _log "▸ Creating libvirt checkpoint $name before Satellite maintenance"
+  $VIRSH snapshot-create-as satellite "$name" \
+    --description 'aap-demo pre-maintenance rollback checkpoint' --atomic || {
+      _err "Could not create the Satellite libvirt checkpoint; refusing maintenance"
+      return 1
+    }
+  SATELLITE_MAINTENANCE_SNAPSHOT="$name"
+  _log "✓ Hypervisor rollback checkpoint ready: $name"
+}
+
+_satellite_cleanup_maintenance_snapshot() {
+  [ -n "$SATELLITE_MAINTENANCE_SNAPSHOT" ] || return 0
+  $VIRSH snapshot-delete satellite "$SATELLITE_MAINTENANCE_SNAPSHOT" >/dev/null || {
+    _err "Maintenance succeeded but the managed checkpoint could not be removed: $SATELLITE_MAINTENANCE_SNAPSHOT"
+    return 1
+  }
+  _log "✓ Removed successful Satellite maintenance checkpoint"
+  SATELLITE_MAINTENANCE_SNAPSHOT=""
+}
 
 _satellite_ensure_ssh_store() {
   mkdir -p "$SAT_STATE_DIR" || return 1
@@ -126,9 +169,8 @@ _satellite_discovery_cache_path_is_safe() {
 # tarball is extracted instead of fetched a second time.
 _satellite_seed_discovery_image() {
   _satellite_discovery_cache_path_is_safe || return 1
-  local cache_tmp guest_seed
+  local cache_tmp cache_bytes guest_available_kib required_kib
   cache_tmp=$(mktemp) || return 1
-  guest_seed=$(mktemp) || { rm -f -- "$cache_tmp"; return 1; }
 
   if sudo test -s "$SAT_DISCOVERY_IMAGE_CACHE" && \
     sudo tar -tf "$SAT_DISCOVERY_IMAGE_CACHE" >/dev/null 2>&1; then
@@ -138,27 +180,48 @@ _satellite_seed_discovery_image() {
     if ! curl --fail --location --retry 3 --retry-delay 2 \
       --output "$cache_tmp" "$SAT_DISCOVERY_IMAGE_URL"; then
       _err "Could not download the Satellite Discovery image"
-      rm -f -- "$cache_tmp" "$guest_seed"
+      rm -f -- "$cache_tmp"
       return 1
     fi
     if ! tar -tf "$cache_tmp" >/dev/null 2>&1; then
       _err "Downloaded Satellite Discovery image is not a valid tar archive"
-      rm -f -- "$cache_tmp" "$guest_seed"
+      rm -f -- "$cache_tmp"
       return 1
     fi
-    sudo install -d -m 0755 /var/lib/libvirt/images || { rm -f -- "$cache_tmp" "$guest_seed"; return 1; }
-    sudo install -m 0644 "$cache_tmp" "${SAT_DISCOVERY_IMAGE_CACHE}.new" || { rm -f -- "$cache_tmp" "$guest_seed"; return 1; }
-    sudo mv -f -- "${SAT_DISCOVERY_IMAGE_CACHE}.new" "$SAT_DISCOVERY_IMAGE_CACHE" || { rm -f -- "$cache_tmp" "$guest_seed"; return 1; }
+    sudo install -d -m 0755 /var/lib/libvirt/images || { rm -f -- "$cache_tmp"; return 1; }
+    sudo install -m 0644 "$cache_tmp" "${SAT_DISCOVERY_IMAGE_CACHE}.new" || { rm -f -- "$cache_tmp"; return 1; }
+    sudo mv -f -- "${SAT_DISCOVERY_IMAGE_CACHE}.new" "$SAT_DISCOVERY_IMAGE_CACHE" || { rm -f -- "$cache_tmp"; return 1; }
     _log "✓ Cached Satellite Discovery image: ${SAT_DISCOVERY_IMAGE_CACHE}"
   fi
 
-  # Read the root-owned cache through a user-owned temporary file so scp never
-  # needs elevated privileges.  The temporary file is removed on every return.
-  sudo install -m 0600 "$SAT_DISCOVERY_IMAGE_CACHE" "$guest_seed" || { rm -f -- "$cache_tmp" "$guest_seed"; return 1; }
-  $SAT_SSH "install -d -m 0755 $(dirname "$SAT_DISCOVERY_IMAGE_GUEST_PATH")" || { rm -f -- "$cache_tmp" "$guest_seed"; return 1; }
-  $SAT_SCP "$guest_seed" "root@${SAT_IP}:${SAT_DISCOVERY_IMAGE_GUEST_PATH}" || { rm -f -- "$cache_tmp" "$guest_seed"; return 1; }
-  rm -f -- "$cache_tmp" "$guest_seed"
-  _log "✓ Seeded cached Discovery image on the Satellite VM"
+  cache_bytes=$(sudo stat -c %s "$SAT_DISCOVERY_IMAGE_CACHE") || { rm -f -- "$cache_tmp"; return 1; }
+  required_kib=$(( (cache_bytes + 1023) / 1024 + 1024 * 1024 ))
+
+  # An interrupted prior transfer must not be mistaken for a usable cache.
+  if $SAT_SSH "test -s '${SAT_DISCOVERY_IMAGE_GUEST_PATH}' && tar -tf '${SAT_DISCOVERY_IMAGE_GUEST_PATH}' >/dev/null 2>&1"; then
+    rm -f -- "$cache_tmp"
+    _log "✓ Discovery image is already seeded on the Satellite VM"
+    return 0
+  fi
+
+  guest_available_kib=$($SAT_SSH "install -d -m 0755 '$(dirname "$SAT_DISCOVERY_IMAGE_GUEST_PATH")' && df -Pk '$(dirname "$SAT_DISCOVERY_IMAGE_GUEST_PATH")' | awk 'NR == 2 {print \$4}'" 2>/dev/null || true)
+  if ! [[ "$guest_available_kib" =~ ^[0-9]+$ ]] || [ "$guest_available_kib" -lt "$required_kib" ]; then
+    _err "Satellite VM has insufficient free space for the Discovery image (need ${required_kib} KiB, available ${guest_available_kib:-unknown} KiB)"
+    rm -f -- "$cache_tmp"
+    return 1
+  fi
+
+  # Stream the root-owned cache directly into a guest-side temporary file. This
+  # avoids a second 1+ GiB host copy and leaves the final path atomic and valid.
+  _log "▸ Streaming cached Discovery image to the Satellite VM (${cache_bytes} bytes)..."
+  if ! sudo cat "$SAT_DISCOVERY_IMAGE_CACHE" | $SAT_SSH "temporary='${SAT_DISCOVERY_IMAGE_GUEST_PATH}.aap-demo.new'; rm -f \"\$temporary\"; cat >\"\$temporary\" && tar -tf \"\$temporary\" >/dev/null && mv -f \"\$temporary\" '${SAT_DISCOVERY_IMAGE_GUEST_PATH}'"; then
+    _err "Could not seed a verified Discovery image on the Satellite VM"
+    $SAT_SSH "rm -f '${SAT_DISCOVERY_IMAGE_GUEST_PATH}.aap-demo.new'" >/dev/null 2>&1 || true
+    rm -f -- "$cache_tmp"
+    return 1
+  fi
+  rm -f -- "$cache_tmp"
+  _log "✓ Seeded and verified cached Discovery image on the Satellite VM"
 }
 
 _satellite_installer_progress() {
@@ -231,8 +294,8 @@ _satellite_maintenance_progress() {
 }
 
 _satellite_run_maintenance_with_progress() {
-  local backup_dir="$1" maintenance_pid rc=0
-  printf 'export SATELLITE_BACKUP_DIR=%q\nbash /root/maintain-satellite.sh\n' "$backup_dir" | \
+  local checkpoint="$1" maintenance_pid rc=0
+  printf 'export SATELLITE_MAINTENANCE_CHECKPOINT=%q\nbash /root/maintain-satellite.sh\n' "$checkpoint" | \
     $SAT_SSH 'bash -s' &
   maintenance_pid=$!
   while kill -0 "$maintenance_pid" 2>/dev/null; do
@@ -402,10 +465,21 @@ _stage_wait_install() {
 # -> host entitlement certs (the same CDN cert-auth pattern 00a-fetch-rhel-iso.sh
 # uses for the ISO download). Certificate-only access can install packages but
 # cannot enable Cloud Connector, so it is deliberately the fallback.
+_satellite_register_with_credentials() {
+  # The password must travel only on SSH stdin.  Embedding it in the remote
+  # command makes shell metacharacters alter registration and exposes it in the
+  # local ssh process arguments.
+  local username="$1" password="$2" remote_command
+  printf -v remote_command \
+    'IFS= read -r rhsm_password || test -n "$rhsm_password"; subscription-manager register --username=%q --password="$rhsm_password" --auto-attach' \
+    "$username"
+  printf '%s\n' "$password" | $SAT_SSH "$remote_command"
+}
+
 _stage_register() {
   if $SAT_SSH 'subscription-manager identity >/dev/null 2>&1'; then
     _log "✓ Satellite VM already registered with RHSM"
-    _stage_repos
+    _stage_repos || return 1
     return 0
   fi
   _log "▸ Stage: register Satellite VM with RHSM"
@@ -423,7 +497,7 @@ _stage_register() {
   if [ -n "$rhsm_ak" ] && [ -n "$rhsm_org" ]; then
     _log "  using activation key (org $rhsm_org)"
     if $SAT_SSH "subscription-manager register --org='$rhsm_org' --activationkey='$rhsm_ak'"; then
-      _stage_repos
+      _stage_repos || return 1
       return 0
     fi
     _log "  activation-key registration failed; trying next method"
@@ -431,10 +505,8 @@ _stage_register() {
 
   if [ -n "$rhsm_user" ] && [ -n "$rhsm_pass" ]; then
     _log "  using encrypted CDN credentials"
-    # Pass the secret over stdin to keep it out of the process list.
-    if printf '%s' "$rhsm_pass" | $SAT_SSH \
-      "subscription-manager register --username='$rhsm_user' --password=\"$(cat)\" --auto-attach"; then
-      _stage_repos
+    if _satellite_register_with_credentials "$rhsm_user" "$rhsm_pass"; then
+      _stage_repos || return 1
       return 0
     fi
     _log "  encrypted CDN credential registration failed"
@@ -445,9 +517,8 @@ _stage_register() {
   if [ -n "$legacy_user" ] && [ -n "$legacy_pass" ] \
     && { [ "$legacy_user" != "$rhsm_user" ] || [ "$legacy_pass" != "$rhsm_pass" ]; }; then
     _log "  trying legacy RHSM credentials"
-    if printf '%s' "$legacy_pass" | $SAT_SSH \
-      "subscription-manager register --username='$legacy_user' --password=\"$(cat)\" --auto-attach"; then
-      _stage_repos
+    if _satellite_register_with_credentials "$legacy_user" "$legacy_pass"; then
+      _stage_repos || return 1
       return 0
     fi
     _log "  legacy RHSM credential registration failed"
@@ -455,24 +526,36 @@ _stage_register() {
 
   if $SAT_SSH 'dnf list satellite >/dev/null 2>&1'; then
     _log "✓ Satellite packages already accessible (entitlement certs present)"
-    _stage_repos
+    _stage_repos || return 1
     return 0
   fi
 
   _stage_register_host_certs
 }
 
-# Enable only the repos Satellite 6.17 on RHEL 9 needs. Enable and verify each
-# repo individually: a combined --disable='*' --enable=... can silently drop a
-# repo when the entitlement cert's content list has not refreshed yet.
+# Enable only the current Satellite release's supported RHEL repositories.
+# A maintained VM may have advanced beyond the initial 6.17 release, so query
+# its installed package instead of downgrading its repository selection.
+# Enable and verify each repo individually: a combined --disable='*'
+# --enable=... can silently drop a repo when the entitlement content list has
+# not refreshed yet.
 _stage_repos() {
-  local repo
+  local repo satellite_version os_major arch
+  satellite_version=$($SAT_SSH "rpm -q --qf '%{VERSION}' satellite 2>/dev/null || true" | tail -n 1)
+  if [[ ! "$satellite_version" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+    satellite_version="${SATELLITE_INITIAL_VERSION:-6.17}"
+  fi
+  satellite_version="${satellite_version%.*}"
+  os_major=$($SAT_SSH '. /etc/os-release && printf %s "${VERSION_ID%%.*}"' 2>/dev/null || true)
+  arch=$($SAT_SSH "rpm --eval '%{_arch}'" 2>/dev/null || true)
+  os_major="${os_major:-9}"
+  arch="${arch:-x86_64}"
   $SAT_SSH "subscription-manager repos --disable='*' >/dev/null" || return 1
   for repo in \
-    rhel-9-for-x86_64-baseos-rpms \
-    rhel-9-for-x86_64-appstream-rpms \
-    satellite-6.17-for-rhel-9-x86_64-rpms \
-    satellite-maintenance-6.17-for-rhel-9-x86_64-rpms; do
+    "rhel-${os_major}-for-${arch}-baseos-rpms" \
+    "rhel-${os_major}-for-${arch}-appstream-rpms" \
+    "satellite-${satellite_version}-for-rhel-${os_major}-${arch}-rpms" \
+    "satellite-maintenance-${satellite_version}-for-rhel-${os_major}-${arch}-rpms"; do
     $SAT_SSH "subscription-manager repos --enable='$repo' >/dev/null" || {
       _err "Failed to enable repository: $repo"
       return 1
@@ -548,14 +631,15 @@ _stage_installer() {
 }
 
 _stage_maintenance() {
-  _log "▸ Stage: maintain existing Satellite (backup, update, supported upgrades)"
+  _log "▸ Stage: maintain existing Satellite (hypervisor checkpoint, update, supported upgrades)"
   $SAT_SCP "${SCRIPT_DIR}/maintain-satellite.sh" "root@${SAT_IP}:/root/" || return 1
+  _satellite_create_maintenance_snapshot || return 1
   local rc boot_id new_boot_id attempt ready
   while :; do
     boot_id=$($SAT_SSH 'cat /proc/sys/kernel/random/boot_id') || return 1
     rc=0
     _satellite_run_maintenance_with_progress \
-      "${SATELLITE_BACKUP_DIR:-/var/backup/satellite}" || rc=$?
+      "$SATELLITE_MAINTENANCE_SNAPSHOT" || rc=$?
     [ "$rc" -ne 194 ] || {
       _log "Satellite maintenance requires a reboot; waiting for a new boot"
       $SAT_SSH 'systemd-run --collect --unit=aap-demo-satellite-reboot --on-active=3s systemctl reboot' || return 1
@@ -574,6 +658,9 @@ _stage_maintenance() {
       }
       continue
     }
+    if [ "$rc" -eq 0 ]; then
+      _satellite_cleanup_maintenance_snapshot || return 1
+    fi
     return "$rc"
   done
 }
@@ -624,20 +711,69 @@ _stage_content() {
 _stage_sync_plan() {
   _log "▸ Stage: reconcile Satellite content sync plan"
   $SAT_SCP "${SCRIPT_DIR}/09-content-sync-plan.sh" "root@${SAT_IP}:/root/" || return 1
-  local remote_env collection_token credentials_file
+  local remote_env collection_token pull_secret registry_auth registry_pair credential_source
+  local flatpak_username flatpak_token cdn_username cdn_password credentials_file
   collection_token=$(_vault_val ah_offline_token)
+  # Full-demo validates the Customer Portal/CDN pair first and passes this
+  # non-secret selector through to use the same Vault values here. When Red
+  # Hat rejects that scope, it stores and selects a Registry Service Account.
+  credential_source="${AAP_DEMO_FLATPAK_CREDENTIAL_SOURCE:-auto}"
+  flatpak_username=""
+  flatpak_token=""
+  if [ "$credential_source" = cdn ] || [ "$credential_source" = auto ]; then
+    cdn_username=$(_vault_val aap_demo.redhat.cdn_username)
+    cdn_password=$(_vault_val aap_demo.redhat.cdn_password)
+    if [ -n "$cdn_username" ] && [ -n "$cdn_password" ]; then
+      flatpak_username="$cdn_username"
+      flatpak_token="$cdn_password"
+    fi
+    unset cdn_username cdn_password
+  fi
+  if { [ -z "$flatpak_username" ] || [ -z "$flatpak_token" ]; } && [ "$credential_source" != cdn ]; then
+    flatpak_username=$(_vault_val aap_demo.redhat.registry_username)
+    flatpak_token=$(_vault_val aap_demo.redhat.registry_token)
+  fi
+  pull_secret=""
+  registry_auth=""
+  if [ -z "$flatpak_username" ] || [ -z "$flatpak_token" ]; then
+    pull_secret=$(aap_demo_pull_secret_get 2>/dev/null || true)
+  fi
+  if [ -n "$pull_secret" ]; then
+    registry_auth=$(printf '%s' "$pull_secret" | jq -r '
+      .auths["flatpaks.registry.redhat.io"].auth
+      // .auths["registry.redhat.io"].auth
+      // .auths["registry.access.redhat.com"].auth
+      // empty
+    ' 2>/dev/null || true)
+  fi
+  unset pull_secret
+  if { [ -z "$flatpak_username" ] || [ -z "$flatpak_token" ]; } && [ -n "$registry_auth" ]; then
+    registry_pair=$(printf '%s' "$registry_auth" | base64 -d 2>/dev/null || true)
+    unset registry_auth
+    flatpak_username="${registry_pair%%:*}"
+    flatpak_token="${registry_pair#*:}"
+    unset registry_pair
+  fi
   credentials_file=""
-  if [ -n "$collection_token" ]; then
+  if [ -n "$collection_token" ] || [ -n "$flatpak_username" ] || [ -n "$flatpak_token" ]; then
     credentials_file=$(mktemp) || { unset collection_token; return 1; }
     chmod 600 "$credentials_file"
-    printf 'export SATELLITE_COLLECTIONS_AUTH_TOKEN=%q\n' "$collection_token" >"$credentials_file"
+    if [ -n "$collection_token" ]; then
+      printf 'export SATELLITE_COLLECTIONS_AUTH_TOKEN=%q\n' "$collection_token" >"$credentials_file"
+    fi
+    if [ -n "$flatpak_username" ] && [ -n "$flatpak_token" ]; then
+      printf 'export SATELLITE_FLATPAK_USERNAME=%q\n' "$flatpak_username" >>"$credentials_file"
+      printf 'export SATELLITE_FLATPAK_TOKEN=%q\n' "$flatpak_token" >>"$credentials_file"
+    fi
     unset collection_token
+    unset flatpak_username flatpak_token
     $SAT_SCP "$credentials_file" "root@${SAT_IP}:/root/.aap-demo-sync-plan.env" || {
       rm -f -- "$credentials_file"
       return 1
     }
     rm -f -- "$credentials_file"
   fi
+  unset flatpak_username flatpak_token
   printf -v remote_env 'SAT_ORG=%q SATELLITE_SYNC_PLAN_NAME=%q SATELLITE_SYNC_PLAN_INTERVAL=%q SATELLITE_SYNC_PLAN_SYNC_DATE=%q' \
     "${SAT_ORG:-}" "${SATELLITE_SYNC_PLAN_NAME:-}" \
     "${SATELLITE_SYNC_PLAN_INTERVAL:-}" "${SATELLITE_SYNC_PLAN_SYNC_DATE:-}"

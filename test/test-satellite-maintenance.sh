@@ -7,14 +7,13 @@ AAP_DEMO_DIR="$TEST_DIR/state"
 export AAP_DEMO_DIR
 source "$REPO_ROOT/satellite-lab/maintain-satellite.sh"
 LOG="$TEST_DIR/log"
-SATELLITE_BACKUP_DIR="$TEST_DIR/backups"
 os_major=$(. /etc/os-release; printf '%s' "${VERSION_ID%%.*}")
 reset_case() {
   : >"$LOG"
   printf 6.17.12 >"$TEST_DIR/version"
   printf 6.17 >"$TEST_DIR/target"
   printf 0 >"$TEST_DIR/pending"
-  RELEASES="" BACKUP_FAIL=false CHECK_FAIL=false PARTIAL=false REBOOT_RC=0 DISCOVERY_RC="" NO_APPLY=false
+  RELEASES="" BACKUP_FAIL=false CHECK_FAIL=false PARTIAL=false REBOOT_RC=0 DISCOVERY_RC="" NO_APPLY=false ACTIVE_TASKS='[]' SATELLITE_MAINTENANCE_CHECKPOINT=""
   OFFLINE_REPO_BUG=false UPGRADE_FAIL=false REGISTERED=false REPO_ENABLE_FAIL=false REPO_ENABLE_NOOP=false
   ENABLED_REPOS="" REPO_BUG_TRIGGERED=false
 }
@@ -95,9 +94,28 @@ subscription-manager() {
     printf 'Repo ID: satellite-maintenance-%s-for-rhel-%s-x86_64-rpms\n' "$release" "$os_major"
   done
 }
+hammer() {
+  case "$*" in
+    "--output json task list --search state = running --per-page 100") printf '%s\n' "$ACTIVE_TASKS" ;;
+    "task progress --id "*) ACTIVE_TASKS='[]' ;;
+    *) return 1 ;;
+  esac
+}
+timeout() {
+  shift
+  "$@"
+}
 reset_case
 satellite_maintenance_main >"$TEST_DIR/output"
 ! grep -Eq '^backup |^(update|upgrade) run' "$LOG"
+reset_case
+ACTIVE_TASKS='[{"ID":"task-1","Action":"Wait and Red Hat Lightspeed scheduled sync"}]'
+SATELLITE_MAINTENANCE_CHECKPOINT='aap-demo-maintenance-test'
+satellite_backup 6.17 >"$TEST_DIR/output" 2>&1
+grep -q 'Using managed hypervisor checkpoint: aap-demo-maintenance-test' "$TEST_DIR/output"
+! grep -q '^backup offline' "$LOG"
+satellite_backup 6.17 >"$TEST_DIR/output" 2>&1
+! grep -q '^backup offline' "$LOG"
 reset_case
 printf 100 >"$TEST_DIR/pending"
 RELEASES="6.18 6.19"
@@ -105,20 +123,18 @@ satellite_maintenance_main >"$TEST_DIR/output"
 [[ "$(cat "$TEST_DIR/version")" == 6.19.0 ]]
 [[ "$(grep -c '^upgrade run' "$LOG")" == 2 ]]
 awk '
-  /^backup offline/ {backup=NR}
-  /^self-upgrade$/ {if(!backup || backup>NR) exit 1}
-  /^dnf .* upgrade satellite-maintain/ {if(!backup || backup>NR) exit 1}
+  /^self-upgrade$/ {self_upgrade=NR}
+  /^dnf .* upgrade satellite-maintain/ {if(!self_upgrade || self_upgrade>NR) exit 1}
   /^(update|upgrade) check/ {check=NR}
-  /^(update|upgrade) run/ {if(!backup || !check || check<backup) exit 1}
+  /^(update|upgrade) run/ {if(!check || check<self_upgrade) exit 1}
 ' "$LOG"
 satellite_maintenance_main >"$TEST_DIR/output"
 [[ "$(grep -c '^upgrade run' "$LOG")" == 2 ]]
-[[ "$(grep -c '^backup offline' "$LOG")" == 3 ]]
-for failure in backup check discovery partial; do
+! grep -q '^backup offline' "$LOG"
+for failure in check discovery partial; do
   reset_case
   printf 100 >"$TEST_DIR/pending"
   case "$failure" in
-    backup) BACKUP_FAIL=true ;;
     check) CHECK_FAIL=true ;;
     discovery) DISCOVERY_RC=1 ;;
     partial) PARTIAL=true ;;
@@ -332,6 +348,14 @@ done
   printf old-boot >"$TEST_DIR/boot"
   printf 0 >"$TEST_DIR/maintenance-calls"
   mock_scp() { :; }
+  mock_virsh() {
+    case "$1" in
+      snapshot-list) : ;;
+      snapshot-create-as) printf 'create %s\n' "$*" >>"$LOG" ;;
+      snapshot-delete) printf 'delete %s\n' "$*" >>"$LOG" ;;
+      *) return 1 ;;
+    esac
+  }
   sleep() { :; }
   mock_ssh() {
     case "$1" in
@@ -346,10 +370,12 @@ done
       *) return 1 ;;
     esac
   }
-  SAT_SCP=mock_scp SAT_SSH=mock_ssh
+  SAT_SCP=mock_scp SAT_SSH=mock_ssh VIRSH=mock_virsh
   _stage_maintenance >"$TEST_DIR/output"
   [[ "$(cat "$TEST_DIR/maintenance-calls")" == 2 ]]
   [[ "$(cat "$TEST_DIR/boot")" == new-boot ]]
+  grep -q '^create snapshot-create-as satellite aap-demo-maintenance-' "$LOG"
+  grep -q '^delete snapshot-delete satellite aap-demo-maintenance-' "$LOG"
 )
 (
   source "$REPO_ROOT/satellite-lab/build-and-configure.sh"
@@ -387,4 +413,4 @@ done
   SAT_ORG="Custom's Org" _stage_upload_manifest >"$TEST_DIR/output"
   [[ "$(cat "$TEST_DIR/imported-org")" == "Custom's Org" ]]
 )
-echo "PASS: existing Satellite is maintained, upgrades are sequential and backed up, failures stop the build"
+echo "PASS: existing Satellite is maintained with one hypervisor checkpoint, sequential upgrades, and safe failure stops"

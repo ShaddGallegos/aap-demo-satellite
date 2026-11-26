@@ -1,3 +1,10 @@
+---
+type: Reference
+title: Security policy and local trust controls
+description: Report vulnerabilities and use the local lab's credential, TLS, and SSH trust safeguards.
+tags: [security, trust, credentials]
+---
+
 # Security Policy
 
 ## Reporting a Vulnerability
@@ -20,6 +27,27 @@ Please include the following information in your report:
 ## Supported Versions
 
 Security updates are applied to the latest release on the `main` branch.
+
+## Local-lab trust controls
+
+The demo stores SSH host keys in its own state directories instead of changing
+the user's global `known_hosts`. The default first-use mode is appropriate for
+a private, disposable local lab. Higher-security deployments can require
+fingerprint verification before first connection:
+
+```bash
+export AAP_DEMO_SSH_TRUST_MODE=verify
+export AAP_DEMO_SSH_FINGERPRINTS='192.168.122.20:22=SHA256:<satellite-fingerprint>'
+```
+
+Use one comma-separated `host:port=SHA256:<fingerprint>` entry for every
+managed SSH peer. `AAP_DEMO_SSH_TRUST_MODE=strict` instead requires an
+already-enrolled managed host key. Never copy a fingerprint from the same
+untrusted network path that is being verified.
+
+Run `bash scripts/security-audit.sh` for a read-only review of repository
+guardrails. It does not read credential Vault values. The optional `--strict`
+mode makes unresolved findings fail the command.
 
 ## Disclosure Policy
 

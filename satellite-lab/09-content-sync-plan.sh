@@ -19,6 +19,11 @@ COLLECTIONS_PRODUCT="${SATELLITE_COLLECTIONS_PRODUCT:-aap-demo-ansible-collectio
 COLLECTIONS_REPOSITORY="${SATELLITE_COLLECTIONS_REPOSITORY:-Red Hat Ansible Collections}"
 COLLECTIONS_URL="${SATELLITE_COLLECTIONS_URL:-https://console.redhat.com/api/automation-hub/}"
 COLLECTIONS_AUTH_URL="${SATELLITE_COLLECTIONS_AUTH_URL:-https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token}"
+CONTENT_SYNC_TIMEOUT_SECONDS="${SATELLITE_CONTENT_SYNC_TIMEOUT_SECONDS:-5400}"
+# The Automation Hub offline-token exchange is reliable when the first catalog
+# import is serialized.  Higher Pulp concurrency can stampede the exchange and
+# leave a Satellite worker refreshing bearer tokens without transferring data.
+COLLECTIONS_DOWNLOAD_CONCURRENCY="${SATELLITE_COLLECTIONS_DOWNLOAD_CONCURRENCY:-1}"
 
 case "$INTERVAL" in
   daily | weekly | monthly) ;;
@@ -27,6 +32,28 @@ case "$INTERVAL" in
     exit 2
     ;;
 esac
+
+case "$CONTENT_SYNC_TIMEOUT_SECONDS" in
+  '' | *[!0-9]*)
+    echo "ERROR: SATELLITE_CONTENT_SYNC_TIMEOUT_SECONDS must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+[ "$CONTENT_SYNC_TIMEOUT_SECONDS" -gt 0 ] || {
+  echo "ERROR: SATELLITE_CONTENT_SYNC_TIMEOUT_SECONDS must be greater than zero" >&2
+  exit 2
+}
+
+case "$COLLECTIONS_DOWNLOAD_CONCURRENCY" in
+  '' | *[!0-9]*)
+    echo "ERROR: SATELLITE_COLLECTIONS_DOWNLOAD_CONCURRENCY must be an integer from 1 to 19" >&2
+    exit 2
+    ;;
+esac
+[ "$COLLECTIONS_DOWNLOAD_CONCURRENCY" -ge 1 ] && [ "$COLLECTIONS_DOWNLOAD_CONCURRENCY" -lt 20 ] || {
+  echo "ERROR: SATELLITE_COLLECTIONS_DOWNLOAD_CONCURRENCY must be an integer from 1 to 19" >&2
+  exit 2
+}
 
 if [ -z "$SYNC_DATE" ]; then
   # Only used when creating the plan. Existing plans retain their established
@@ -52,10 +79,11 @@ reconcile_flatpak_remote() {
     return 1
   }
 
-  local remotes remote_id products product_id create_args repo_ids repos mirrored output repo_id
+  local remotes remote_id products product_id create_args repo_ids repos remote_repos
+  local target_repos output repo_id repo_name
   remotes=$(hammer --output json flatpak-remote list --organization "$ORG") || return 1
   remote_id=$(jq -er --arg name "$FLATPAK_NAME" \
-    '.[] | select((.Name // .name) == $name) | (.Id // .id)' <<<"$remotes" | head -n1) || true
+    '.[] | select((.Name // .name) == $name) | (.ID // .Id // .id)' <<<"$remotes" | head -n1) || true
   if [ -z "$remote_id" ]; then
     echo "▸ Creating Flatpak remote: ${FLATPAK_NAME}"
     create_args=(flatpak-remote create --name "$FLATPAK_NAME" --organization "$ORG" --url "$FLATPAK_URL")
@@ -64,9 +92,20 @@ reconcile_flatpak_remote() {
     hammer "${create_args[@]}" || return 1
     remotes=$(hammer --output json flatpak-remote list --organization "$ORG") || return 1
     remote_id=$(jq -er --arg name "$FLATPAK_NAME" \
-      '.[] | select((.Name // .name) == $name) | (.Id // .id)' <<<"$remotes" | head -n1) || return 1
+      '.[] | select((.Name // .name) == $name) | (.ID // .Id // .id)' <<<"$remotes" | head -n1) || return 1
   else
     echo "✓ Reusing Flatpak remote: ${FLATPAK_NAME}"
+  fi
+  if [ -n "${SATELLITE_FLATPAK_USERNAME:-}" ] && [ -n "${SATELLITE_FLATPAK_TOKEN:-}" ]; then
+    # Remote credentials are held by Satellite, not printed by Hammer. Update
+    # them on every reconciliation so an imported pull-secret rotation is used
+    # without deleting the remote or its mirrored content.
+    hammer flatpak-remote update --id "$remote_id" \
+      --username "$SATELLITE_FLATPAK_USERNAME" --token "$SATELLITE_FLATPAK_TOKEN" || return 1
+  else
+    echo "ERROR: Flatpak mirroring requires registry.redhat.io credentials" >&2
+    echo "  Configure the Vault-backed CDN credentials, or a Registry Service Account if Red Hat rejects their registry scope, then retry." >&2
+    return 1
   fi
 
   products=$(hammer --output json product list --organization "$ORG") || return 1
@@ -81,33 +120,95 @@ reconcile_flatpak_remote() {
   fi
 
   hammer flatpak-remote scan --id "$remote_id" || return 1
-  repos=$(hammer --output json flatpak-remote remote-repository list --remote-id "$remote_id") || return 1
-  mapfile -t repo_ids < <(jq -r '.[] | (.Id // .id // empty)' <<<"$repos" | sort -u)
+  remote_repos=$(hammer --output json flatpak-remote remote-repository list \
+    --flatpak-remote-id "$remote_id") || return 1
+  mapfile -t repo_ids < <(jq -r '.[] | (.ID // .Id // .id // empty)' <<<"$remote_repos" | sort -u)
   [ "${#repo_ids[@]}" -gt 0 ] || {
     echo "ERROR: Flatpak remote ${FLATPAK_NAME} returned no repositories after scanning" >&2
     return 1
   }
-  for repo_id in "${repo_ids[@]}"; do
-    if ! output=$(hammer flatpak-remote remote-repository mirror --id "$repo_id" --product-id "$product_id" 2>&1); then
+  target_repos=$(hammer --output json repository list --product-id "$product_id") || return 1
+  while IFS=$'\t' read -r repo_id repo_name; do
+    [ -n "$repo_id" ] || continue
+    if jq -e --arg name "$repo_name" \
+      'any(.[]; (.Name // .name) == $name)' <<<"$target_repos" >/dev/null; then
+      echo "  ✓ Flatpak repository ${repo_name} already mirrored"
+      continue
+    fi
+    if ! output=$(hammer flatpak-remote remote-repository mirror --id "$repo_id" \
+      --flatpak-remote-id "$remote_id" --product-id "$product_id" 2>&1); then
       case "$output" in
         *already*mirrored* | *already*exists*) echo "  ✓ Flatpak repository ${repo_id} already mirrored" ;;
         *) printf '%s\n' "$output" >&2; return 1 ;;
       esac
     fi
-  done
+  done < <(jq -r '.[] | [(.ID // .Id // .id // empty), (.Name // .name // empty)] | @tsv' \
+    <<<"$remote_repos")
   repos=$(hammer --output json repository list --product-id "$product_id") || return 1
-  mapfile -t repo_ids < <(jq -r '.[] | (.Id // .id // empty)' <<<"$repos" | sort -u)
+  mapfile -t repo_ids < <(jq -r '.[] | (.ID // .Id // .id // empty)' <<<"$repos" | sort -u)
   [ "${#repo_ids[@]}" -gt 0 ] || {
     echo "ERROR: No Satellite repositories were created for Flatpak product ${FLATPAK_PRODUCT}" >&2
     return 1
   }
   for repo_id in "${repo_ids[@]}"; do
-    hammer repository synchronize --id "$repo_id" || return 1
+    # Mirroring creates a Pulp remote for each repository. Updating only the
+    # parent Flatpak remote leaves an existing child remote with its previous
+    # credentials, so rotate the per-repository upstream authentication too.
+    hammer repository update --id "$repo_id" \
+      --upstream-username "$SATELLITE_FLATPAK_USERNAME" \
+      --upstream-password "$SATELLITE_FLATPAK_TOKEN" || return 1
+    if ! hammer repository synchronize --id "$repo_id"; then
+      echo "ERROR: Flatpak repository synchronization failed." >&2
+      echo "  Verify the Vault-backed CDN credentials are authorized for the Red Hat Flatpak registry." >&2
+      echo "  If Red Hat rejects that scope, rerun interactively to replace them with a Registry Service Account." >&2
+      return 1
+    fi
   done
   echo "✓ Flatpak remote ${FLATPAK_NAME} mirrored and synchronized (${#repo_ids[@]} repository/repositories)"
 }
 
 reconcile_flatpak_remote
+
+recover_stalled_collection_worker() {
+  local unit refreshes
+  # Pulp can leave a task running when an Automation Hub bearer-token refresh
+  # loops. Restart only the worker that is demonstrably emitting that loop;
+  # this makes Pulp mark the abandoned task stopped so a later reconciliation
+  # can start a fresh, serialized sync.
+  for unit in pulpcore-worker@1 pulpcore-worker@2 pulpcore-worker@3 pulpcore-worker@4; do
+    refreshes=$(journalctl -u "$unit" --since '5 minutes ago' --no-pager 2>/dev/null \
+      | grep -Fc 'Updating bearer token' || true)
+    if [ "$refreshes" -ge 20 ]; then
+      echo "WARNING: restarting $unit after ${refreshes} repeated Automation Hub token refreshes" >&2
+      systemctl restart "$unit" || return 1
+      return 0
+    fi
+  done
+  echo "WARNING: collection sync timed out, but no token-refreshing Pulp worker was identified; leaving services unchanged" >&2
+  return 0
+}
+
+wait_for_existing_repository_sync() {
+  local repository_name="$1" active_tasks task_id
+  active_tasks=$(hammer --output json task list --search 'state = running' --per-page 100) || return 1
+  task_id=$(jq -r --arg repository "$repository_name" '
+    .[]
+    | select(((.Action // .action // "") | contains("Synchronize repository '\''" + $repository + "'\''")))
+    | (.ID // .Id // .id // empty)
+  ' <<<"$active_tasks" | head -n1) || return 1
+  # Distinguish “none is running” from a running task that later fails: the
+  # caller may launch a new sync only in the former case.
+  [ -n "$task_id" ] || return 3
+
+  echo "▸ Reusing active synchronization for ${repository_name} (task: ${task_id})"
+  echo "  Waiting up to $((CONTENT_SYNC_TIMEOUT_SECONDS / 60)) minutes; progress is reported by Satellite."
+  if ! timeout "$CONTENT_SYNC_TIMEOUT_SECONDS" hammer task progress --id "$task_id"; then
+    recover_stalled_collection_worker || true
+    echo "ERROR: Existing synchronization for ${repository_name} did not complete successfully." >&2
+    return 1
+  fi
+  return 0
+}
 
 reconcile_ansible_collections() {
   [ "$COLLECTIONS_ENABLED" = true ] || {
@@ -140,7 +241,8 @@ reconcile_ansible_collections() {
     create_args=(repository create --organization "$ORG" --product "$COLLECTIONS_PRODUCT" \
       --name "$COLLECTIONS_REPOSITORY" --content-type ansible_collection --url "$COLLECTIONS_URL" \
       --ansible-collection-auth-token "$SATELLITE_COLLECTIONS_AUTH_TOKEN" \
-      --ansible-collection-auth-url "$COLLECTIONS_AUTH_URL")
+      --ansible-collection-auth-url "$COLLECTIONS_AUTH_URL" \
+      --download-concurrency "$COLLECTIONS_DOWNLOAD_CONCURRENCY")
     hammer "${create_args[@]}" || return 1
     repositories=$(hammer --output json repository list --product-id "$product_id") || return 1
     repository_id=$(jq -er --arg name "$COLLECTIONS_REPOSITORY" \
@@ -149,9 +251,26 @@ reconcile_ansible_collections() {
     # Rotate the upstream token without deleting content or changing the repo.
     hammer repository update --id "$repository_id" --url "$COLLECTIONS_URL" \
       --ansible-collection-auth-token "$SATELLITE_COLLECTIONS_AUTH_TOKEN" \
-      --ansible-collection-auth-url "$COLLECTIONS_AUTH_URL" || return 1
+      --ansible-collection-auth-url "$COLLECTIONS_AUTH_URL" \
+      --download-concurrency "$COLLECTIONS_DOWNLOAD_CONCURRENCY" || return 1
   fi
-  hammer repository synchronize --id "$repository_id" || return 1
+  # A prior full-demo run can still be transferring the initial collection
+  # catalog. Reuse that authoritative Pulp task rather than launching a
+  # duplicate (which Satellite rejects) and incorrectly failing this stage.
+  if wait_for_existing_repository_sync "$COLLECTIONS_REPOSITORY"; then
+    :
+  else
+    local wait_rc=$?
+    if [ "$wait_rc" -eq 3 ]; then
+      if ! timeout "$CONTENT_SYNC_TIMEOUT_SECONDS" hammer repository synchronize --id "$repository_id"; then
+        recover_stalled_collection_worker || true
+        echo "ERROR: Ansible collection synchronization did not complete before the timeout." >&2
+        return 1
+      fi
+    else
+      return "$wait_rc"
+    fi
+  fi
   unset SATELLITE_COLLECTIONS_AUTH_TOKEN
   echo "✓ Ansible collection repository synchronized: ${COLLECTIONS_REPOSITORY}"
 }

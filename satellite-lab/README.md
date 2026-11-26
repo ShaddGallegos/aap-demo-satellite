@@ -226,6 +226,20 @@ It also creates the `Red Hat Ansible Collections` repository in the
 `console.redhat.com`. Satellite needs the Automation Hub offline token for the
 collection remote; aap-demo transfers the Vault-backed `ah_offline_token` only
 to configure the guest and removes the temporary guest file immediately.
+Its first collection catalog import is serialized by default
+(`SATELLITE_COLLECTIONS_DOWNLOAD_CONCURRENCY=1`) to avoid concurrent
+offline-token exchanges starving a Pulp worker. Increase it only after a
+successful initial sync; Satellite accepts values from `1` through `19`.
+Red Hat Flatpak mirroring first reuses the Vault-backed CDN/Customer Portal
+pair (`aap_demo.redhat.cdn_username` and `aap_demo.redhat.cdn_password`) that
+the installer already collects. If Red Hat rejects that pair for the Flatpak
+registry scope, the full Satellite profile securely collects a separately
+Vault-backed Registry Service Account pair
+(`aap_demo.redhat.registry_username` and `aap_demo.redhat.registry_token`) and
+transfers it only in the temporary guest file. Create that fallback pair from the
+[Registry Service Accounts page](https://access.redhat.com/RegistryAuthentication#creating-registry-service-accounts-6),
+then provide the displayed service-account username and token/password when
+the installer asks.
 Set `SATELLITE_FLATPAK_ENABLED=false` or `SATELLITE_COLLECTIONS_ENABLED=false`
 only when deliberately excluding those content types.
 
@@ -301,12 +315,19 @@ release and may reject an RHSM minor-release pin. The builder does not change
 an existing pin; resolve a rejected pin and any repository dependency conflicts
 before retrying. Do not bypass the native checks or skip broken packages.
 
-Before each changing maintenance step, a full offline backup, including Pulp
-content, is stored under `/var/backup/satellite/pre-<release>.*`. Override the
-parent with `SATELLITE_BACKUP_DIR`, preferably pointing at a separate mounted
-backup volume with enough capacity. Failed backups prevent package changes.
-Backups are retained for manual restoration; failed upgrades do not trigger
-an automatic rollback.
+Before changing maintenance, the builder creates one managed libvirt
+checkpoint of the `satellite` VM. This avoids a second in-guest Pulp archive,
+which can consume several GiB and fill a local lab disk. The checkpoint covers
+the entire maintenance run, including supported adjacent upgrades. It is
+removed after a successful run and retained on failure for a deliberate manual
+rollback. A subsequent retry replaces only the prior aap-demo checkpoint; it
+never changes administrator-created libvirt snapshots.
+
+The native `satellite-maintain` checks remain the authority for safe package
+changes. aap-demo does not wait on every Foreman task itself: Satellite keeps
+long-lived scheduler tasks, such as Red Hat Lightspeed's scheduled sync, in a
+running state indefinitely. Failed upgrades do not trigger an automatic
+rollback.
 
 After rebuilding the OS disk, do not mount a previous installation's retained
 Pulp content over the new database. Use separate per-installation NFS exports.

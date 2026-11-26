@@ -5,16 +5,14 @@ _LAB_SSH_LOADED=1
 LAB_SSH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=fleet-stack-remote.sh
 source "$LAB_SSH_DIR/fleet-stack-remote.sh"
+# shellcheck source=ssh-trust.sh
+source "$LAB_SSH_DIR/ssh-trust.sh"
 
 lab_ssh_satellite() {
   local state_dir="${AAP_DEMO_DIR:-$HOME/.aap-demo}/satellite"
   local known_hosts="${state_dir}/known_hosts"
-  mkdir -p "$state_dir" || return 1
-  chmod 700 "$state_dir" || return 1
-  touch "$known_hosts" || return 1
-  chmod 600 "$known_hosts" || return 1
-  ssh -o UserKnownHostsFile="$known_hosts" -o GlobalKnownHostsFile=/dev/null \
-    -o StrictHostKeyChecking=accept-new \
+  aap_demo_ssh_prepare_trust "$known_hosts" "${SATELLITE_LAB_IP:-192.168.122.20}" 22 || return 1
+  ssh "${AAP_DEMO_SSH_TRUST_OPTS[@]}" \
     -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=10 "root@${SATELLITE_LAB_IP:-192.168.122.20}" "$@"
 }
 

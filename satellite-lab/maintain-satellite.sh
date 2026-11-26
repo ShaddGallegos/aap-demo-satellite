@@ -2,6 +2,11 @@
 # Run on an existing Satellite server; never apply initial-install settings.
 set -euo pipefail
 
+# The managed caller creates a libvirt checkpoint on the host before this
+# script starts. Guest-side Pulp tar backups are intentionally disabled: they
+# double the storage consumed by a large Satellite lab and can fill the VM.
+SATELLITE_MAINTENANCE_CHECKPOINT="${SATELLITE_MAINTENANCE_CHECKPOINT:-}"
+
 satellite_release() {
   local version
   version=$(rpm -q --qf '%{VERSION}' satellite) || return 1
@@ -17,14 +22,14 @@ satellite_maintenance_target() {
 }
 
 satellite_backup() {
-  local root="${SATELLITE_BACKUP_DIR:-/var/backup/satellite}" backup
-  install -d -m 700 "$root" || return 1
-  backup=$(mktemp -d "$root/pre-${1}.XXXXXX") || return 1
-  echo "Satellite rollback backup: $backup"
-  satellite-maintain backup offline --assumeyes --preserve-directory "$backup" || {
-    echo "ERROR: Backup failed; no package changes will be attempted." >&2
-    return 1
-  }
+  # `satellite-maintain` can call this maintenance wrapper repeatedly while it
+  # advances adjacent releases. One hypervisor checkpoint covers the whole
+  # operation, so never create an in-guest Pulp archive here.
+  if [ -n "$SATELLITE_MAINTENANCE_CHECKPOINT" ]; then
+    echo "Using managed hypervisor checkpoint: $SATELLITE_MAINTENANCE_CHECKPOINT"
+  else
+    echo "WARNING: No managed hypervisor checkpoint was supplied; continuing without an in-guest backup." >&2
+  fi
 }
 
 satellite_reboot_required() {
@@ -170,8 +175,14 @@ satellite_maintenance_main() {
   done
 }
 
+satellite_maintenance_run() {
+  local rc=0
+  satellite_maintenance_main || rc=$?
+  return "$rc"
+}
+
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   exec 9>/var/lock/aap-demo-satellite-maintenance.lock
   flock -n 9 || { echo "ERROR: Satellite maintenance is already running." >&2; exit 1; }
-  satellite_maintenance_main
+  satellite_maintenance_run
 fi
