@@ -104,3 +104,36 @@ console.log("PASS: demo submenus, scoped buttons, escaping, and no implicit job 
 context.renderMail({messages: [{id: "20261125T010203Z", subject: "AAP <report>", created: "fixture"}]});
 assert.match(elements.get("#mail-list").innerHTML, /AAP &lt;report&gt;/);
 console.log("PASS: dashboard renders local captured mail as escaped text");
+
+async function testSessionRecovery() {
+  const calls = [];
+  const responses = [
+    {status: 403, ok: false, json: async () => ({error: "Invalid session token"})},
+    {status: 200, ok: true, json: async () => ({token: "fresh-session-token"})},
+    {status: 202, ok: true, json: async () => ({status: "accepted"})},
+  ];
+  context.fetch = async (path, options = {}) => {
+    calls.push({path, options});
+    return responses.shift();
+  };
+  const result = await vm.runInContext(`
+    state.sessionToken = "stale-session-token";
+    api("/api/addons/product-demo-infrastructure/enable", {
+      method: "POST", body: "{}",
+    });
+  `, context);
+  assert.deepEqual(result, {status: "accepted"});
+  assert.deepEqual(calls.map((call) => call.path), [
+    "/api/addons/product-demo-infrastructure/enable",
+    "/api/session",
+    "/api/addons/product-demo-infrastructure/enable",
+  ]);
+  assert.equal(calls[0].options.headers["X-AAP-Demo-Token"], "stale-session-token");
+  assert.equal(calls[1].options.headers["X-AAP-Demo-Token"], undefined);
+  assert.equal(calls[2].options.headers["X-AAP-Demo-Token"], "fresh-session-token");
+}
+
+testSessionRecovery().then(
+  () => console.log("PASS: dashboard refreshes a stale session before retrying an action once"),
+  (error) => { throw error; },
+);

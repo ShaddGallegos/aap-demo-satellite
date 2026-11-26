@@ -56,7 +56,18 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-async function api(path, options = {}) {
+async function refreshSessionToken() {
+  const response = await fetch("/api/session", {
+    headers: {"Content-Type": "application/json"},
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || typeof payload.token !== "string" || !payload.token) {
+    throw new Error(payload.error || "Could not refresh the dashboard session");
+  }
+  state.sessionToken = payload.token;
+}
+
+async function api(path, options = {}, mayRefreshSession = true) {
   const response = await fetch(path, {
     ...options,
     headers: {
@@ -66,6 +77,13 @@ async function api(path, options = {}) {
     },
   });
   const payload = await response.json().catch(() => ({}));
+  // A dashboard restart rotates its memory-only token. The server rejects the
+  // request before reading its body, so one retry with a fresh token cannot
+  // duplicate an add-on operation or other state-changing request.
+  if (response.status === 403 && payload.error === "Invalid session token" && mayRefreshSession && path !== "/api/session") {
+    await refreshSessionToken();
+    return api(path, options, false);
+  }
   if (!response.ok) {
     throw new Error(payload.error || `Request failed with status ${response.status}`);
   }
