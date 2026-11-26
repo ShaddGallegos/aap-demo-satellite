@@ -28,6 +28,8 @@ The [project home page](../README.md) is the short start. These pages are the re
   Operator prerequisite without creating Central or cluster monitoring.
 - [OpenShift Quay proof of concept](openshift-quay.md) - Opt-in registry
   Operator prerequisite without creating a registry instance.
+- [OpenShift ACM proof of concept](openshift-acm.md) - Opt-in cluster-management
+  Operator prerequisite without creating a management hub.
 - [The older command](guides/older-command.md) - Keep using the bash command for work that has not moved over.
 - [Pause and resume the full lab](guides/older-command.md#pause-for-travel-without-deleting-data) -
   Shut down Fleet, CRC, and Satellite without deleting data.

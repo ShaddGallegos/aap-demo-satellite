@@ -1,0 +1,65 @@
+{
+    "schema_version": "1.0",
+    "name": "openshift-acm",
+    "summary": "Installs an owned ACM Operator subscription as an optional cluster-management proof-of-concept prerequisite.",
+    "lifecycle": {
+        "enable": "deploy.sh",
+        "disable": "deploy.sh --delete",
+        "idempotency": "Reuses only the operator namespace, OperatorGroup, and Subscription marked as owned by aap-demo; the channel is discovered from the configured catalog.",
+        "failure_boundary": "The addon stops before applying resources when OLM, the configured CatalogSource, package metadata, or ownership checks are unavailable."
+    },
+    "dependencies": {
+        "addons": [],
+        "services": [
+            "Kubernetes API",
+            "OLM",
+            "Red Hat operator CatalogSource"
+        ]
+    },
+    "inputs": [
+        {
+            "name": "ACM_CATALOG_SOURCE",
+            "source": "environment:ACM_CATALOG_SOURCE",
+            "required": false,
+            "secret": false
+        },
+        {
+            "name": "ACM_CATALOG_NAMESPACE",
+            "source": "environment:ACM_CATALOG_NAMESPACE",
+            "required": false,
+            "secret": false
+        },
+        {
+            "name": "ACM_OPERATOR_NAMESPACE",
+            "source": "environment:ACM_OPERATOR_NAMESPACE",
+            "required": false,
+            "secret": false
+        },
+        {
+            "name": "ACM_WAIT_SECONDS",
+            "source": "environment:ACM_WAIT_SECONDS",
+            "required": false,
+            "secret": false
+        }
+    ],
+    "resources": {
+        "namespaces": [
+            "open-cluster-management"
+        ],
+        "operator_groups": [
+            "aap-demo-acm-operator"
+        ],
+        "subscriptions": [
+            "aap-demo-acm-operator"
+        ]
+    },
+    "readiness": [
+        "The managed ACM subscription reports a Succeeded installed CSV.",
+        "The configured CatalogSource exposes a default channel for advanced-cluster-management."
+    ],
+    "security": {
+        "secret_storage": "The scenario accepts no passwords, tokens, pull secrets, or credentials.",
+        "network_trust": "Catalog access follows the cluster's configured registry and CatalogSource trust policy.",
+        "external_actions": "No MultiClusterHub, managed cluster import, policy, credential, compliance rule, or workload is created automatically."
+    }
+}

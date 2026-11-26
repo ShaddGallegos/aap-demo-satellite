@@ -131,6 +131,11 @@
       "vm_gib": 4,
       "host_gib": 0,
       "description": "Red Hat Quay Operator images and logs only. A QuayRegistry, registry storage, database, scanning data, image content, and customer credentials are deliberately not included."
+    },
+    "openshift-acm": {
+      "vm_gib": 6,
+      "host_gib": 0,
+      "description": "ACM Operator images and logs only. A MultiClusterHub, multicluster engine, managed clusters, observability, policy data, and customer credentials are deliberately not included."
     }
   }
 }

@@ -224,6 +224,7 @@ Examples
     aap-demo enable openshift-delivery    # Optional GitOps and Pipelines operators
     aap-demo enable openshift-security    # Optional RHACS Operator prerequisite only
     aap-demo enable openshift-quay        # Optional Red Hat Quay Operator prerequisite only
+    aap-demo enable openshift-acm         # Optional ACM Operator prerequisite only
     LIGHTWELL_APP_NODE=4 aap-demo enable lightwell --prepare
                                          # Prepare Lightwell resources for dedicated Fleet node 4
     aap-demo enable product-demos         # Install the non-Satellite demo content

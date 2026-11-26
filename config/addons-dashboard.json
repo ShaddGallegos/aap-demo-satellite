@@ -295,6 +295,15 @@
     "namespace": "aap-demo-quay-operator",
     "prefix": "quay-operator"
    }
+  },
+  {
+   "id": "openshift-acm",
+   "name": "OpenShift Cluster Management Proof of Concept",
+   "category": "Cloud-native management",
+   "description": "Optionally install the owned Red Hat Advanced Cluster Management Operator subscription. It discovers a supported catalog channel and creates no MultiClusterHub, managed-cluster import, policy, credential, compliance rule, or workload.",
+   "dependencies": [],
+   "availability": "Requires OLM and a reachable Red Hat operator CatalogSource; reserves about 3 GiB RAM and 6 GiB VM storage for the operator prerequisite.",
+   "health": {"type": "pod-prefix", "namespace": "open-cluster-management", "prefix": "advanced-cluster-management"}
   }
  ]
 }

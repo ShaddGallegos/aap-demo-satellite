@@ -513,6 +513,17 @@ class DashboardUnitTests(unittest.TestCase):
         inventory["pods"][-1]["ready_containers"] = 0
         self.assertEqual(dashboard.addon_state(self.addons["openshift-quay"], inventory), "degraded")
 
+    def test_acm_health_requires_acm_operator(self) -> None:
+        inventory = fixture_inventory()
+        inventory["addons"].append("openshift-acm")
+        inventory["pods"].append({
+            "namespace": "open-cluster-management", "name": "advanced-cluster-management-abc",
+            "phase": "Running", "ready_containers": 1, "total_containers": 1,
+        })
+        self.assertEqual(dashboard.addon_state(self.addons["openshift-acm"], inventory), "running")
+        inventory["pods"][-1]["phase"] = "Pending"
+        self.assertEqual(dashboard.addon_state(self.addons["openshift-acm"], inventory), "degraded")
+
     def test_operation_output_redacts_credentials(self) -> None:
         output = (
             "\x1b[0;31mAuthorization: Bearer secret-token\x1b[0m\n"

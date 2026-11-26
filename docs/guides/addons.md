@@ -150,6 +150,20 @@ See [OpenShift Quay proof of concept](../openshift-quay.md) for catalog
 prerequisites, ownership boundary, and the required design decisions before a
 registry instance is created.
 
+## OpenShift ACM proof of concept
+
+The optional ACM scenario installs only an aap-demo-owned ACM Operator
+subscription. It creates no management hub, managed-cluster import, policy,
+credential, compliance rule, or workload:
+
+```bash
+aap-demo enable openshift-acm
+```
+
+See [OpenShift ACM proof of concept](../openshift-acm.md) for catalog
+prerequisites, ownership boundary, and the decisions required before a hub is
+created.
+
 ## Automation Hub content synchronization
 
 `aap-demo enable setup-pah` reads the separate Automation Hub offline token from
