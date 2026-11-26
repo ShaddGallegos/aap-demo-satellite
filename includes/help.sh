@@ -55,6 +55,8 @@ Health
                     Track sanitized read-only findings; no AI, repair, or ticket actions
   reports [generate|send] [--reconfigure]
                     Create a weekly HTML report and local captured email; no external delivery
+  support-bundle [preview|create]
+                    Create a private, redacted local support bundle; no upload
   must-gather       Collect AAP and cluster diagnostics
   redhat-status     Check Red Hat registry status
 
@@ -130,6 +132,9 @@ Notes
                       Record read-only findings in FIX_TRACKING.md; no repair or external action
   reports [generate|send] [--reconfigure]
                       Write polished HTML/text reports and a local captured email; no SMTP relay
+  support-bundle [preview|create] [--output DIRECTORY]
+                      Preview or create an offline-scanned, owner-only redacted bundle.
+                      It excludes Vault data, kubeconfig, keys, raw logs, and uploads.
   dashboard [--no-open]
                       Start the localhost dashboard without opening a browser
   console [--no-open] Show the console URL without opening a browser

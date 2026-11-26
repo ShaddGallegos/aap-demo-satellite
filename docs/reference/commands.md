@@ -28,6 +28,7 @@ still run with [the older command](../guides/older-command.md).
 | `kubeconfig` | Refresh the login file and the `aap-demo` context in `~/.kube/config`. |
 | `diagnose` | Print a health report: CRC on the host (the `crc` binary, its daemon, the VM's SSH forward), then the cluster. |
 | `steward scan` | Run approved read-only health checks, store redacted local evidence, and write an ignored `FIX_TRACKING.md`. It does not use AI, MCP, repair, scheduling, or vendor APIs. |
+| `support-bundle preview` / `support-bundle create --output DIR` | Preview or create owner-only, offline-scanned redacted diagnostic evidence. It excludes credentials and never uploads. |
 | `reports generate` / `reports send` | Generate a styled weekly HTML/text report, or additionally capture it as a local `.eml` message. Neither sends network email. |
 | `repair` | Fix the usual breakage after the laptop sleeps. |
 | `must-gather` | Collect logs into a folder. An optional path picks the folder. |

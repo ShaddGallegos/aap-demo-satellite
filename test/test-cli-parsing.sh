@@ -59,6 +59,24 @@ fi
 
 echo "PASS: reports help is a local command"
 
+if ! output=$(HOME="$test_home" AAP_DEMO_DIR="$test_home/aap-demo" QUIET=true "$AAP_DEMO_SH" support-bundle preview 2>&1) \
+  || ! grep -Fq 'Support bundle preview' <<<"$output"; then
+  echo "FAIL: support-bundle preview should be local and explicit"
+  echo "$output"
+  exit 1
+fi
+
+echo "PASS: support-bundle preview is a local command"
+
+if ! output=$(HOME="$test_home" AAP_DEMO_DIR="$test_home/aap-demo" QUIET=true "$AAP_DEMO_SH" support-bundle create --output "$test_home/bundle" 2>&1) \
+  || ! test -f "$test_home/bundle/manifest.json"; then
+  echo "FAIL: support-bundle create did not preserve its action or output path"
+  echo "$output"
+  exit 1
+fi
+
+echo "PASS: support-bundle create accepts an explicit output path"
+
 if output=$(HOME="$test_home" QUIET=true "$AAP_DEMO_SH" fleet auth status 2>&1); then
   echo "FAIL: unconfigured fleet auth status unexpectedly succeeded"
   exit 1
@@ -115,7 +133,7 @@ fi
 echo "PASS: structured-output options are validated"
 
 help_output=$(QUIET=true "$AAP_DEMO_SH" --help)
-for command in deploy status watch clean redeploy redeploy-all idle preflight diagnose steward reports \
+for command in deploy status watch clean redeploy redeploy-all idle preflight diagnose steward reports support-bundle \
   must-gather wire config redhat-status update version help create destroy stop start \
   repair setup ssh kubeconfig system-info dashboard maintenance; do
   if ! grep -Eq "^[[:space:]]+${command}([[:space:]|]|\$)" <<<"$help_output"; then

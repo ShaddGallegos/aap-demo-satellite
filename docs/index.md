@@ -41,6 +41,8 @@ The [project home page](../README.md) is the short start. These pages are the re
   Automation Hub token in the encrypted Vault and diagnose Pulp sync failures.
 - [Credential Vault](credential-vault.md) - Managed secret locations, ownership,
   and safe configuration paths.
+- [Private support bundles](support-bundles.md) - Offline-scanned, redacted
+  diagnostic evidence with no automatic upload.
 - [Lightwell CI/CD simulation](../addons/lightwell/README.md) -
   Prepared-service integration, human approvals, and dashboard links.
 - [Local Gitea VM](../addons/gitea/README.md) -

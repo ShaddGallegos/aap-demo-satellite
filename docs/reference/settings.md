@@ -102,6 +102,11 @@ Automatic environment reports are redacted. To generate a report for support,
 use `aap-demo system-info --redact --output /tmp/aap-support.md`; do not retain
 or share an unredacted report.
 
+For a reviewed local evidence directory, use `aap-demo support-bundle preview`
+then `aap-demo support-bundle create --output DIRECTORY`. The bundle is
+owner-only, redacted, offline-scanned, and never uploaded automatically. It
+does not include the Vault, kubeconfig, keys, raw logs, or must-gather output.
+
 Common retained keys include `aap_demo.redhat.cdn_username`,
 `aap_demo.redhat.cdn_password`, `aap_demo.satellite.admin_password`,
 `aap_demo.satellite.root_password`, and

@@ -59,6 +59,8 @@ source "${SCRIPT_DIR}/includes/addon-contract.sh"
 source "${SCRIPT_DIR}/includes/steward.sh"
 # shellcheck source=includes/reports.sh
 source "${SCRIPT_DIR}/includes/reports.sh"
+# shellcheck source=includes/support-bundle.sh
+source "${SCRIPT_DIR}/includes/support-bundle.sh"
 # shellcheck source=includes/help.sh
 source "${SCRIPT_DIR}/includes/help.sh"
 # shellcheck source=includes/cmd-fleet.sh
@@ -334,7 +336,14 @@ for arg in "$@"; do
     --backend)
       PENDING_FLAG="backend"
       ;;
-    deploy | deploy-all | repair | trust-ca | clean | maintenance | credentials | stop | restart | service | setup | create | storage | watch | update | config | redeploy | redeploy-all | redhat-status | rh-status | kubeconfig | idle | preflight | diagnose | check-integrations | steward | reports | must-gather | enable | disable | wire | system-info | dashboard | console | keycloak | gpu | v2 | version | help | --help | -h | --version | -V)
+    create)
+      if [ "$COMMAND" = "support-bundle" ]; then
+        EXTRA_ARGS+=("$arg")
+      else
+        COMMAND="$arg"
+      fi
+      ;;
+    deploy | deploy-all | repair | trust-ca | clean | maintenance | credentials | stop | restart | service | setup | storage | watch | update | config | redeploy | redeploy-all | redhat-status | rh-status | kubeconfig | idle | preflight | diagnose | check-integrations | steward | reports | support-bundle | must-gather | enable | disable | wire | system-info | dashboard | console | keycloak | gpu | v2 | version | help | --help | -h | --version | -V)
       if [ "$COMMAND" = "gpu" ]; then
         EXTRA_ARGS+=("$arg")
       elif [ "$COMMAND" = "credentials" ]; then
@@ -350,14 +359,14 @@ for arg in "$@"; do
             if [ -z "$COMMAND" ]; then COMMAND="keycloak"; else EXTRA_ARGS+=("$arg"); fi
             ;;
           --help | -h)
-            if [ "$COMMAND" = "enable" ] || [ "$COMMAND" = "steward" ] || [ "$COMMAND" = "reports" ]; then
+            if [ "$COMMAND" = "enable" ] || [ "$COMMAND" = "steward" ] || [ "$COMMAND" = "reports" ] || [ "$COMMAND" = "support-bundle" ]; then
               EXTRA_ARGS+=("$arg")
             else
               COMMAND="help"
             fi
             ;;
           help)
-            if [ "$COMMAND" = "steward" ] || [ "$COMMAND" = "reports" ]; then
+            if [ "$COMMAND" = "steward" ] || [ "$COMMAND" = "reports" ] || [ "$COMMAND" = "support-bundle" ]; then
               EXTRA_ARGS+=("$arg")
             else
               COMMAND="help"
@@ -439,7 +448,7 @@ for arg in "$@"; do
       if [ "$COMMAND" = "must-gather" ] || [ "$COMMAND" = "clean" ] \
         || [ "$COMMAND" = "fleet" ] || [ "$COMMAND" = "maintenance" ] \
         || [ "$COMMAND" = "credentials" ] || [ "$COMMAND" = "keycloak" ] \
-        || [ "$COMMAND" = "storage" ] || [ "$COMMAND" = "steward" ] || [ "$COMMAND" = "reports" ]; then
+        || [ "$COMMAND" = "storage" ] || [ "$COMMAND" = "steward" ] || [ "$COMMAND" = "reports" ] || [ "$COMMAND" = "support-bundle" ]; then
         EXTRA_ARGS+=("$arg")
       elif [ -n "$COMMAND" ]; then
         echo "Unknown argument for '$COMMAND': $arg"
@@ -502,8 +511,8 @@ if [ "$REDACT" = true ] && [ "$COMMAND" != system-info ]; then
   echo "ERROR: --redact is supported only by system-info" >&2
   exit 1
 fi
-if [ -n "$SYSTEM_INFO_OUTPUT" ] && [ "$COMMAND" != system-info ] && [ "$COMMAND" != steward ]; then
-  echo "ERROR: --output is supported only by system-info and steward" >&2
+if [ -n "$SYSTEM_INFO_OUTPUT" ] && [ "$COMMAND" != system-info ] && [ "$COMMAND" != steward ] && [ "$COMMAND" != support-bundle ]; then
+  echo "ERROR: --output is supported only by system-info, steward, and support-bundle" >&2
   exit 1
 fi
 if [ "$DASHBOARD_NO_OPEN" = true ] \
@@ -4146,6 +4155,9 @@ case "$COMMAND" in
     ;;
   reports)
     cmd_reports "${EXTRA_ARGS[@]}" || exit $?
+    ;;
+  support-bundle)
+    cmd_support_bundle "${EXTRA_ARGS[@]}" || exit $?
     ;;
   must-gather)
     cmd_must_gather "${EXTRA_ARGS[0]:-}"
