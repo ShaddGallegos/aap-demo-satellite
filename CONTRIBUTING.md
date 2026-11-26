@@ -38,7 +38,8 @@ tools is in [Linting](docs/LINTING.md).
 
 ## Test
 
-For a Python change, run the same checks the pull request workflow runs:
+For a Python change, run the same checks available in the manually started
+Python test workflow:
 
 ```bash
 python -m pytest tests/unit -q
@@ -47,8 +48,10 @@ python -m ruff format --check src tests
 python -m aap_demo --help
 ```
 
-The usual pytest run is the unit tests. Tests marked `integration` need a real
-cluster, and the pull request workflow leaves them out.
+For a complete local, non-destructive gate, run `make verify`. Tests marked
+`integration` need a real cluster and are excluded from the pull-request
+workflows. Publishing, host-trust tests, badges, and CodeQL stay manually
+started from the repository's **Actions** tab.
 
 For a documentation change, lint the Markdown files you edited:
 

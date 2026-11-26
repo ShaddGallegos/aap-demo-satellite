@@ -1,10 +1,10 @@
 ---
 name: Lint
 
+# This workflow is non-destructive: it validates source and never needs a
+# cluster, credentials, or repository write permission.
 on:
   pull_request:
-    branches: [main, master]
-  push:
     branches: [main, master]
   workflow_dispatch:
 

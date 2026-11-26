@@ -1,10 +1,9 @@
 ---
 name: Test
 
+# These tests use isolated fixtures only; live CRC/AAP tests remain excluded.
 on:
   pull_request:
-    branches: [main, master]
-  push:
     branches: [main, master]
   workflow_dispatch:
 

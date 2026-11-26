@@ -303,7 +303,11 @@ validator.
 
 ## GitHub Actions
 
-Three workflows run on every pull request:
+The lint, shell/unit-test, Python-unit-test, version, commitlint, and PR
+metadata workflows run on pull requests. Run `make verify` locally for the
+same complete non-live validation gate. Publishing, host-trust, badge, and
+CodeQL workflows remain explicitly started from the repository's **Actions**
+tab.
 
 ### 1. Lint Workflow (`.github/workflows/lint.yaml`)
 

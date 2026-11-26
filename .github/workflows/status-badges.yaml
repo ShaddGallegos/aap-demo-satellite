@@ -1,17 +1,14 @@
 ---
 name: Status Badges
 
+# Workflows are deliberately manual-only.
 on:
-  push:
-    branches: [main, master]
-  pull_request:
-    branches: [main, master]
+  workflow_dispatch:
 
 jobs:
   update-badges:
     name: Update Status Badges
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

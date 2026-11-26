@@ -5,6 +5,7 @@ name: Commit Lint
   pull_request:
     branches: [main, master]
     types: [opened, synchronize, reopened, edited]
+  workflow_dispatch:
 
 jobs:
   commitlint:
@@ -33,6 +34,7 @@ jobs:
   pr-title:
     name: PR Title Check
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     steps:
       - name: Check PR title format
         uses: amannn/action-semantic-pull-request@v5

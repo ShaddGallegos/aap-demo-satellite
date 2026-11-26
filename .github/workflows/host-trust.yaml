@@ -2,22 +2,8 @@
 name: Host Trust Tests
 
 # Runs the ingress CA import against real Linux trust stores. These jobs change
-# the runner's trust store, so tests/system is opt-in and not part of Unit.
+# the runner's trust store, so they are explicitly user-started only.
 on:
-  pull_request:
-    branches: [main, master]
-    paths:
-      - 'src/aap_demo/cluster/ingress_ca.py'
-      - 'src/aap_demo/exec/runner.py'
-      - 'tests/system/**'
-      - '.github/workflows/host-trust.yaml'
-  push:
-    branches: [main, master]
-    paths:
-      - 'src/aap_demo/cluster/ingress_ca.py'
-      - 'src/aap_demo/exec/runner.py'
-      - 'tests/system/**'
-      - '.github/workflows/host-trust.yaml'
   workflow_dispatch:
 
 permissions:

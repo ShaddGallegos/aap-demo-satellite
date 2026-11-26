@@ -40,10 +40,10 @@ automatically activate this venv.
 
 | File | Purpose | Triggers |
 |------|---------|----------|
-| `.github/workflows/lint.yaml` | Main linting workflow | PR, push to main |
-| `.github/workflows/commitlint.yaml` | Commit message validation | PR |
-| `.github/workflows/test.yaml` | Syntax and dry-run tests | PR, push to main |
-| `.github/workflows/pr-checks.yaml` | PR metadata validation | PR |
+| `.github/workflows/lint.yaml` | Main linting workflow | Pull requests and manual dispatch |
+| `.github/workflows/commitlint.yaml` | Commit message validation | Pull requests and manual dispatch |
+| `.github/workflows/test.yaml` | Syntax and dry-run tests | Pull requests and manual dispatch |
+| `.github/workflows/pr-checks.yaml` | PR metadata validation | Pull requests and manual dispatch |
 
 ### Documentation
 
@@ -155,7 +155,7 @@ pre-commit run --all-files
 | Workflow | Purpose |
 |----------|---------|
 | `lint.yaml` | shellcheck, yamllint, markdownlint, shfmt, secrets |
-| `version-check.yaml` | Validate `VERSION` semver on PRs/pushes to `main` |
+| `version-check.yaml` | Validate `VERSION` semver when manually started |
 | `commitlint.yaml` | Conventional commits |
 | `pr-checks.yaml` | PR metadata, size, conflicts |
 
@@ -165,7 +165,12 @@ Check the version format locally:
 grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$' VERSION
 ```
 
-Every pull request triggers:
+`make verify` is the complete non-live local gate. The following checks run
+automatically on pull requests and can also be started from the repository's
+**Actions** tab. For a manually started `pr-checks.yaml`, provide the pull
+request number.
+
+The pull-request checks are:
 
 1. **Lint workflow**: Runs all linters (shellcheck, yamllint, markdownlint, ansible-lint, etc.)
 2. **Version check workflow**: Ensures `VERSION` contains valid semver
@@ -173,7 +178,8 @@ Every pull request triggers:
 4. **Test workflow**: Shell syntax checks, dry-run tests, link validation
 5. **PR checks workflow**: Metadata validation, size check, conflict detection
 
-All checks must pass before merging.
+Publishing, host-trust, badge, and CodeQL workflows remain manually started.
+All required checks must pass before merging.
 
 ## Commit Message Format
 

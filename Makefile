@@ -15,6 +15,7 @@ help: ## Show this help
 	@echo ""
 	@echo "Usage:"
 	@echo "  make lint                  Run all linters"
+	@echo "  make verify                Run the complete non-live validation suite"
 	@echo "  make ci                    Run all CI checks locally"
 	@echo ""
 	@echo "Deployment Targets:"

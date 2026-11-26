@@ -23,6 +23,7 @@ as background health checks.
 | [aap-release-validation](../../.claude/skills/aap-release-validation/SKILL.md) | Validation before publishing | "Check these changes before I push and open a PR." |
 | [aap-resource-diagnostics](../../.claude/skills/aap-resource-diagnostics/SKILL.md) | HPA metrics, memory, scheduling, and storage | "Explain why the HPA reports unknown CPU utilization." |
 | [aap-feature-surface](../../.claude/skills/aap-feature-surface/SKILL.md) | Keeping a feature discoverable and consistent across CLI help, docs, dashboard, and tests | "Add this feature and update every user-facing surface." |
+| [aap-security-guardrails](../../.claude/skills/aap-security-guardrails/SKILL.md) | Reviewing secrets, trust boundaries, and destructive-operation safety | "Review this integration before enabling it; do not change the live lab." |
 
 These complement the existing environment-management, addon-development,
 architecture-decision, and issue-authoring skills.

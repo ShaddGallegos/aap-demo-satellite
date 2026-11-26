@@ -3,10 +3,10 @@ name: Publish to PyPI
 # Publishes the pre-releases of the Python command (dev, alpha, beta, or
 # release candidate). pip installs a pre-release only when no final release
 # exists or it is named, as in `pip install 'aap-demo==<version>'`.
-# A push publishes only when src/aap_demo/__init__.py changes, because PyPI
-# keeps each version forever. Publish from main. A version already on PyPI is skipped, and any
-# version that is not a pre-release of the next major release fails the check
-# job (see .github/scripts/pypi_version_state.py).
+# Publishing is deliberately user-started because PyPI keeps each version
+# forever. A version already on PyPI is skipped, and any version that is not a
+# pre-release of the next major release fails the check job (see
+# .github/scripts/pypi_version_state.py).
 #
 # After a publish, the release job tags the commit that set the version as
 # v<version> and creates a GitHub prerelease with the files PyPI serves. It
@@ -15,10 +15,6 @@ name: Publish to PyPI
 # release is left alone.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - src/aap_demo/__init__.py
 
 permissions:
   contents: read
