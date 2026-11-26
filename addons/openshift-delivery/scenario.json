@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0",
+  "name": "openshift-delivery",
+  "summary": "Installs owned OpenShift GitOps and Pipelines operator subscriptions for an optional delivery proof of concept.",
+  "lifecycle": {
+    "enable": "deploy.sh",
+    "disable": "deploy.sh --delete",
+    "idempotency": "Reuses only subscriptions and the GitOps operator namespace marked as owned by aap-demo; operator channels are discovered from the configured catalog.",
+    "failure_boundary": "The addon stops before applying subscriptions when OLM, the configured CatalogSource, package metadata, or ownership checks are unavailable."
+  },
+  "dependencies": {
+    "addons": [],
+    "services": ["Kubernetes API", "OLM", "Red Hat operator CatalogSource"]
+  },
+  "inputs": [
+    {"name": "OPENSHIFT_DELIVERY_CATALOG_SOURCE", "source": "environment:OPENSHIFT_DELIVERY_CATALOG_SOURCE", "required": false, "secret": false},
+    {"name": "OPENSHIFT_DELIVERY_CATALOG_NAMESPACE", "source": "environment:OPENSHIFT_DELIVERY_CATALOG_NAMESPACE", "required": false, "secret": false},
+    {"name": "OPENSHIFT_DELIVERY_WAIT_SECONDS", "source": "environment:OPENSHIFT_DELIVERY_WAIT_SECONDS", "required": false, "secret": false}
+  ],
+  "resources": {
+    "namespaces": ["openshift-gitops-operator"],
+    "operator_groups": ["aap-demo-openshift-gitops"],
+    "subscriptions": ["aap-demo-openshift-gitops", "aap-demo-openshift-pipelines"]
+  },
+  "readiness": [
+    "Both managed subscriptions report a Succeeded installed CSV.",
+    "The configured CatalogSource exposes default channels for GitOps and Pipelines."
+  ],
+  "security": {
+    "secret_storage": "The scenario accepts no passwords, tokens, repository credentials, or pull secrets.",
+    "network_trust": "Catalog access follows the cluster's configured registry and CatalogSource trust policy.",
+    "external_actions": "No application repository, Argo CD Application, PipelineRun, credential, or customer workload is created automatically."
+  }
+}

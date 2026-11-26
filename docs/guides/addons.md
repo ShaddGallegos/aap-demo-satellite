@@ -109,6 +109,19 @@ in AAP until you delete them in the UI.
 
 The cluster still wants about 8 processors and 24 GB of memory. Demo jobs add work on top of AAP.
 
+## OpenShift delivery proof of concept
+
+The optional delivery scenario installs Red Hat OpenShift GitOps and OpenShift
+Pipelines operator subscriptions. It does not create a repository, application,
+pipeline execution, credential, or workload:
+
+```bash
+aap-demo enable openshift-delivery
+```
+
+See [OpenShift delivery proof of concept](../openshift-delivery.md) for its
+catalog prerequisites, ownership boundary, and safe removal behavior.
+
 ## Automation Hub content synchronization
 
 `aap-demo enable setup-pah` reads the separate Automation Hub offline token from

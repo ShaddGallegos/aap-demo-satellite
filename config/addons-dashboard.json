@@ -254,6 +254,21 @@
    "health": {
     "type": "configured"
    }
+  },
+  {
+   "id": "openshift-delivery",
+   "name": "OpenShift Delivery Proof of Concept",
+   "category": "Cloud-native delivery",
+   "description": "Optionally install the owned Red Hat OpenShift GitOps and Pipelines operator subscriptions. It discovers supported catalog channels and creates no repository, Argo CD Application, PipelineRun, credential, or workload.",
+   "dependencies": [],
+   "availability": "Requires OLM and a reachable Red Hat operator CatalogSource; reserves about 4 GiB RAM and 14 GiB VM storage.",
+   "health": {
+    "type": "pod-prefixes",
+    "items": [
+     {"namespace": "openshift-gitops", "prefix": "openshift-gitops-"},
+     {"namespace": "openshift-pipelines", "prefix": "tekton-"}
+    ]
+   }
   }
  ]
 }

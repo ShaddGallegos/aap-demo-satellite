@@ -345,6 +345,26 @@ def addon_state(addon: dict[str, Any], inventory: dict[str, Any]) -> str:
             if pod.get("namespace") == health["namespace"]
             and pod.get("name", "").startswith(health["prefix"])
         ]
+    elif health["type"] == "pod-prefixes":
+        items = health.get("items")
+        if not isinstance(items, list) or not items:
+            return "unknown"
+        groups = []
+        for item in items:
+            if not isinstance(item, dict):
+                return "unknown"
+            namespace = item.get("namespace")
+            prefix = item.get("prefix")
+            if not isinstance(namespace, str) or not isinstance(prefix, str):
+                return "unknown"
+            group = [
+                pod for pod in pods
+                if pod.get("namespace") == namespace and pod.get("name", "").startswith(prefix)
+            ]
+            if not group:
+                return "degraded"
+            groups.extend(group)
+        matches = groups
     else:
         return "unknown"
     if not matches:

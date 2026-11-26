@@ -22,6 +22,8 @@ The [project home page](../README.md) is the short start. These pages are the re
 - [Add-ons](guides/addons.md) - Practice machines, product demos, and extras that still use the older command.
 - [Addon scenario contracts](addon-scenario-contracts.md) - Lifecycle, dependency,
   ownership, readiness, and security boundaries for complex addons.
+- [OpenShift delivery proof of concept](openshift-delivery.md) - Opt-in GitOps and
+  Pipelines operators without creating customer workloads.
 - [The older command](guides/older-command.md) - Keep using the bash command for work that has not moved over.
 - [Pause and resume the full lab](guides/older-command.md#pause-for-travel-without-deleting-data) -
   Shut down Fleet, CRC, and Satellite without deleting data.

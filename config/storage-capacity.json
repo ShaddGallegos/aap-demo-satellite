@@ -116,6 +116,11 @@
       "vm_gib": 0,
       "host_gib": 1,
       "description": "Satellite subscription manifest and lab metadata on the host; the Satellite VM itself is provisioned separately by satellite-lab."
+    },
+    "openshift-delivery": {
+      "vm_gib": 14,
+      "host_gib": 0,
+      "description": "OpenShift GitOps and Pipelines operators, their controllers, images, and logs. Customer workloads and source repositories are not included."
     }
   }
 }

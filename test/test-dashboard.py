@@ -478,6 +478,19 @@ class DashboardUnitTests(unittest.TestCase):
             ["mcp-server", "eda"],
         )
 
+    def test_delivery_health_requires_gitops_and_pipelines_controllers(self) -> None:
+        inventory = fixture_inventory()
+        inventory["addons"].append("openshift-delivery")
+        inventory["pods"].extend([
+            {"namespace": "openshift-gitops", "name": "openshift-gitops-server-abc",
+             "phase": "Running", "ready_containers": 1, "total_containers": 1},
+            {"namespace": "openshift-pipelines", "name": "tekton-pipelines-controller-abc",
+             "phase": "Running", "ready_containers": 1, "total_containers": 1},
+        ])
+        self.assertEqual(dashboard.addon_state(self.addons["openshift-delivery"], inventory), "running")
+        inventory["pods"].pop()
+        self.assertEqual(dashboard.addon_state(self.addons["openshift-delivery"], inventory), "degraded")
+
     def test_operation_output_redacts_credentials(self) -> None:
         output = (
             "\x1b[0;31mAuthorization: Bearer secret-token\x1b[0m\n"
@@ -524,7 +537,7 @@ class DashboardUnitTests(unittest.TestCase):
     def test_dashboard_capacity_markup_and_rendering(self) -> None:
         markup = (REPO_ROOT / "dashboard/static/index.html").read_text(encoding="utf-8")
         script = (REPO_ROOT / "dashboard/static/app.js").read_text(encoding="utf-8")
-        self.assertIn("<h1>Ansible Automation Platform - MicroShift Demo</h1>", markup)
+        self.assertIn("<h1>Ansible Automation Platform - Single Node/Micro Shift Demo</h1>", markup)
         self.assertIn("<h2>Environment Overview</h2>", markup)
         self.assertIn('id="capacity-panel"', markup)
         self.assertIn('role="status"', markup)
