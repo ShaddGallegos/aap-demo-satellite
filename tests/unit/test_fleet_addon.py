@@ -373,8 +373,15 @@ def _playbook_runs(runner: FakeRunner) -> list:
     return runs
 
 
-def test_registry_lists_fleet_and_product_demos() -> None:
-    assert names() == ["fleet", "product-demo-satellite", "product-demos"]
+def test_registry_lists_all_public_addons() -> None:
+    assert names() == [
+        "eda",
+        "fleet",
+        "product-demo-eda",
+        "product-demo-infrastructure",
+        "product-demo-satellite",
+        "product-demos",
+    ]
 
 
 def test_fleet_parser_accepts_the_kubernetes_native_backend() -> None:
@@ -896,11 +903,7 @@ def test_enable_without_a_name_json_lists_addons(app_ctx) -> None:
 
     assert addons_cli.enable(app_ctx, argparse.Namespace(addon=None)) == 0
 
-    assert json.loads(app_ctx.console.stdout) == [
-        "fleet",
-        "product-demo-satellite",
-        "product-demos",
-    ]
+    assert json.loads(app_ctx.console.stdout) == names()
 
 
 def test_enable_json_is_a_document(app_ctx, monkeypatch) -> None:

@@ -65,7 +65,7 @@ spec:
         sourceControlProvider: github
         repositoryOwner: ${{ (parameters.repoUrl | parseRepoUrl).owner }}
         repositoryName: ${{ (parameters.repoUrl | parseRepoUrl).repo }}
-        repositoryUrl: https://github.com/${{ (parameters.repoUrl | parseRepoUrl).owner }}/${{ (parameters.repoUrl | parseRepoUrl).repo }}
+        repositoryUrl: https://github.com/${{ (parameters.repoUrl | parseRepoUrl).owner }}/${{ (parameters.repoUrl | parseRepoUrl).repo }}  # yamllint disable-line rule:line-length
         defaultBranch: ${{ parameters.defaultBranch }}
 
     - id: fetch-base
@@ -78,7 +78,7 @@ spec:
           entityName: ${{ (parameters.repoUrl | parseRepoUrl).repo }}
           repoName: ${{ (parameters.repoUrl | parseRepoUrl).repo }}
           org: ${{ (parameters.repoUrl | parseRepoUrl).owner }}
-          repoUrl: https://github.com/${{ (parameters.repoUrl | parseRepoUrl).owner }}/${{ (parameters.repoUrl | parseRepoUrl).repo }}
+          repoUrl: https://github.com/${{ (parameters.repoUrl | parseRepoUrl).owner }}/${{ (parameters.repoUrl | parseRepoUrl).repo }}  # yamllint disable-line rule:line-length
           defaultBranch: ${{ parameters.defaultBranch }}
           owner: user:${{ user.entity.metadata.namespace }}/${{ user.entity.metadata.name }}
 
@@ -102,7 +102,7 @@ spec:
       if: ${{ parameters.openPullRequest }}
       action: catalog:register
       input:
-        catalogInfoUrl: https://github.com/${{ (parameters.repoUrl | parseRepoUrl).owner }}/${{ (parameters.repoUrl | parseRepoUrl).repo }}/blob/${{ parameters.defaultBranch }}/catalog-info.yaml  # noqa: yaml[line-length]
+        catalogInfoUrl: https://github.com/${{ (parameters.repoUrl | parseRepoUrl).owner }}/${{ (parameters.repoUrl | parseRepoUrl).repo }}/blob/${{ parameters.defaultBranch }}/catalog-info.yaml  # yamllint disable-line rule:line-length
         optional: true
 
   output:
@@ -114,7 +114,7 @@ spec:
         url: /self-service/repositories/catalog
       - title: Open repository
         icon: catalog
-        url: /self-service/repositories/${{ steps['register-direct'].output.entityName or (parameters.repoUrl | parseRepoUrl).repo }}
+        url: /self-service/repositories/${{ steps['register-direct'].output.entityName or (parameters.repoUrl | parseRepoUrl).repo }}  # yamllint disable-line rule:line-length
     text:
       - title: Next steps
         content: |

@@ -77,13 +77,12 @@ def test_a_pypi_outage_fails_instead_of_uploading() -> None:
         _state_script().is_published("2.0.0.dev9", opener=_http_error(503))
 
 
-def test_pypi_workflow_publishes_from_main_only() -> None:
+def test_pypi_workflow_requires_manual_dispatch() -> None:
     workflow = (ROOT / ".github/workflows/pypi-publish.yaml").read_text(encoding="utf-8")
     # PyYAML 1.1 would read ``on`` as true, so keep this a text check.
-    push = workflow.split("on:", 1)[1].split("jobs:", 1)[0]
-    assert "branches: [main]" in push
-    assert "v2" not in push
-    assert "src/aap_demo/__init__.py" in push
+    triggers = workflow.split("on:", 1)[1].split("jobs:", 1)[0]
+    assert "workflow_dispatch:" in triggers
+    assert "push:" not in triggers
     assert re.search(r"(?<![\w.])2\.0\.0(?!\.)", workflow) is None
 
     jobs = workflow.split("jobs:", 1)[1]

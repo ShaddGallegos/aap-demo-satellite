@@ -240,7 +240,9 @@ aap-demo uses the first available source:
 
 When you run `aap-demo deploy`, the tool automatically:
 
-1. **Detects credentials**: Reads the `aap_demo` namespace in `~/.ansible/conf/env.yml` and the non-secret PAH URL from `~/.aap-demo/pah-config.yml`
+1. **Detects credentials**: Reads the `aap_demo` namespace in
+   `~/.ansible/conf/env.yml` and the non-secret PAH URL from
+   `~/.aap-demo/pah-config.yml`
 2. **Validates authentication**: Verifies token formats and configuration
 3. **Generates ansible.cfg**: Creates galaxy server configuration with detected sources
 4. **Installs collections**: Runs `ansible-galaxy collection install -r config/requirements.yml`

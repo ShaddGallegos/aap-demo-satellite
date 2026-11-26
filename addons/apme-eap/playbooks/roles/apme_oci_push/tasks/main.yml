@@ -13,7 +13,7 @@
     apme_oci_push_registry_normalized: "{{ oci_registry | regex_replace('/$', '') }}"
     apme_oci_push_registry_host: "{{ (oci_registry | regex_replace('/$', '')).rsplit('/', 1)[0] }}"
     apme_oci_push_registry_repository: "{{ (oci_registry | regex_replace('/$', '')).rsplit('/', 1)[1] }}"
-    apme_oci_push_repository_path: "{{ (oci_registry | regex_replace('/$', '')).rsplit('/', 1)[1] }}/{{ apme_oci_push_image_name }}"
+    apme_oci_push_repository_path: "{{ (oci_registry | regex_replace('/$', '')).rsplit('/', 1)[1] }}/{{ apme_oci_push_image_name }}"  # yamllint disable-line rule:line-length
 
 - name: Use explicit OCI tarball when provided  # noqa var-naming[no-role-prefix]
   ansible.builtin.set_fact:

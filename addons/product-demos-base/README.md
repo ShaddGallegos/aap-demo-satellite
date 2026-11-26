@@ -59,7 +59,8 @@ Network access is required to:
 After installation, you'll need to configure some credentials in the AAP UI:
 
 1. **Galaxy/Automation Hub Tokens** (optional):
-   - Run `aap-demo enable setup-pah` to store the offline token in the encrypted `~/.ansible/conf/env.yml`, then enable product-demos
+   - Run `aap-demo enable setup-pah` to store the offline token in the encrypted
+     `~/.ansible/conf/env.yml`, then enable product-demos
      (Galaxy credentials are wired automatically after the APD install job completes).
      Setup validates the token and waits for both Pulp remote sync tasks; correct
      any reported Pulp/SSO error before retrying APD.

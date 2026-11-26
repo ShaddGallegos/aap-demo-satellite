@@ -31,7 +31,7 @@
     user: "{{ aap_username | default(omit) }}"
     password: "{{ aap_password | default(omit) }}"
     force_basic_auth: "{{ aap_username is defined and aap_username | length > 0 }}"
-    headers: "{{ {} if (aap_username is defined and aap_username | length > 0) else {'Authorization': 'Bearer ' + aap_token, 'Content-Type': 'application/json'} }}"  # noqa: yaml[line-length]
+    headers: "{{ {} if (aap_username is defined and aap_username | length > 0) else {'Authorization': 'Bearer ' + aap_token, 'Content-Type': 'application/json'} }}"  # yamllint disable-line rule:line-length
     body_format: json
     body:
       description: "{{ aap_apme_prerequisites_api_token_description }}"

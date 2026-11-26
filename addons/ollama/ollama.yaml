@@ -89,7 +89,7 @@ spec:
             limits:
               cpu: "4"
               memory: 8Gi
-              __GPU_RESOURCE_LIMIT__
+              # __GPU_RESOURCE_LIMIT__
           readinessProbe:
             httpGet:
               path: /api/tags

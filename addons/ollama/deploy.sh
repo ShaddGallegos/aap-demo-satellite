@@ -184,7 +184,7 @@ sed -e "s|host: ollama\.apps\.127\.0\.0\.1\.nip\.io|host: ${OLLAMA_ROUTE}|" \
   -e "s|storageClassName: __STORAGE_CLASS__|storageClassName: ${_ollama_sc}|" \
   -e "s|storage: __STORAGE_SIZE__|storage: ${OLLAMA_STORAGE_SIZE}|" \
   -e "s|progressDeadlineSeconds: __PROGRESS_DEADLINE_SECONDS__|progressDeadlineSeconds: ${_ollama_progress_deadline}|" \
-  -e "s|__GPU_RESOURCE_LIMIT__|${_ollama_gpu_limit}|" \
+  -e "s|              # __GPU_RESOURCE_LIMIT__|              ${_ollama_gpu_limit}|" \
   "${SCRIPT_DIR}/ollama.yaml" | kubectl apply -f -
 
 echo "  Waiting for Ollama deployment to be ready..."

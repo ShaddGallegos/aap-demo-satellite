@@ -48,3 +48,6 @@ ignore: |
   .serena/
   test/
   .github/
+  # This is a hand-maintained Ansible content declaration whose aligned Jinja
+  # maps are intentionally formatted for review; ansible-lint owns it.
+  satellite-lab/03-content-ansible.yml
