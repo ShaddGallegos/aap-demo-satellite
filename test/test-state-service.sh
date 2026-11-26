@@ -185,7 +185,7 @@ grep -q "After=.*user@${STATE_UID}.service.*libvirtd.service.*virtqemud.service"
 grep -q '^ExecStop=/usr/local/libexec/aap-demo-state save$' "$TEST_DIR/aap-demo.service"
 grep -q '^RemainAfterExit=yes$' "$TEST_DIR/aap-demo.service"
 grep -q '^TimeoutStopSec=30min$' "$TEST_DIR/aap-demo.service"
-if command -v systemd-analyze >/dev/null; then
+if [ "${AAP_DEMO_TEST_SOCKET_SUPPORTED:-true}" = true ] && command -v systemd-analyze >/dev/null; then
   # Unit syntax can be verified without installing its privileged runner.
   sed -i -e 's#^ExecStart=.*#ExecStart=/usr/bin/true#' \
     -e 's#^ExecStop=.*#ExecStop=/usr/bin/true#' "$TEST_DIR/aap-demo.service"

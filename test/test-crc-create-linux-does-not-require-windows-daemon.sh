@@ -3,6 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+if [ "${AAP_DEMO_TEST_SOCKET_SUPPORTED:-true}" != true ]; then
+  echo "SKIP: local Unix sockets are unavailable in this execution sandbox"
+  exit 0
+fi
 TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aap-demo-crc-linux-daemon.XXXXXX")"
 trap 'rm -rf "$TEST_DIR"' EXIT
 

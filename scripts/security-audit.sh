@@ -55,7 +55,26 @@ git grep -q 'StrictHostKeyChecking=accept-new' -- '*.sh' 2>/dev/null \
   || pass 'no SSH accept-new use detected'
 
 if command -v detect-secrets >/dev/null 2>&1; then
-  scanner_version=$(detect-secrets --version 2>&1 | head -n1)
+  # Developer-managed command shims can lazily create an environment or fetch
+  # dependencies. An audit must remain read-only and bounded, especially in a
+  # clean CI/test HOME where that setup has not happened yet.
+  scanner_output=$(mktemp "${TMPDIR:-/tmp}/aap-demo-detect-secrets.XXXXXX")
+  detect-secrets --version >"$scanner_output" 2>&1 &
+  scanner_pid=$!
+  scanner_wait=0
+  while kill -0 "$scanner_pid" 2>/dev/null && [ "$scanner_wait" -lt 5 ]; do
+    sleep 1
+    scanner_wait=$((scanner_wait + 1))
+  done
+  if kill -0 "$scanner_pid" 2>/dev/null; then
+    kill "$scanner_pid" 2>/dev/null || true
+    wait "$scanner_pid" 2>/dev/null || true
+    scanner_version="unavailable (version check timed out)"
+  else
+    wait "$scanner_pid" 2>/dev/null || true
+    scanner_version=$(head -n1 "$scanner_output")
+  fi
+  rm -f -- "$scanner_output"
   case "$scanner_version" in
     *1.5.0*) pass 'pinned detect-secrets scanner is available; run scripts/check-secrets.sh for the full baseline comparison' ;;
     *) warn "detect-secrets 1.5.0 is required for the baseline comparison (found: ${scanner_version})" ;;

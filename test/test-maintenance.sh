@@ -5,6 +5,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AAP_DEMO_SH="${SCRIPT_DIR}/../aap-demo.sh"
 MAINTENANCE_SH="${SCRIPT_DIR}/../includes/maintenance.sh"
+# This fixture creates several independent HOME directories. It deliberately
+# tests the legacy HOME-derived locations, so it must not inherit the runner's
+# XDG overrides.
+unset XDG_CONFIG_HOME XDG_CACHE_HOME XDG_STATE_HOME
 
 output=$(QUIET=true "$AAP_DEMO_SH" help)
 grep -Fq "maintenance [--apply]" <<<"$output"
@@ -179,7 +183,7 @@ HOME="$zero_vault_home" QUIET=true bash -c '
   source "$SCRIPT_DIR/includes/maintenance.sh"
   _maintenance_remove_zero_vault
 ' _ "${SCRIPT_DIR}/.." >/dev/null
-if find "$zero_vault_home/.ansible" -type f -print -quit | grep -q .; then
+if [ -d "$zero_vault_home/.ansible" ] && find "$zero_vault_home/.ansible" -type f -print -quit | grep -q .; then
   echo "FAIL: --zero did not remove all supported Vault lineage files"
   exit 1
 fi

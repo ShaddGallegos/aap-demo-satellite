@@ -293,6 +293,7 @@ set -euo pipefail
 _verify_cluster() { echo UNEXPECTED_CLUSTER; return 1; }
 setup_kubeconfig() { echo UNEXPECTED_KUBECONFIG; return 1; }
 _aap_demo_run_addon_wire() { echo UNEXPECTED_WIRING; return 1; }
+aap_demo_validate_addon_contract() { :; }
 _addons_list() { :; }
 _addons_add() { :; }
 _addons_remove() { :; }

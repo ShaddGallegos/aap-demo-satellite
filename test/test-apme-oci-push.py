@@ -166,6 +166,8 @@ class RedirectingRegistryTests(unittest.TestCase):
 class OciPushRoleTests(unittest.TestCase):
     @unittest.skipIf(shutil.which("ansible-playbook") is None, "ansible-playbook is not installed")
     def test_role_pushes_archive_to_plugin_image_repository(self):
+        if os.environ.get("AAP_DEMO_TEST_SOCKET_SUPPORTED") == "false":
+            self.skipTest("Ansible's local RPC server needs unavailable local sockets")
         role_dir = SCRIPT.parents[1] / "playbooks" / "roles"
         with tempfile.TemporaryDirectory() as root:
             recorder = Path(root) / "record-argv.py"
@@ -201,12 +203,16 @@ class OciPushRoleTests(unittest.TestCase):
                 "ANSIBLE_REMOTE_TEMP": str(Path(root) / "ansible-remote"),
                 "ANSIBLE_ROLES_PATH": str(role_dir),
             }
-            subprocess.run(
+            result = subprocess.run(
                 ["ansible-playbook", "-i", "localhost,", "-c", "local", str(playbook)],
-                check=True,
                 env=env,
                 capture_output=True,
                 text=True,
+            )
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=f"ansible-playbook failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
             )
 
             argv = output.read_text(encoding="utf-8").splitlines()

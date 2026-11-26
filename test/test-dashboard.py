@@ -635,6 +635,10 @@ class DashboardUnitTests(unittest.TestCase):
             self.assertEqual(snapshot["output"].strip(), "check-integrations")
 
 
+@unittest.skipIf(
+    os.environ.get("AAP_DEMO_TEST_SOCKET_SUPPORTED") == "false",
+    "local TCP sockets are unavailable in this execution sandbox",
+)
 class DashboardHttpTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -875,6 +879,10 @@ class DashboardHttpTests(unittest.TestCase):
         self.assertNotIn(self.app.session_token, json.dumps(payload))
 
 
+@unittest.skipIf(
+    os.environ.get("AAP_DEMO_TEST_SOCKET_SUPPORTED") == "false",
+    "local TCP sockets are unavailable in this execution sandbox",
+)
 class DashboardBackgroundTests(unittest.TestCase):
     def test_background_return_reuse_and_real_restart(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

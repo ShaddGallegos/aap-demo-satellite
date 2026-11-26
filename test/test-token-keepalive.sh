@@ -6,6 +6,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_DIR=$(mktemp -d)
 trap 'rm -rf "$TEST_DIR"' EXIT
 export HOME="$TEST_DIR/home %space's"
+export XDG_CONFIG_HOME="$HOME/.config"
 export AAP_DEMO_DIR="$HOME/.aap-demo"
 export AAP_DEMO_VAULT_FILE="$HOME/.ansible/conf/env.yml"
 export AAP_DEMO_VAULT_PASSWORD_FILE="$HOME/.ansible/conf/.vaultpass.txt"

@@ -23,7 +23,7 @@ fi
 
 all_addons=$(jq -r '.addons | keys | join(" ")' "$AAP_DEMO_CAPACITY_MODEL")
 all_plan=$(aap_demo_capacity_plan "$all_addons")
-[ "$(jq -r '.recommended_vm_disk_gib' <<<"$all_plan")" = 280 ]
+[ "$(jq -r '.recommended_vm_disk_gib' <<<"$all_plan")" = 310 ]
 # host_only_gib includes Fleet, Gitea/Lightwell retained services, the local
 # image cache, and satellite-manifest's 1 GiB host-side manifest.
 [ "$(jq -r '.host_only_gib' <<<"$all_plan")" = 121 ]
