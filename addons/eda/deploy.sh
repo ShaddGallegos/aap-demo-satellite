@@ -10,7 +10,7 @@ ACTION="${1:-deploy}"
 
 case "$ACTION" in
   deploy) ;;
-  --delete|delete)
+  --delete | delete)
     echo "EDA remains enabled so existing rulebook activations are not interrupted."
     echo "Disable it deliberately by patching the AAP CR after removing its EDA resources."
     exit 0

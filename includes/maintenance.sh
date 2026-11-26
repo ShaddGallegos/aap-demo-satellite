@@ -334,9 +334,9 @@ _maintenance_remove_zero_vault() {
     && [ "$prior_password" = "$vault_dir/.vaultpass-aap-demo.txt" ] \
     && [ "$legacy_file" = "$vault_dir/env_microshift.yml" ] \
     && [ "$legacy_password" = "$vault_dir/.vaultpass_microshift.txt" ] || {
-      echo "ERROR: --zero only removes the standard Vault paths under $vault_dir; unset Vault path overrides first." >&2
-      return 1
-    }
+    echo "ERROR: --zero only removes the standard Vault paths under $vault_dir; unset Vault path overrides first." >&2
+    return 1
+  }
 
   rm -f -- "$vault_file" "$password_file" "$prior_file" "$prior_password" \
     "$legacy_file" "$legacy_password" || return 1

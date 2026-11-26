@@ -31,7 +31,10 @@ aap_demo_github_configure() {
   printf 'GitHub personal access token (hidden): ' >"$AAP_DEMO_SECRET_PROMPT_OUTPUT"
   IFS= read -r -s token <"$AAP_DEMO_SECRET_PROMPT_DEVICE" || return 1
   printf '\n' >"$AAP_DEMO_SECRET_PROMPT_OUTPUT"
-  [ -n "$token" ] || { _err "GitHub token cannot be empty"; return 1; }
+  [ -n "$token" ] || {
+    _err "GitHub token cannot be empty"
+    return 1
+  }
   if ! [[ "$token" =~ ^(ghp_|github_pat_)[A-Za-z0-9_]+$ ]]; then
     unset token
     _err "GitHub token must be a classic or fine-grained personal access token"

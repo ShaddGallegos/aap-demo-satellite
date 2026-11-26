@@ -58,8 +58,14 @@ if [ "$ACTION" = "--delete" ] || [ "$ACTION" = "delete" ]; then
 fi
 
 # --- preflight ---------------------------------------------------------------
-command -v kubectl >/dev/null 2>&1 || { _err "kubectl not found"; exit 1; }
-command -v jq >/dev/null 2>&1 || { _err "jq not found"; exit 1; }
+command -v kubectl >/dev/null 2>&1 || {
+  _err "kubectl not found"
+  exit 1
+}
+command -v jq >/dev/null 2>&1 || {
+  _err "jq not found"
+  exit 1
+}
 
 if ! kubectl get crd ansiblelightspeeds.lightspeed.ansible.com >/dev/null 2>&1; then
   _err "AnsibleLightspeed CRD not found — is the ansible-lightspeed operator installed?"

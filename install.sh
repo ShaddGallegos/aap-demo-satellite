@@ -20,7 +20,10 @@ install_oc() (
     Darwin:x86_64) platform=mac ;;
     Linux:x86_64) platform=linux ;;
     Linux:aarch64 | Linux:arm64) platform=linux-arm64 ;;
-    *) echo "ERROR: No oc download configured for $(uname -sm)" >&2; exit 1 ;;
+    *)
+      echo "ERROR: No oc download configured for $(uname -sm)" >&2
+      exit 1
+      ;;
   esac
   archive="openshift-client-${platform}.tar.gz"
   tmp=$(mktemp -d)
@@ -53,12 +56,16 @@ install_kubectl() (
   local version arch tmp expected actual
   version=$(curl -fsSL https://dl.k8s.io/release/stable.txt) || exit 1
   [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-    echo "ERROR: Invalid Kubernetes release version" >&2; exit 1;
+    echo "ERROR: Invalid Kubernetes release version" >&2
+    exit 1
   }
   case "$(uname -m)" in
     x86_64) arch=amd64 ;;
     aarch64 | arm64) arch=arm64 ;;
-    *) echo "ERROR: Unsupported kubectl architecture: $(uname -m)" >&2; exit 1 ;;
+    *)
+      echo "ERROR: Unsupported kubectl architecture: $(uname -m)" >&2
+      exit 1
+      ;;
   esac
   tmp=$(mktemp -d) || exit 1
   trap 'rm -rf -- "$tmp"' EXIT
@@ -70,7 +77,10 @@ install_kubectl() (
   else
     actual=$(shasum -a 256 "$tmp/kubectl" | awk '{print $1}') || exit 1
   fi
-  [ "$expected" = "$actual" ] || { echo "ERROR: kubectl checksum mismatch" >&2; exit 1; }
+  [ "$expected" = "$actual" ] || {
+    echo "ERROR: kubectl checksum mismatch" >&2
+    exit 1
+  }
   mkdir -p "$HOME/.local/bin" || exit 1
   install -m 755 "$tmp/kubectl" "$HOME/.local/bin/kubectl"
 )

@@ -104,8 +104,8 @@ if ! grep -q 'Pull secret not found' "$TEST_DIR/output"; then
   exit 1
 fi
 
-if grep '^systemctl ' "$AAP_DEMO_TEST_LOG" |
-  grep -Fvx 'systemctl --user cat crc-http.socket crc-vsock.socket'; then
+if grep '^systemctl ' "$AAP_DEMO_TEST_LOG" \
+  | grep -Fvx 'systemctl --user cat crc-http.socket crc-vsock.socket'; then
   echo "CRC create unexpectedly attempted daemon recovery" >&2
   cat "$AAP_DEMO_TEST_LOG" >&2
   exit 1

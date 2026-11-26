@@ -27,7 +27,10 @@ _reports_atomic_write() {
 
 _reports_generate() {
   local timestamp report_dir tracking html text enabled
-  command -v python3 >/dev/null 2>&1 || { echo "ERROR: reports requires python3" >&2; return 1; }
+  command -v python3 >/dev/null 2>&1 || {
+    echo "ERROR: reports requires python3" >&2
+    return 1
+  }
   _reports_prepare_dir || return 1
   timestamp=$(date -u +%Y%m%dT%H%M%SZ)
   report_dir="$(_reports_dir)/$timestamp"
@@ -113,6 +116,9 @@ No SMTP relay, recipient, schedule, LLM, MCP tool, repair, or vendor ticket is
 configured by this command. It cannot send mail off the local machine.
 EOF
       ;;
-    *) echo "ERROR: Unknown reports action: $action (use generate or send)" >&2; return 2 ;;
+    *)
+      echo "ERROR: Unknown reports action: $action (use generate or send)" >&2
+      return 2
+      ;;
   esac
 }

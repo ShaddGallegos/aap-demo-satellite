@@ -7,7 +7,10 @@ AAP_DEMO_DIR="$TEST_DIR/state"
 export AAP_DEMO_DIR
 source "$REPO_ROOT/satellite-lab/maintain-satellite.sh"
 LOG="$TEST_DIR/log"
-os_major=$(. /etc/os-release; printf '%s' "${VERSION_ID%%.*}")
+os_major=$(
+  . /etc/os-release
+  printf '%s' "${VERSION_ID%%.*}"
+)
 reset_case() {
   : >"$LOG"
   printf 6.17.12 >"$TEST_DIR/version"
@@ -39,7 +42,7 @@ satellite-maintain() {
   printf '%s\n' "$*" >>"$LOG"
   case "$1 ${2:-}" in
     'backup offline') [ "$BACKUP_FAIL" != true ] ;;
-    'update check'|'upgrade check') [ "$CHECK_FAIL" != true ] ;;
+    'update check' | 'upgrade check') [ "$CHECK_FAIL" != true ] ;;
     'update run')
       if [ "$NO_APPLY" != true ]; then
         printf 0 >"$TEST_DIR/pending"
@@ -140,7 +143,8 @@ for failure in check discovery partial; do
     partial) PARTIAL=true ;;
   esac
   if satellite_maintenance_main >"$TEST_DIR/output" 2>&1; then
-    echo "FAIL: $failure failure was ignored" >&2; exit 1
+    echo "FAIL: $failure failure was ignored" >&2
+    exit 1
   fi
   ! grep -Eq '^(update|upgrade) run|^dnf .* upgrade satellite-maintain' "$LOG"
 done
@@ -181,13 +185,15 @@ reset_case
 printf 100 >"$TEST_DIR/pending"
 NO_APPLY=true
 if satellite_maintenance_main >"$TEST_DIR/output" 2>&1; then
-  echo "FAIL: maintenance reported success with unapplied updates" >&2; exit 1
+  echo "FAIL: maintenance reported success with unapplied updates" >&2
+  exit 1
 fi
 grep -q 'Package updates remain' "$TEST_DIR/output"
 reset_case
 printf 6.19 >"$TEST_DIR/target"
 if satellite_maintenance_main >"$TEST_DIR/output" 2>&1; then
-  echo "FAIL: unsupported release jump was accepted" >&2; exit 1
+  echo "FAIL: unsupported release jump was accepted" >&2
+  exit 1
 fi
 ! grep -q '^backup ' "$LOG"
 reset_case
@@ -220,7 +226,8 @@ for failure in unrelated registered enable verification retry; do
       ;;
   esac
   if satellite_maintenance_main >"$TEST_DIR/output" 2>&1; then
-    echo "FAIL: $failure upgrade recovery failure was ignored" >&2; exit 1
+    echo "FAIL: $failure upgrade recovery failure was ignored" >&2
+    exit 1
   fi
   if [ "$failure" = retry ]; then
     [[ "$(grep -c '^upgrade run' "$LOG")" == 2 ]]
@@ -269,13 +276,15 @@ done
     [[ "$rc" == 2 ]]
     : >"$LOG"
     if _stage_wait_install >"$TEST_DIR/output" 2>&1; then
-      echo "FAIL: SSH trust failure was ignored" >&2; exit 1
+      echo "FAIL: SSH trust failure was ignored" >&2
+      exit 1
     fi
     [[ "$(cat "$LOG")" == ssh ]]
     grep -q 'saved trust was not changed' "$TEST_DIR/output"
     : >"$LOG"
     if main >"$TEST_DIR/output" 2>&1; then
-      echo "FAIL: builder continued after SSH trust failure" >&2; exit 1
+      echo "FAIL: builder continued after SSH trust failure" >&2
+      exit 1
     fi
     [[ "$(cat "$LOG")" == ssh ]]
     jq -e '.status == "failed" and .phases[-1].name == "ssh-trust"' \
@@ -315,8 +324,14 @@ done
   _stage_provision() { echo provision >>"$LOG"; }
   _stage_wait_install() { echo wait >>"$LOG"; }
   _stage_register() { echo register >>"$LOG"; }
-  _stage_installer() { echo installer >>"$LOG"; echo installed >"$TEST_DIR/install-state"; }
-  _stage_maintenance() { echo maintenance >>"$LOG"; [ "${MAINTENANCE_FAIL:-false}" != true ]; }
+  _stage_installer() {
+    echo installer >>"$LOG"
+    echo installed >"$TEST_DIR/install-state"
+  }
+  _stage_maintenance() {
+    echo maintenance >>"$LOG"
+    [ "${MAINTENANCE_FAIL:-false}" != true ]
+  }
   _stage_upload_manifest() { echo import >>"$LOG"; }
   _stage_content() { echo content >>"$LOG"; }
   _stage_provisioning() { echo provisioning >>"$LOG"; }
@@ -407,7 +422,8 @@ done
   [[ "$(cat "$TEST_DIR/imported-org")" == 'Demo Org' ]]
   rm "$TEST_DIR/imported-org"
   if CONTENT_ORGS=2 _stage_upload_manifest >"$TEST_DIR/output" 2>&1; then
-    echo "FAIL: ambiguous content organizations were accepted" >&2; exit 1
+    echo "FAIL: ambiguous content organizations were accepted" >&2
+    exit 1
   fi
   [[ ! -e "$TEST_DIR/imported-org" ]]
   SAT_ORG="Custom's Org" _stage_upload_manifest >"$TEST_DIR/output"

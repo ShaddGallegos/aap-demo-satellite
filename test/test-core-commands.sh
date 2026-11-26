@@ -245,7 +245,10 @@ _test_start() (
   AAP_DEMO_CRC_CREATE_SCRIPT="${AAP_DEMO_CRC_CREATE_SCRIPT:-${SCRIPT_DIR}/test/mocks/start-coredns.sh}"
   _addons_list() { :; }
   _start_crc_cluster() {
-    crc start || { _err "Failed to start the CRC cluster"; return 1; }
+    crc start || {
+      _err "Failed to start the CRC cluster"
+      return 1
+    }
   }
   _err() { echo "ERROR: $*" >&2; }
   setup_kubeconfig() { :; }

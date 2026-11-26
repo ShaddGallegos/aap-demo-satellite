@@ -32,7 +32,10 @@ if ! apd_base_is_recorded; then
   bash "${SCRIPT_DIR}/../product-demos-base/deploy.sh"
 fi
 
-command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required" >&2; exit 1; }
+command -v jq >/dev/null 2>&1 || {
+  echo "ERROR: jq is required" >&2
+  exit 1
+}
 apd_init_aap_connection
 echo "Resolving Product Demos base resources..."
 apd_wait_for_domain_install_ids "$PRODUCT_DEMOS_EE_NAME"

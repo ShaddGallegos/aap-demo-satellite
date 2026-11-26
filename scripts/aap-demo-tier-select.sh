@@ -85,7 +85,7 @@ detect_ram_gb() {
     awk '/^MemTotal:/ {printf "%d", $2/1024/1024}' /proc/meminfo
   elif command -v sysctl >/dev/null 2>&1; then
     # macOS: hw.memsize is bytes
-    echo $(( $(sysctl -n hw.memsize) / 1024 / 1024 / 1024 ))
+    echo $(($(sysctl -n hw.memsize) / 1024 / 1024 / 1024))
   else
     echo 0
   fi
@@ -172,8 +172,14 @@ prompt_choice() {
       return 2
     fi
     case "${answer,,}" in
-      1 | sno | openshift) echo "sno"; return 0 ;;
-      2 | microshift | micro) echo "microshift"; return 0 ;;
+      1 | sno | openshift)
+        echo "sno"
+        return 0
+        ;;
+      2 | microshift | micro)
+        echo "microshift"
+        return 0
+        ;;
       *) msg_warn "Invalid choice '${answer}' — enter 1 (SNO) or 2 (MicroShift)" ;;
     esac
   done
@@ -187,7 +193,10 @@ deploy_tier() {
   case "$tier" in
     sno) preset="openshift" ;;
     microshift) preset="microshift" ;;
-    *) msg_err "Unknown tier '${tier}'"; return 2 ;;
+    *)
+      msg_err "Unknown tier '${tier}'"
+      return 2
+      ;;
   esac
 
   msg_info "Deploying ${tier} (CRC_PRESET=${preset})..."
@@ -235,15 +244,35 @@ main() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --tier)
-        [ $# -ge 2 ] || { msg_err "--tier requires a value"; usage; return 2; }
+        [ $# -ge 2 ] || {
+          msg_err "--tier requires a value"
+          usage
+          return 2
+        }
         forced_tier="$2"
         shift 2
         ;;
-      --tier=*) forced_tier="${1#*=}"; shift ;;
-      --yes | -y) assume_yes=true; shift ;;
-      --dry-run) DRY_RUN=true; shift ;;
-      --help | -h) usage; return 0 ;;
-      *) msg_err "Unknown argument: $1"; usage; return 2 ;;
+      --tier=*)
+        forced_tier="${1#*=}"
+        shift
+        ;;
+      --yes | -y)
+        assume_yes=true
+        shift
+        ;;
+      --dry-run)
+        DRY_RUN=true
+        shift
+        ;;
+      --help | -h)
+        usage
+        return 0
+        ;;
+      *)
+        msg_err "Unknown argument: $1"
+        usage
+        return 2
+        ;;
     esac
   done
 
@@ -251,7 +280,10 @@ main() {
     case "${forced_tier,,}" in
       sno | openshift) forced_tier="sno" ;;
       microshift | micro) forced_tier="microshift" ;;
-      *) msg_err "Invalid tier '${forced_tier}' (use sno or microshift)"; return 2 ;;
+      *)
+        msg_err "Invalid tier '${forced_tier}' (use sno or microshift)"
+        return 2
+        ;;
     esac
   fi
 
@@ -290,7 +322,10 @@ main() {
       case "${AAP_DEMO_TIER_CHOICE,,}" in
         1 | sno | openshift) choice="sno" ;;
         2 | microshift | micro) choice="microshift" ;;
-        *) msg_err "Invalid AAP_DEMO_TIER_CHOICE '${AAP_DEMO_TIER_CHOICE}'"; return 2 ;;
+        *)
+          msg_err "Invalid AAP_DEMO_TIER_CHOICE '${AAP_DEMO_TIER_CHOICE}'"
+          return 2
+          ;;
       esac
       print_menu "$cpus" "$ram" "$disk"
       msg_info "Tier selected via AAP_DEMO_TIER_CHOICE: ${choice}"

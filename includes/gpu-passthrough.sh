@@ -183,7 +183,10 @@ _aap_demo_gpu_attach() {
       continue
     fi
     xml_file=$(mktemp "${TMPDIR:-/tmp}/aap-demo-gpu-hostdev.XXXXXX.xml") || return 1
-    _aap_demo_gpu_write_hostdev_xml "$bdf" "$xml_file" || { rm -f "$xml_file"; return 1; }
+    _aap_demo_gpu_write_hostdev_xml "$bdf" "$xml_file" || {
+      rm -f "$xml_file"
+      return 1
+    }
     if sudo virsh attach-device "$AAP_DEMO_GPU_DOMAIN" "$xml_file" --config; then
       echo "  ✓ Assigned ${bdf} to ${AAP_DEMO_GPU_DOMAIN}"
       attached_now=true
@@ -208,7 +211,10 @@ _aap_demo_gpu_attach() {
 
 _aap_demo_gpu_configure_guest() {
   local setup_script="${_AAP_DEMO_GPU_DIR}/../addons/ollama/gpu-guest-setup.sh" rc
-  [ -r "$setup_script" ] || { echo "ERROR: NVIDIA guest setup script is missing." >&2; return 1; }
+  [ -r "$setup_script" ] || {
+    echo "ERROR: NVIDIA guest setup script is missing." >&2
+    return 1
+  }
   # shellcheck source=infra-crc.sh
   source "${_AAP_DEMO_GPU_DIR}/infra-crc.sh"
   echo "  Installing/reconciling the NVIDIA guest driver, CRI-O toolkit, and device plugin..."
@@ -229,7 +235,10 @@ _aap_demo_gpu_wait_for_resource() {
   local attempt count
   for attempt in $(seq 1 90); do
     count=$(kubectl get nodes -o json 2>/dev/null | jq -r '[.items[].status.allocatable["nvidia.com/gpu"] // "0" | tonumber] | add // 0' 2>/dev/null || echo 0)
-    [ "$count" -gt 0 ] 2>/dev/null && { echo "✓ Kubernetes now advertises ${count} NVIDIA GPU(s)"; return 0; }
+    [ "$count" -gt 0 ] 2>/dev/null && {
+      echo "✓ Kubernetes now advertises ${count} NVIDIA GPU(s)"
+      return 0
+    }
     sleep 2
   done
   echo "ERROR: NVIDIA device plugin did not advertise nvidia.com/gpu within three minutes." >&2
@@ -252,8 +261,14 @@ _aap_demo_gpu_disable() {
   for bdf in "${_aap_demo_gpu_bdfs[@]}"; do
     _aap_demo_gpu_domain_has_bdf "$bdf" || continue
     xml_file=$(mktemp "${TMPDIR:-/tmp}/aap-demo-gpu-hostdev.XXXXXX.xml") || return 1
-    _aap_demo_gpu_write_hostdev_xml "$bdf" "$xml_file" || { rm -f "$xml_file"; return 1; }
-    sudo virsh detach-device "$AAP_DEMO_GPU_DOMAIN" "$xml_file" --config || { rm -f "$xml_file"; return 1; }
+    _aap_demo_gpu_write_hostdev_xml "$bdf" "$xml_file" || {
+      rm -f "$xml_file"
+      return 1
+    }
+    sudo virsh detach-device "$AAP_DEMO_GPU_DOMAIN" "$xml_file" --config || {
+      rm -f "$xml_file"
+      return 1
+    }
     rm -f "$xml_file"
     echo "  ✓ Returned ${bdf} to the host"
   done
@@ -303,7 +318,11 @@ cmd_gpu() {
       echo "Reconcile Ollama with GPU scheduling: OLLAMA_GPU=auto aap-demo enable ollama"
       ;;
     disable)
-      [ "$apply" = true ] || { echo "Preview only. Run 'aap-demo gpu disable --apply' to detach the NVIDIA GPU from CRC."; aap_demo_gpu_status; return 0; }
+      [ "$apply" = true ] || {
+        echo "Preview only. Run 'aap-demo gpu disable --apply' to detach the NVIDIA GPU from CRC."
+        aap_demo_gpu_status
+        return 0
+      }
       _aap_demo_gpu_require_linux || return 1
       _aap_demo_gpu_disable
       ;;

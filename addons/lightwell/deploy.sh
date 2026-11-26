@@ -6,7 +6,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ACTION="${1:-deploy}"
 case "$ACTION" in
   deploy | --prepare | --delete | --preflight) ;;
-  *) echo 'ERROR: Usage: deploy.sh [--prepare|--delete|--preflight]' >&2; exit 2 ;;
+  *)
+    echo 'ERROR: Usage: deploy.sh [--prepare|--delete|--preflight]' >&2
+    exit 2
+    ;;
 esac
 if [ "$ACTION" = --prepare ]; then
   bash "$SCRIPT_DIR/prepare-services.sh" services

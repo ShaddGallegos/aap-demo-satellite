@@ -149,8 +149,8 @@ AAP_DEMO_VAULT_FILE="$TEST_DIR/new conf/env.yml" \
   AAP_DEMO_SECRET_PROMPT_OUTPUT="$TEST_DIR/prompt" \
   bash "$REPO_ROOT/scripts/aap-demo-token-keepalive.sh" setup >"$TEST_DIR/fresh-output"
 "$AAP_DEMO_ANSIBLE_VAULT" view --vault-password-file "$TEST_DIR/new conf/.vaultpass.txt" \
-  "$TEST_DIR/new conf/env.yml" |
-  "$AAP_DEMO_VAULT_PYTHON" -c '
+  "$TEST_DIR/new conf/env.yml" \
+  | "$AAP_DEMO_VAULT_PYTHON" -c '
 import sys
 import yaml
 

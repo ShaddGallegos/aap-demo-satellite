@@ -19,8 +19,8 @@ if [ -e "$unit" ] && ! grep -Fxq '# Managed by aap-demo lightwell' "$unit"; then
   echo 'ERROR: Refusing to replace an unowned CI runner service' >&2
   exit 1
 fi
-id aap-demo-ci >/dev/null 2>&1 ||
-  useradd --system --create-home --home-dir /var/lib/aap-demo-lightwell-runner \
+id aap-demo-ci >/dev/null 2>&1 \
+  || useradd --system --create-home --home-dir /var/lib/aap-demo-lightwell-runner \
     --shell /usr/sbin/nologin aap-demo-ci
 install -d -m 700 -o aap-demo-ci -g aap-demo-ci /var/lib/aap-demo-lightwell-runner
 chgrp aap-demo-ci "$settings"

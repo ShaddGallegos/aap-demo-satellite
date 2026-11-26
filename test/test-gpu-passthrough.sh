@@ -6,8 +6,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_DIR=$(mktemp -d)
 trap 'rm -rf "$TEST_DIR"' EXIT
 PASSED=0 FAILED=0
-pass() { echo "✓ $1"; ((PASSED++)); }
-fail() { echo "✗ $1" >&2; ((FAILED++)); }
+pass() {
+  echo "✓ $1"
+  ((PASSED++))
+}
+fail() {
+  echo "✗ $1" >&2
+  ((FAILED++))
+}
 
 mkdir -p "$TEST_DIR/sys/bus/pci/devices" "$TEST_DIR/iommu/15/devices"
 for bdf in 0000:01:00.0 0000:01:00.1; do

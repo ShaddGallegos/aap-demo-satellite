@@ -26,7 +26,8 @@ fi
 echo "PASS: destroy is only accepted as a fleet subcommand"
 
 if output=$(HOME="$test_home" QUIET=true "$AAP_DEMO_SH" fleet ssh ../1 2>&1); then
-  echo "FAIL: Fleet SSH accepted an invalid node index"; exit 1
+  echo "FAIL: Fleet SSH accepted an invalid node index"
+  exit 1
 fi
 grep -q 'Fleet SSH requires a node index' <<<"$output"
 echo "PASS: fleet ssh remains a nested subcommand and validates its node index"

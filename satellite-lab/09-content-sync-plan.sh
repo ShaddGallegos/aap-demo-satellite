@@ -139,7 +139,10 @@ reconcile_flatpak_remote() {
       --flatpak-remote-id "$remote_id" --product-id "$product_id" 2>&1); then
       case "$output" in
         *already*mirrored* | *already*exists*) echo "  ✓ Flatpak repository ${repo_id} already mirrored" ;;
-        *) printf '%s\n' "$output" >&2; return 1 ;;
+        *)
+          printf '%s\n' "$output" >&2
+          return 1
+          ;;
       esac
     fi
   done < <(jq -r '.[] | [(.ID // .Id // .id // empty), (.Name // .name // empty)] | @tsv' \
@@ -238,10 +241,10 @@ reconcile_ansible_collections() {
     '.[] | select((.Name // .name) == $name) | (.Id // .id)' <<<"$repositories" | head -n1) || true
   if [ -z "$repository_id" ]; then
     echo "▸ Creating Ansible collections repository: ${COLLECTIONS_REPOSITORY}"
-    create_args=(repository create --organization "$ORG" --product "$COLLECTIONS_PRODUCT" \
-      --name "$COLLECTIONS_REPOSITORY" --content-type ansible_collection --url "$COLLECTIONS_URL" \
-      --ansible-collection-auth-token "$SATELLITE_COLLECTIONS_AUTH_TOKEN" \
-      --ansible-collection-auth-url "$COLLECTIONS_AUTH_URL" \
+    create_args=(repository create --organization "$ORG" --product "$COLLECTIONS_PRODUCT"
+      --name "$COLLECTIONS_REPOSITORY" --content-type ansible_collection --url "$COLLECTIONS_URL"
+      --ansible-collection-auth-token "$SATELLITE_COLLECTIONS_AUTH_TOKEN"
+      --ansible-collection-auth-url "$COLLECTIONS_AUTH_URL"
       --download-concurrency "$COLLECTIONS_DOWNLOAD_CONCURRENCY")
     hammer "${create_args[@]}" || return 1
     repositories=$(hammer --output json repository list --product-id "$product_id") || return 1

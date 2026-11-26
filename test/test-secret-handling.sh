@@ -43,8 +43,8 @@ grep -q 'body-fixture' "$TEST_CURL_PAYLOAD"
 
 : >"$TEST_CURL_ARGS"
 : >"$TEST_CURL_PAYLOAD"
-printf '%s' '{"subscriptions_username":"stdin-user","subscriptions_password":"stdin-password"}' |
-  curl -sk -u 'admin:stdin-admin-password' \
+printf '%s' '{"subscriptions_username":"stdin-user","subscriptions_password":"stdin-password"}' \
+  | curl -sk -u 'admin:stdin-admin-password' \
     -H 'Content-Type: application/json' \
     --data-binary @- \
     https://example.invalid/

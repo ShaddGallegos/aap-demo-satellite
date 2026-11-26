@@ -152,7 +152,10 @@ if grep -q 'patch aap' "$START_LOG"; then
 fi
 actual=$(grep -E '^(cluster|kubeconfig|storage|coredns|catalog|trust|fleet|wire true|status)$' "$START_LOG")
 expected=$(printf '%s\n' cluster kubeconfig storage coredns catalog trust fleet 'wire true' status)
-[ "$actual" = "$expected" ] || { echo "FAIL: incorrect startup order: $actual" >&2; exit 1; }
+[ "$actual" = "$expected" ] || {
+  echo "FAIL: incorrect startup order: $actual" >&2
+  exit 1
+}
 echo "PASS: start restores the configured demo in dependency order and prints kubeconfig guidance"
 
 : >"$START_LOG"

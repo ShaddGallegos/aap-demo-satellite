@@ -33,7 +33,11 @@ hammer() {
     *) return 1 ;;
   esac
 }
-reset_case() { : >"$temp/calls"; rm -f "$temp/ready"; INVENTORY_UPLOAD=true; }
+reset_case() {
+  : >"$temp/calls"
+  rm -f "$temp/ready"
+  INVENTORY_UPLOAD=true
+}
 reset_case
 READY=true satellite_cloud_main >"$temp/out"
 grep -q 'settings list.*allow_auto_inventory_upload' "$temp/calls"

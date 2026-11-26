@@ -14,7 +14,10 @@ LOG="$TEST_DIR/calls"
 POOLS="$TEST_DIR/pools"
 ATTACHED="$TEST_DIR/attached"
 
-fail() { echo "FAIL: $*" >&2; exit 1; }
+fail() {
+  echo "FAIL: $*" >&2
+  exit 1
+}
 
 reset_case() {
   : >"$LOG"
@@ -97,7 +100,10 @@ PY
 }
 
 _satellite_manifest_export() { printf 'export\n' >>"$LOG"; }
-_satellite_manifest_download() { printf 'download\n' >>"$LOG"; printf '%s' "$TEST_DIR/manifest.zip"; }
+_satellite_manifest_download() {
+  printf 'download\n' >>"$LOG"
+  printf '%s' "$TEST_DIR/manifest.zip"
+}
 
 reset_case
 ALLOCATION_EXISTS=false

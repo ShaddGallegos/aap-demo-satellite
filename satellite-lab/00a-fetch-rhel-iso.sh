@@ -12,12 +12,15 @@
 set -euo pipefail
 
 RHEL_VERSION="${RHEL_VERSION:-9.5}"
-ISO_KIND="${ISO_KIND:-boot}"                 # boot | dvd
+ISO_KIND="${ISO_KIND:-boot}" # boot | dvd
 ISO_NAME="rhel-${RHEL_VERSION}-x86_64-${ISO_KIND}.iso"
 DEST="${RHEL_ISO:-/var/lib/libvirt/images/${ISO_NAME}}"
 CDN_ISO_URL="https://cdn.redhat.com/content/dist/rhel9/${RHEL_VERSION}/x86_64/baseos/iso/${ISO_NAME}"
 
-[[ $EUID -eq 0 ]] || { echo "ERROR: run as root (sudo)"; exit 1; }
+[[ $EUID -eq 0 ]] || {
+  echo "ERROR: run as root (sudo)"
+  exit 1
+}
 
 # Locate the host entitlement cert + key (proves RHSM registration).
 ENT_CERT=""
@@ -46,8 +49,8 @@ echo "  $CDN_ISO_URL"
 mkdir -p "$(dirname "$DEST")"
 TMP="${DEST}.partial"
 if curl -sk --fail --cert "$ENT_CERT" --key "$ENT_KEY" \
-    --connect-timeout 20 --max-time 1800 \
-    -o "$TMP" "$CDN_ISO_URL"; then
+  --connect-timeout 20 --max-time 1800 \
+  -o "$TMP" "$CDN_ISO_URL"; then
   mv "$TMP" "$DEST"
   chmod 644 "$DEST"
   echo "✓ Downloaded: $DEST ($(du -h "$DEST" | cut -f1))"

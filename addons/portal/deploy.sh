@@ -793,7 +793,10 @@ validate_portal_lightspeed() {
   case "$PORTAL_LIGHTSPEED" in
     false) return 0 ;;
     true) ;;
-    *) echo "ERROR: PORTAL_LIGHTSPEED must be true or false." >&2; return 1 ;;
+    *)
+      echo "ERROR: PORTAL_LIGHTSPEED must be true or false." >&2
+      return 1
+      ;;
   esac
   if [ "$IS_ARM_CLUSTER" = true ]; then
     echo "ERROR: Portal Lightspeed is only validated with the x86 Red Hat chart." >&2

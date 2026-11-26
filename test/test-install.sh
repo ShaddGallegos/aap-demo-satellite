@@ -71,10 +71,12 @@ for platform in Linux:x86_64:linux Linux:aarch64:linux-arm64 \
 done
 echo "✓ architecture-specific Linux/macOS oc and kubectl installation"
 if BAD_CHECKSUM=true HOME="$TEST_HOME" install_oc >/dev/null 2>&1; then
-  echo "FAIL: invalid client checksum accepted" >&2; exit 1
+  echo "FAIL: invalid client checksum accepted" >&2
+  exit 1
 fi
 if DOWNLOAD_FAILURE=true HOME="$TEST_HOME" install_oc >/dev/null 2>&1; then
-  echo "FAIL: failed client download accepted" >&2; exit 1
+  echo "FAIL: failed client download accepted" >&2
+  exit 1
 fi
 echo "✓ download and checksum failures are explicit"
 
@@ -85,10 +87,12 @@ for platform in x86_64:amd64 aarch64:arm64; do
   test -x "$TEST_HOME/.local/bin/kubectl"
 done
 if BAD_CHECKSUM=true HOME="$TEST_HOME" install_kubectl >/dev/null 2>&1; then
-  echo "FAIL: invalid kubectl checksum accepted" >&2; exit 1
+  echo "FAIL: invalid kubectl checksum accepted" >&2
+  exit 1
 fi
 if KUBE_VERSION=invalid HOME="$TEST_HOME" install_kubectl >/dev/null 2>&1; then
-  echo "FAIL: invalid Kubernetes release accepted" >&2; exit 1
+  echo "FAIL: invalid Kubernetes release accepted" >&2
+  exit 1
 fi
 echo "✓ verified standalone kubectl installation and release validation"
 

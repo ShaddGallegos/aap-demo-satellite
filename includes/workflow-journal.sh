@@ -118,7 +118,7 @@ _workflow_spinner_start() {
     trap 'exit 0' INT TERM EXIT
     while :; do
       elapsed=$((SECONDS - started))
-      printf '\r  [%s] %s in progress (%s)' "${frames:frame++ % ${#frames}:1}" \
+      printf '\r  [%s] %s in progress (%s)' "${frames:frame++%${#frames}:1}" \
         "$name" "$(_workflow_phase_elapsed "$elapsed")" >&2
       sleep 0.2
     done

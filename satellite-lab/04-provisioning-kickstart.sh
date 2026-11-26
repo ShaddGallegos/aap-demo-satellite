@@ -16,9 +16,9 @@ if [ "$MEDIA_ONLY" != true ]; then
   # broken Satellite installation, not a reason to point provisioning elsewhere.
   CAPSULE_ID=$(hammer --output json proxy list --search "name = $SAT" \
     | jq -er '.[0].Id // .[0].id') || {
-      echo "ERROR: Integrated Capsule '$SAT' was not found" >&2
-      exit 1
-    }
+    echo "ERROR: Integrated Capsule '$SAT' was not found" >&2
+    exit 1
+  }
 
   if hammer domain info --name demo.lab >/dev/null 2>&1; then
     hammer domain update --name demo.lab --dns "$SAT" \
@@ -50,7 +50,7 @@ if [ "$MEDIA_ONLY" != true ]; then
 fi
 
 echo "== Operating systems (auto-created by the kickstart tree sync) =="
-hammer os list   # expect: RedHat 9.5 and RedHat 10.0
+hammer os list # expect: RedHat 9.5 and RedHat 10.0
 
 echo "== Installation media backed by local Satellite Kickstart content =="
 published_repo_url() { # <repo name>
@@ -111,7 +111,7 @@ mk_hostgroup() { # <name> <os title> <kickstart repo> <cv> <lce> <activation key
   hammer hostgroup set-parameter --hostgroup "$1" \
     --name kt_activation_keys --value "$6"
 }
-mk_hostgroup hg-rhel9-prod  "RedHat 9.5"  "Red Hat Enterprise Linux 9 for x86_64 - BaseOS Kickstart 9.5"   RHEL9  PROD ak-rhel9-prod
+mk_hostgroup hg-rhel9-prod "RedHat 9.5" "Red Hat Enterprise Linux 9 for x86_64 - BaseOS Kickstart 9.5" RHEL9 PROD ak-rhel9-prod
 mk_hostgroup hg-rhel10-prod "RedHat 10.0" "Red Hat Enterprise Linux 10 for x86_64 - BaseOS Kickstart 10.0" RHEL10 PROD ak-rhel10-prod
 
 cat <<'EOF'

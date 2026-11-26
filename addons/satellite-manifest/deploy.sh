@@ -51,17 +51,17 @@ _rhsm_api() {
   local response
   # Pass the token via a curl config file on stdin so it never appears in the
   # process list or shell tracing (matches the fleet addon's pattern).
-  response=$(printf 'header = "Authorization: Bearer %s"\n' "$token" |
-    curl --config - --silent --show-error \
+  response=$(printf 'header = "Authorization: Bearer %s"\n' "$token" \
+    | curl --config - --silent --show-error \
       --connect-timeout 15 --max-time 60 \
       --write-out '\n%{http_code}' \
       --request "$method" \
       --header "Accept: application/json" \
       "$@" \
       "${RHSM_API_BASE}${path}") || {
-      _err "Unable to contact the Red Hat RHSM API"
-      return 2
-    }
+    _err "Unable to contact the Red Hat RHSM API"
+    return 2
+  }
   # First line: HTTP status. Remaining lines: body. (A global would not
   # survive the caller's command-substitution subshell.)
   printf '%s\n' "${response##*$'\n'}"
@@ -103,7 +103,10 @@ _satellite_manifest_list() {
     RHSM_HTTP_CODE="${out%%$'\n'*}"
     body="${out#*$'\n'}"
     _rhsm_require_permission || return 1
-    [ "$RHSM_HTTP_CODE" = 200 ] || { _err "Listing ${path} failed (HTTP $RHSM_HTTP_CODE)"; return 1; }
+    [ "$RHSM_HTTP_CODE" = 200 ] || {
+      _err "Listing ${path} failed (HTTP $RHSM_HTTP_CODE)"
+      return 1
+    }
     count=$(printf '%s' "$body" | python3 -c '
 import json
 import sys
@@ -254,7 +257,10 @@ _satellite_manifest_entitlements() {
   out=$(_rhsm_api GET "/allocations/${uuid}?include=entitlements") || return $?
   RHSM_HTTP_CODE="${out%%$'\n'*}"
   _rhsm_require_permission || return 1
-  [ "$RHSM_HTTP_CODE" = 200 ] || { _err "Reading allocation entitlements failed (HTTP $RHSM_HTTP_CODE)"; return 1; }
+  [ "$RHSM_HTTP_CODE" = 200 ] || {
+    _err "Reading allocation entitlements failed (HTTP $RHSM_HTTP_CODE)"
+    return 1
+  }
   printf '%s' "${out#*$'\n'}"
 }
 
@@ -302,7 +308,10 @@ data = json.load(sys.stdin)
 body = data.get("body", data)
 print(body.get("exportJobID", "") if isinstance(body, dict) else "")
 ')
-  [ -n "$job_id" ] || { _err "The export response did not include a job ID"; return 1; }
+  [ -n "$job_id" ] || {
+    _err "The export response did not include a job ID"
+    return 1
+  }
 
   echo "▸ Waiting for export job ${job_id}..."
   # The exportJob endpoint returns 202 while running and 200 with a download
@@ -321,7 +330,10 @@ data = json.load(sys.stdin)
 body = data.get("body", data)
 print(body.get("href", "") if isinstance(body, dict) else "")
 ')
-        [ -n "$href" ] || { _err "Export completed but no download URL was returned"; return 1; }
+        [ -n "$href" ] || {
+          _err "Export completed but no download URL was returned"
+          return 1
+        }
         MANIFEST_DOWNLOAD_URL="$href"
         return 0
         ;;
@@ -346,17 +358,25 @@ _satellite_manifest_download() {
   echo "▸ Downloading manifest to ${dest}..." >&2
   local code tmp
   tmp=$(mktemp "${MANIFEST_DIR}/manifest.zip.XXXXXX") || return 1
-  code=$(printf 'header = "Authorization: Bearer %s"\n' "$token" |
-    curl --config - --silent --show-error \
+  code=$(printf 'header = "Authorization: Bearer %s"\n' "$token" \
+    | curl --config - --silent --show-error \
       --connect-timeout 15 --max-time 300 \
       --output "$tmp" --write-out '%{http_code}' \
-      "$MANIFEST_DOWNLOAD_URL") || { rm -f "$tmp"; _err "Unable to download the manifest"; return 1; }
+      "$MANIFEST_DOWNLOAD_URL") || {
+    rm -f "$tmp"
+    _err "Unable to download the manifest"
+    return 1
+  }
   if [ "$code" != 200 ]; then
     rm -f "$tmp"
     _err "Manifest download failed (HTTP $code)"
     return 1
   fi
-  [ -s "$tmp" ] || { rm -f "$tmp"; _err "Downloaded manifest is empty"; return 1; }
+  [ -s "$tmp" ] || {
+    rm -f "$tmp"
+    _err "Downloaded manifest is empty"
+    return 1
+  }
   mv -f "$tmp" "$dest"
   printf '%s' "$dest"
 }
@@ -371,7 +391,10 @@ main() {
     echo "✓ Reusing existing allocation ${uuid}"
   else
     uuid=$(_satellite_manifest_create_allocation) || return 1
-    [ -n "$uuid" ] || { _err "Allocation creation did not return a UUID"; return 1; }
+    [ -n "$uuid" ] || {
+      _err "Allocation creation did not return a UUID"
+      return 1
+    }
     echo "✓ Created allocation ${uuid}"
   fi
 

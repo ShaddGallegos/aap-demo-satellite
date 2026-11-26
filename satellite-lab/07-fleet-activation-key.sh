@@ -39,7 +39,7 @@ fi
 
 # Create the activation key if missing.
 if hammer --no-headers activation-key list --organization "$ORG" 2>/dev/null \
-    | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}' | grep -qx "$AK_NAME"; then
+  | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}' | grep -qx "$AK_NAME"; then
   _log "✓ Activation key $AK_NAME already exists"
 else
   hammer activation-key create --organization "$ORG" --name "$AK_NAME" \

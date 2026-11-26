@@ -71,4 +71,3 @@ _aap_demo_auto_dashboard() {
   _aap_demo_auto_console
   return 0
 }
-

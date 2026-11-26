@@ -11,7 +11,8 @@ satellite_release() {
   local version
   version=$(rpm -q --qf '%{VERSION}' satellite) || return 1
   [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.[0-9]+$ ]] || {
-    echo "ERROR: Unrecognized Satellite RPM version: $version" >&2; return 1;
+    echo "ERROR: Unrecognized Satellite RPM version: $version" >&2
+    return 1
   }
   printf '%s.%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
 }
@@ -38,7 +39,10 @@ satellite_reboot_required() {
   case "$rc" in
     0) return 0 ;;
     1) return 194 ;;
-    *) echo "ERROR: Cannot determine whether Satellite needs a reboot." >&2; return "$rc" ;;
+    *)
+      echo "ERROR: Cannot determine whether Satellite needs a reboot." >&2
+      return "$rc"
+      ;;
   esac
 }
 
@@ -46,7 +50,10 @@ satellite_repair_offline_upgrade_repositories() {
   local version="$1" os_major arch maintenance_repo enabled repo
   # Native RHSM's offline multi-enable path can retain only the last repository.
   test ! -s /etc/pki/consumer/cert.pem || return 1
-  os_major=$(. /etc/os-release; printf '%s' "${VERSION_ID%%.*}")
+  os_major=$(
+    . /etc/os-release
+    printf '%s' "${VERSION_ID%%.*}"
+  )
   arch=$(rpm --eval '%{_arch}') || return 1
   maintenance_repo="satellite-maintenance-${version}-for-rhel-${os_major}-${arch}-rpms"
   enabled=$(LC_ALL=C subscription-manager repos --list-enabled) || return 1
@@ -90,7 +97,8 @@ satellite_apply_maintenance() {
   fi
   actual=$(satellite_release) || return 1
   [ "$actual" = "$expected" ] || {
-    echo "ERROR: Expected Satellite $expected after $operation, found $actual." >&2; return 1;
+    echo "ERROR: Expected Satellite $expected after $operation, found $actual." >&2
+    return 1
   }
   satellite-maintain health check --assumeyes || return 1
   satellite_reboot_required
@@ -99,14 +107,17 @@ satellite_apply_maintenance() {
 satellite_maintenance_main() {
   local current target next repos repo maintenance_repo rc os_major arch
   rpm -q satellite >/dev/null || return 1
-  test -s /etc/foreman-installer/scenarios.d/satellite-answers.yaml &&
-    test -s /etc/foreman/settings.yaml || {
+  test -s /etc/foreman-installer/scenarios.d/satellite-answers.yaml \
+    && test -s /etc/foreman/settings.yaml || {
     echo "ERROR: Satellite packages exist but installation is incomplete. Repair the saved installer scenario before rerunning." >&2
     return 1
   }
   satellite-maintain service start || return 1
   satellite-maintain health check --assumeyes || return 1
-  os_major=$(. /etc/os-release; printf '%s' "${VERSION_ID%%.*}")
+  os_major=$(
+    . /etc/os-release
+    printf '%s' "${VERSION_ID%%.*}"
+  )
   arch=$(rpm --eval '%{_arch}') || return 1
   while :; do
     current=$(satellite_release) || return 1
@@ -146,7 +157,10 @@ satellite_maintenance_main() {
           return 1
         }
         ;;
-      *) echo "ERROR: Package update discovery failed." >&2; return "$rc" ;;
+      *)
+        echo "ERROR: Package update discovery failed." >&2
+        return "$rc"
+        ;;
     esac
     repos=$(LC_ALL=C subscription-manager repos --list) || return 1
     repos=$(awk '$1 == "Repo" && $2 == "ID:" {print $3}' <<<"$repos")
@@ -183,6 +197,9 @@ satellite_maintenance_run() {
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   exec 9>/var/lock/aap-demo-satellite-maintenance.lock
-  flock -n 9 || { echo "ERROR: Satellite maintenance is already running." >&2; exit 1; }
+  flock -n 9 || {
+    echo "ERROR: Satellite maintenance is already running." >&2
+    exit 1
+  }
   satellite_maintenance_run
 fi

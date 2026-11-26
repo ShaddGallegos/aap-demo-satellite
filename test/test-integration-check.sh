@@ -23,7 +23,10 @@ touch "$TEST_DIR/existing-kubeconfig"
   check_kubectl() { :; }
   aap_demo_resolve_kubeconfig() { printf '%s' "$TEST_DIR/existing-kubeconfig"; }
   aap_demo_reject_remote_kubeconfig() { :; }
-  cp() { echo 'FAIL: read-only setup tried to copy a kubeconfig' >&2; return 1; }
+  cp() {
+    echo 'FAIL: read-only setup tried to copy a kubeconfig' >&2
+    return 1
+  }
   COMMAND=check-integrations
   AAP_DEMO_DIR="$TEST_DIR/missing-state"
   KUBECTL_KUBECONFIG=""

@@ -68,10 +68,26 @@ _steward_extract_findings() {
   local source="$1" report="$2" findings="$3" line summary found=false
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
-      '  ✗ '* | '✗ '*) summary="${line#*✗ }"; _steward_add_finding "$findings" "$source" high "$summary"; found=true ;;
-      '  ⚠ '* | '⚠ '*) summary="${line#*⚠ }"; _steward_add_finding "$findings" "$source" warning "$summary"; found=true ;;
-      FAIL[[:space:]]*) summary="${line#FAIL }"; _steward_add_finding "$findings" "$source" high "$summary"; found=true ;;
-      ERROR:*) summary="${line#ERROR:}"; _steward_add_finding "$findings" "$source" high "$summary"; found=true ;;
+      '  ✗ '* | '✗ '*)
+        summary="${line#*✗ }"
+        _steward_add_finding "$findings" "$source" high "$summary"
+        found=true
+        ;;
+      '  ⚠ '* | '⚠ '*)
+        summary="${line#*⚠ }"
+        _steward_add_finding "$findings" "$source" warning "$summary"
+        found=true
+        ;;
+      FAIL[[:space:]]*)
+        summary="${line#FAIL }"
+        _steward_add_finding "$findings" "$source" high "$summary"
+        found=true
+        ;;
+      ERROR:*)
+        summary="${line#ERROR:}"
+        _steward_add_finding "$findings" "$source" high "$summary"
+        found=true
+        ;;
     esac
   done <"$report"
   "$found"
@@ -109,12 +125,18 @@ _steward_update_state() {
   state=$(_steward_state_file)
   _steward_initialize_state "$state" || return 1
   temporary=$(umask 077 && mktemp "${state}.tmp.XXXXXX") || return 1
-  normalized=$(umask 077 && mktemp "$(_steward_dir)/findings-normalized.XXXXXX") || { rm -f "$temporary"; return 1; }
+  normalized=$(umask 077 && mktemp "$(_steward_dir)/findings-normalized.XXXXXX") || {
+    rm -f "$temporary"
+    return 1
+  }
   if ! jq -s 'unique_by(.id)' "$findings" >"$normalized"; then
     rm -f "$temporary" "$normalized"
     return 1
   fi
-  current_ids=$(jq '[.[].id]' "$normalized") || { rm -f "$temporary" "$normalized"; return 1; }
+  current_ids=$(jq '[.[].id]' "$normalized") || {
+    rm -f "$temporary" "$normalized"
+    return 1
+  }
   if ! jq --slurpfile fresh "$normalized" --arg now "$timestamp" --arg evidence "$evidence" \
     --argjson current_ids "$current_ids" '
       def current($id): $current_ids | index($id) != null;
@@ -161,22 +183,47 @@ _steward_render_tracking() {
 
 _steward_scan() {
   local timestamp findings report tracking
-  command -v jq >/dev/null 2>&1 || { echo "ERROR: steward requires jq" >&2; return 1; }
-  command -v python3 >/dev/null 2>&1 || { echo "ERROR: steward requires python3 for local report redaction" >&2; return 1; }
-  _steward_prepare_dir || { echo "ERROR: Cannot create private steward state directory" >&2; return 1; }
+  command -v jq >/dev/null 2>&1 || {
+    echo "ERROR: steward requires jq" >&2
+    return 1
+  }
+  command -v python3 >/dev/null 2>&1 || {
+    echo "ERROR: steward requires python3 for local report redaction" >&2
+    return 1
+  }
+  _steward_prepare_dir || {
+    echo "ERROR: Cannot create private steward state directory" >&2
+    return 1
+  }
   timestamp=$(date -u +%Y%m%dT%H%M%SZ)
   findings=$(umask 077 && mktemp "$(_steward_dir)/findings.XXXXXX") || return 1
   : >"$findings"
   echo "Operations steward (read-only; no LLM, MCP, repairs, scheduler, or vendor tickets)"
-  report=$(_steward_capture preflight "$findings" "$timestamp" cmd_preflight) || { rm -f "$findings"; return 1; }
+  report=$(_steward_capture preflight "$findings" "$timestamp" cmd_preflight) || {
+    rm -f "$findings"
+    return 1
+  }
   echo "  ✓ Sanitized preflight evidence: ${report##*/}"
-  report=$(_steward_capture diagnose "$findings" "$timestamp" cmd_diagnose) || { rm -f "$findings"; return 1; }
+  report=$(_steward_capture diagnose "$findings" "$timestamp" cmd_diagnose) || {
+    rm -f "$findings"
+    return 1
+  }
   echo "  ✓ Sanitized diagnosis evidence: ${report##*/}"
-  report=$(_steward_capture integrations "$findings" "$timestamp" cmd_check_integrations) || { rm -f "$findings"; return 1; }
+  report=$(_steward_capture integrations "$findings" "$timestamp" cmd_check_integrations) || {
+    rm -f "$findings"
+    return 1
+  }
   echo "  ✓ Sanitized integration evidence: ${report##*/}"
-  _steward_update_state "$findings" "$timestamp" "$timestamp" || { rm -f "$findings"; echo "ERROR: Cannot update private steward state" >&2; return 1; }
+  _steward_update_state "$findings" "$timestamp" "$timestamp" || {
+    rm -f "$findings"
+    echo "ERROR: Cannot update private steward state" >&2
+    return 1
+  }
   tracking=$(_steward_tracking_file)
-  _steward_render_tracking "$tracking" || { rm -f "$findings"; return 1; }
+  _steward_render_tracking "$tracking" || {
+    rm -f "$findings"
+    return 1
+  }
   rm -f "$findings"
   echo "✓ Tracking report: $tracking"
   echo "✓ Private sanitized evidence: $(_steward_dir)/reports"
@@ -188,7 +235,10 @@ cmd_steward() {
     scan) _steward_scan ;;
     report)
       _steward_prepare_dir || return 1
-      [ -f "$(_steward_state_file)" ] || { echo "ERROR: No steward scan exists yet; run: aap-demo steward scan" >&2; return 1; }
+      [ -f "$(_steward_state_file)" ] || {
+        echo "ERROR: No steward scan exists yet; run: aap-demo steward scan" >&2
+        return 1
+      }
       tracking=$(_steward_tracking_file)
       _steward_render_tracking "$tracking" || return 1
       echo "✓ Tracking report: $tracking"
@@ -205,6 +255,9 @@ watch external advisory feeds, or create vendor tickets. Evidence stays local
 under ~/.aap-demo/steward (or $AAP_DEMO_STEWARD_DIR).
 EOF
       ;;
-    *) echo "ERROR: Unknown steward action: $action (use scan or report)" >&2; return 2 ;;
+    *)
+      echo "ERROR: Unknown steward action: $action (use scan or report)" >&2
+      return 2
+      ;;
   esac
 }

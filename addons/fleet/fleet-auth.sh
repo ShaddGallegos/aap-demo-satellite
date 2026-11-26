@@ -144,9 +144,9 @@ _fleet_redhat_exchange_token() {
     --data-urlencode "client_id=rhsm-api" \
     --data-urlencode "refresh_token@-" \
     "$FLEET_REDHAT_TOKEN_URL") || {
-      _err "Unable to contact Red Hat SSO"
-      return 2
-    }
+    _err "Unable to contact Red Hat SSO"
+    return 2
+  }
 
   local http_code="${response##*$'\n'}"
   response="${response%$'\n'*}"

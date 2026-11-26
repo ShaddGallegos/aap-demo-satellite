@@ -37,7 +37,10 @@ mac_state_cli() {
 
 (
   attempts=0
-  launchctl() { attempts=$((attempts + 1)); [ "$attempts" -ge 2 ]; }
+  launchctl() {
+    attempts=$((attempts + 1))
+    [ "$attempts" -ge 2 ]
+  }
   sleep() { SECONDS=$((SECONDS + 2)); }
   mac_state_wait_daemon
   test "$attempts" -eq 2
@@ -47,7 +50,8 @@ if (
   sleep() { SECONDS=$((SECONDS + 120)); }
   mac_state_wait_daemon
 ) >/dev/null 2>&1; then
-  echo "FAIL: missing CRC login daemon did not time out" >&2; exit 1
+  echo "FAIL: missing CRC login daemon did not time out" >&2
+  exit 1
 fi
 echo "PASS: login waits for the CRC daemon and fails within a bounded timeout"
 
@@ -77,20 +81,26 @@ echo "PASS: default one-state retention and explicit three-state retention prote
 latest=$(mac_state_latest)
 printf 'bad-data\n' >>"$latest/payload/crc/machines/crc/crc.img"
 if mac_state_restore >/dev/null 2>&1; then
-  echo "FAIL: corrupt checkpoint was accepted" >&2; exit 1
+  echo "FAIL: corrupt checkpoint was accepted" >&2
+  exit 1
 fi
 test ! -f "$MAC_STATE_ROOT/restore-pending"
 mac_state_save
 old_latest=$(cat "$MAC_STATE_ROOT/latest")
-if (mac_state_copy() { return 1; }; mac_state_save) >/dev/null 2>&1; then
-  echo "FAIL: failed copy published a checkpoint" >&2; exit 1
+if (
+  mac_state_copy() { return 1; }
+  mac_state_save
+) >/dev/null 2>&1; then
+  echo "FAIL: failed copy published a checkpoint" >&2
+  exit 1
 fi
 test "$(cat "$MAC_STATE_ROOT/latest")" = "$old_latest"
 echo "PASS: checksum and copy failures preserve the completed recovery point"
 
 echo Running >"$TEST_DIR/status"
 if mac_state_save >/dev/null 2>&1; then
-  echo "FAIL: running disks were copied" >&2; exit 1
+  echo "FAIL: running disks were copied" >&2
+  exit 1
 fi
 mac_state_checkpoint
 test "$(cat "$TEST_DIR/status")" = Stopped
@@ -98,19 +108,29 @@ mac_state_start
 test "$(cat "$TEST_DIR/status")" = Running
 echo "PASS: checkpoint stops cleanly and start restores and resumes"
 
-if (mac_state_save() { return 1; }; mac_state_checkpoint) >/dev/null 2>&1; then
-  echo "FAIL: failed checkpoint was accepted" >&2; exit 1
+if (
+  mac_state_save() { return 1; }
+  mac_state_checkpoint
+) >/dev/null 2>&1; then
+  echo "FAIL: failed checkpoint was accepted" >&2
+  exit 1
 fi
 if mac_state_start >/dev/null 2>&1; then
-  echo "FAIL: failed checkpoint allowed same-boot rollback" >&2; exit 1
+  echo "FAIL: failed checkpoint allowed same-boot rollback" >&2
+  exit 1
 fi
 mac_state_checkpoint
-if (mac_state_copy() { return 1; }; mac_state_restore) >/dev/null 2>&1; then
-  echo "FAIL: failed restore was accepted" >&2; exit 1
+if (
+  mac_state_copy() { return 1; }
+  mac_state_restore
+) >/dev/null 2>&1; then
+  echo "FAIL: failed restore was accepted" >&2
+  exit 1
 fi
 test -f "$MAC_STATE_ROOT/restore-pending"
 if mac_state_checkpoint >/dev/null 2>&1; then
-  echo "FAIL: interrupted restore could overwrite completed checkpoint" >&2; exit 1
+  echo "FAIL: interrupted restore could overwrite completed checkpoint" >&2
+  exit 1
 fi
 mac_state_start
 test ! -e "$MAC_STATE_ROOT/restore-pending"
@@ -126,13 +146,18 @@ grep -q '<key>RunAtLoad</key><true/>' "$TEST_DIR/recovery.plist"
 grep -q 'login</string>' "$TEST_DIR/recovery.plist"
 echo "PASS: login LaunchAgent XML and argument shape"
 
-if (crc() { echo '{"crcStatus":"Unknown"}'; }; mac_state_stopped) >/dev/null 2>&1; then
-  echo "FAIL: unknown CRC status allowed disk access" >&2; exit 1
+if (
+  crc() { echo '{"crcStatus":"Unknown"}'; }
+  mac_state_stopped
+) >/dev/null 2>&1; then
+  echo "FAIL: unknown CRC status allowed disk access" >&2
+  exit 1
 fi
 jq '.DriverName = "hyperkit"' "$HOME/.crc/machines/crc/config.json" >"$TEST_DIR/config.json"
 mv "$TEST_DIR/config.json" "$HOME/.crc/machines/crc/config.json"
 if mac_state_layout >/dev/null 2>&1; then
-  echo "FAIL: unsupported hypervisor layout accepted" >&2; exit 1
+  echo "FAIL: unsupported hypervisor layout accepted" >&2
+  exit 1
 fi
 echo "PASS: unknown VM state and unsupported macOS drivers fail explicitly"
 
@@ -143,7 +168,8 @@ uname() {
 }
 plutil() { test -s "$2"; }
 if mac_state_main install --keep 0 >/dev/null 2>&1; then
-  echo "FAIL: zero retention was accepted" >&2; exit 1
+  echo "FAIL: zero retention was accepted" >&2
+  exit 1
 fi
 trap '_aap_demo_release_operation_lock; rm -rf -- "$TEST_DIR"' EXIT
 mac_state_main install --keep 2
@@ -152,7 +178,8 @@ test -f "$MAC_STATE_PLIST"
 test "$(cat "$MAC_STATE_ROOT/retention")" = 2
 test "$(cat "$TEST_DIR/status")" = Running
 if mac_state_main install >/dev/null 2>&1; then
-  echo "FAIL: active installation was replaced" >&2; exit 1
+  echo "FAIL: active installation was replaced" >&2
+  exit 1
 fi
 mac_state_main stop
 test "$(cat "$TEST_DIR/status")" = Stopped
@@ -172,7 +199,8 @@ SCRIPT_DIR="$REPO_ROOT"
 touch "$MAC_STATE_ROOT/enabled"
 aap_demo_service_managed
 if AAP_DEMO_SERVICE_INTERNAL=1 aap_demo_service_managed; then
-  echo "FAIL: internal CLI would recurse into recovery" >&2; exit 1
+  echo "FAIL: internal CLI would recurse into recovery" >&2
+  exit 1
 fi
 bash() { printf '%s\n' "$*"; }
 for action in start restart stop; do

@@ -29,7 +29,7 @@ satellite_cloud_ready() {
     && systemctl is-enabled --quiet rhcd.service \
     && test -s /etc/rhc/workers/foreman_rh_cloud.toml \
     && hammer --output json settings list --search 'name = rhc_instance_id' \
-      | jq -e 'any(.[]; .Name == "rhc_instance_id" and (.Value | type == "string" and length > 0))' >/dev/null
+    | jq -e 'any(.[]; .Name == "rhc_instance_id" and (.Value | type == "string" and length > 0))' >/dev/null
 }
 
 satellite_cloud_inventory_upload_ready() {

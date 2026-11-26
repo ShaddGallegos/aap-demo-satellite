@@ -163,7 +163,10 @@ kubectl() {
   case "$*" in
     "get svc ollama "*) return 0 ;;
     "apply -f -") cat >"${TEST_DIR}/lightspeed-secret.json" ;;
-    *) echo "Unexpected kubectl: $*" >&2; return 91 ;;
+    *)
+      echo "Unexpected kubectl: $*" >&2
+      return 91
+      ;;
   esac
 }
 if validate_portal_lightspeed && configure_portal_lightspeed; then

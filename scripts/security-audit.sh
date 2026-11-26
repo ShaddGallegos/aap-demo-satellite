@@ -14,8 +14,14 @@ cd "$root"
 warnings=0
 passes=0
 
-pass() { printf 'PASS  %s\n' "$*"; passes=$((passes + 1)); }
-warn() { printf 'WARN  %s\n' "$*"; warnings=$((warnings + 1)); }
+pass() {
+  printf 'PASS  %s\n' "$*"
+  passes=$((passes + 1))
+}
+warn() {
+  printf 'WARN  %s\n' "$*"
+  warnings=$((warnings + 1))
+}
 
 for path in \
   includes/credential-vault.sh \

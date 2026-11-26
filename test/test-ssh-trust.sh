@@ -8,7 +8,10 @@ trap 'rm -rf "$TEST_DIR"' EXIT
 # shellcheck source=../includes/ssh-trust.sh
 source "$ROOT/includes/ssh-trust.sh"
 
-assert() { "$@" || { echo "FAIL: $*" >&2; exit 1; }; }
+assert() { "$@" || {
+  echo "FAIL: $*" >&2
+  exit 1
+}; }
 
 AAP_DEMO_SSH_TRUST_MODE=tofu
 unset AAP_DEMO_SSH_FINGERPRINTS

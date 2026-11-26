@@ -11,7 +11,10 @@ case "$ACTION" in
     LIGHTWELL_AO_ROUTE=$(wire_ao_route_host)
     export LIGHTWELL_AO_ROUTE
     ;;
-  *) echo "ERROR: Usage: prepare-services.sh [services|runner]" >&2; exit 2 ;;
+  *)
+    echo "ERROR: Usage: prepare-services.sh [services|runner]" >&2
+    exit 2
+    ;;
 esac
 prepare_with_key() {
   python3 "$HERE/prepare.py" "$ACTION" --ssh-key "$1"

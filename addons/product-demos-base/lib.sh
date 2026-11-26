@@ -777,7 +777,7 @@ apd_wait_for_domain_install_ids() {
       return 0
     fi
 
-    elapsed=$(( $(date +%s) - started ))
+    elapsed=$(($(date +%s) - started))
     if [ "$elapsed" -ge "$timeout" ]; then
       echo "❌ ERROR: Product Demos base resources were not ready after ${timeout}s" >&2
       # Run once without suppressing output so the user gets the precise

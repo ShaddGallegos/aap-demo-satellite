@@ -11,8 +11,14 @@ source "${SCRIPT_DIR}/../includes/satellite-ca-trust.sh"
 PASSED=0
 FAILED=0
 
-_pass() { echo "✓ $1"; ((PASSED++)); }
-_fail() { echo "✗ $1"; ((FAILED++)); }
+_pass() {
+  echo "✓ $1"
+  ((PASSED++))
+}
+_fail() {
+  echo "✗ $1"
+  ((FAILED++))
+}
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -56,7 +62,7 @@ fi
 # Restore the real function, then point it at a server that hands back a leaf.
 unset -f _fetch_satellite_ca
 source "${SCRIPT_DIR}/../includes/satellite-ca-trust.sh"
-curl() { cp "$NOT_CA" "${@: -1}"; }  # stub: last arg is -o destination
+curl() { cp "$NOT_CA" "${@: -1}"; } # stub: last arg is -o destination
 if _fetch_satellite_ca "$TMPDIR/rejected.crt" 2>/dev/null; then
   _fail "fetch_rejects_non_ca"
 else

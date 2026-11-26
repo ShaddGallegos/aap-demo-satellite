@@ -15,10 +15,19 @@ fleet_stack_replace_block() {
     return 1
   fi
   printf '# BEGIN AAP-DEMO STACK\n%s\n# END AAP-DEMO STACK\n' "$content" >>"$temp"
-  chmod --reference="$path" "$temp" || { rm -f "$temp"; return 1; }
-  chown --reference="$path" "$temp" || { rm -f "$temp"; return 1; }
+  chmod --reference="$path" "$temp" || {
+    rm -f "$temp"
+    return 1
+  }
+  chown --reference="$path" "$temp" || {
+    rm -f "$temp"
+    return 1
+  }
   # /etc/hosts may be a bind mount, so retain the original inode.
-  cat "$temp" >"$path" || { rm -f "$temp"; return 1; }
+  cat "$temp" >"$path" || {
+    rm -f "$temp"
+    return 1
+  }
   rm -f "$temp"
 }
 

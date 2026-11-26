@@ -20,7 +20,10 @@ LOC="${SATELLITE_GENERAL_NODE_LOCATION:-Lab}"
   echo "ERROR: SATELLITE_GENERAL_NODE_PREFIX must be a safe DNS-label prefix" >&2
   exit 2
 }
-[ "$COUNT" -gt 0 ] || { echo "General Satellite nodes disabled (count=0)"; exit 0; }
+[ "$COUNT" -gt 0 ] || {
+  echo "General Satellite nodes disabled (count=0)"
+  exit 0
+}
 [ -n "$IMAGE" ] || {
   echo "ERROR: SATELLITE_GENERAL_NODE_IMAGE must name an image registered on '$RESOURCE'." >&2
   echo "  Image-based provisioning is deliberately not replaced with a PXE/kickstart fallback." >&2

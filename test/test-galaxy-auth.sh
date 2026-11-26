@@ -208,8 +208,8 @@ printf 'existing_setting: keep-me\naap_demo:\n  galaxy:\n    offline_token: comp
 aap_demo_vault_set ah_offline_token compatible-token
 [ "$(aap_demo_vault_get aap_demo.galaxy.offline_token)" = compatible-token ]
 "$AAP_DEMO_ANSIBLE_VAULT" view --vault-password-file "$AAP_DEMO_VAULT_PASSWORD_FILE" \
-  "$AAP_DEMO_VAULT_FILE" |
-  "$AAP_DEMO_VAULT_PYTHON" -c '
+  "$AAP_DEMO_VAULT_FILE" \
+  | "$AAP_DEMO_VAULT_PYTHON" -c '
 import sys
 import yaml
 

@@ -82,40 +82,40 @@ cmd_check_integrations() {
       _integration_result NOT_TESTED AO-to-MCP "AO inspection failed"
       _integration_result NOT_TESTED AO-to-Ollama "AO inspection failed"
     else
-    if item=$(_integration_item "$WIRE_AAP_INTEGRATION_NAME" ansible_automation_platform "$integrations" 2>/dev/null) \
-      && jq -e '.enabled == true and .validation_status == "available"' <<<"$item" >/dev/null \
-      && id=$(jq -er '.id | select(type == "string" and test("^[A-Za-z0-9._-]+$"))' <<<"$item") \
-      && credential_id=$(jq -er '.management_credential_id | select(type == "string" and test("^[A-Za-z0-9._-]+$"))' <<<"$item") \
-      && inventories=$(_integration_ao_get "/proxies/aap/inventories?integration_id=$id&credential_id=$credential_id") \
-      && jq -e '(.results | type) == "array"' <<<"$inventories" >/dev/null; then
-      _integration_result PASS AO-to-AAP "enabled and authenticated inventory proxy responds"
-    else
-      _integration_result FAIL AO-to-AAP "integration or authenticated inventory proxy failed"
-    fi
+      if item=$(_integration_item "$WIRE_AAP_INTEGRATION_NAME" ansible_automation_platform "$integrations" 2>/dev/null) \
+        && jq -e '.enabled == true and .validation_status == "available"' <<<"$item" >/dev/null \
+        && id=$(jq -er '.id | select(type == "string" and test("^[A-Za-z0-9._-]+$"))' <<<"$item") \
+        && credential_id=$(jq -er '.management_credential_id | select(type == "string" and test("^[A-Za-z0-9._-]+$"))' <<<"$item") \
+        && inventories=$(_integration_ao_get "/proxies/aap/inventories?integration_id=$id&credential_id=$credential_id") \
+        && jq -e '(.results | type) == "array"' <<<"$inventories" >/dev/null; then
+        _integration_result PASS AO-to-AAP "enabled and authenticated inventory proxy responds"
+      else
+        _integration_result FAIL AO-to-AAP "integration or authenticated inventory proxy failed"
+      fi
 
-    if ! _integration_enabled mcp-server; then
-      _integration_result DISABLED AO-to-MCP "mcp-server not listed as enabled"
-    elif item=$(_integration_item "$WIRE_MCP_INTEGRATION_NAME" mcp_server "$integrations" 2>/dev/null) \
-      && jq -e '.enabled == true and .validation_status == "available" and
+      if ! _integration_enabled mcp-server; then
+        _integration_result DISABLED AO-to-MCP "mcp-server not listed as enabled"
+      elif item=$(_integration_item "$WIRE_MCP_INTEGRATION_NAME" mcp_server "$integrations" 2>/dev/null) \
+        && jq -e '.enabled == true and .validation_status == "available" and
         (.enabled_tool_count | type == "number" and . > 0)' <<<"$item" >/dev/null; then
-      _integration_result PASS AO-to-MCP "last validation available; enabled tools recorded"
-    else
-      _integration_result FAIL AO-to-MCP "integration unavailable or no enabled tools recorded"
-    fi
+        _integration_result PASS AO-to-MCP "last validation available; enabled tools recorded"
+      else
+        _integration_result FAIL AO-to-MCP "integration unavailable or no enabled tools recorded"
+      fi
 
-    if ! _integration_enabled ollama; then
-      _integration_result DISABLED AO-to-Ollama "ollama not listed as enabled"
-    elif item=$(_integration_item "aap-demo Ollama" llm_provider "$integrations" 2>/dev/null) \
-      && jq -e '.enabled == true and .validation_status == "available"' <<<"$item" >/dev/null \
-      && id=$(jq -er '.id | select(type == "string" and test("^[A-Za-z0-9._-]+$"))' <<<"$item") \
-      && models=$(_integration_ao_get "/integrations/$id/models?limit=100") \
-      && jq -e '(.resources | type) == "array" and has("next") and .next == null and
+      if ! _integration_enabled ollama; then
+        _integration_result DISABLED AO-to-Ollama "ollama not listed as enabled"
+      elif item=$(_integration_item "aap-demo Ollama" llm_provider "$integrations" 2>/dev/null) \
+        && jq -e '.enabled == true and .validation_status == "available"' <<<"$item" >/dev/null \
+        && id=$(jq -er '.id | select(type == "string" and test("^[A-Za-z0-9._-]+$"))' <<<"$item") \
+        && models=$(_integration_ao_get "/integrations/$id/models?limit=100") \
+        && jq -e '(.resources | type) == "array" and has("next") and .next == null and
         (.total == null or ((.total | type) == "number" and .total <= (.resources | length))) and
         any(.resources[]; .enabled == true and .is_default == true)' <<<"$models" >/dev/null; then
-      _integration_result PASS AO-to-Ollama "last validation available; enabled default model recorded"
-    else
-      _integration_result FAIL AO-to-Ollama "integration unavailable or default model not enabled"
-    fi
+        _integration_result PASS AO-to-Ollama "last validation available; enabled default model recorded"
+      else
+        _integration_result FAIL AO-to-Ollama "integration unavailable or default model not enabled"
+      fi
     fi
   fi
 

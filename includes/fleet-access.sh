@@ -146,7 +146,10 @@ _fleet_ssh_with_key() {
       break
     fi
     case "$arg" in
-      -p[0-9]*) port="${arg#-p}"; break ;;
+      -p[0-9]*)
+        port="${arg#-p}"
+        break
+        ;;
     esac
     previous="$arg"
   done

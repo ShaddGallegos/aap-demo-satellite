@@ -17,7 +17,10 @@ BUILD_SCRIPT="${REPO_ROOT}/satellite-lab/build-and-configure.sh"
 TEST_DIR=$(mktemp -d)
 trap 'rm -rf "$TEST_DIR"' EXIT
 
-fail() { echo "FAIL: $1" >&2; exit 1; }
+fail() {
+  echo "FAIL: $1" >&2
+  exit 1
+}
 
 # --- Extract the functions under test ---------------------------------------
 # build-and-configure.sh runs main() at the bottom; source only the stage

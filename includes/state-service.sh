@@ -45,7 +45,10 @@ aap_demo_service_lifecycle() {
   case "$1" in
     stop) sudo systemctl stop aap-demo.service ;;
     start | restart) sudo systemctl restart aap-demo.service ;;
-    *) _err "Unsupported service lifecycle action: $1"; return 1 ;;
+    *)
+      _err "Unsupported service lifecycle action: $1"
+      return 1
+      ;;
   esac
 }
 
@@ -81,12 +84,21 @@ cmd_service() {
       while [ "$#" -gt 0 ]; do
         case "$1" in
           --keep | --stop-timeout)
-            [ "$#" -ge 2 ] || { _err "Missing value for $1"; return 1; }
+            [ "$#" -ge 2 ] || {
+              _err "Missing value for $1"
+              return 1
+            }
             if [ "$1" = --keep ]; then keep="$2"; else stop_timeout="$2"; fi
             shift 2
             ;;
-          --force-stop) force_stop=true; shift ;;
-          *) _err "Usage: aap-demo service install [--keep N] [--force-stop] [--stop-timeout SECONDS]"; return 1 ;;
+          --force-stop)
+            force_stop=true
+            shift
+            ;;
+          *)
+            _err "Usage: aap-demo service install [--keep N] [--force-stop] [--stop-timeout SECONDS]"
+            return 1
+            ;;
         esac
       done
       if ! [[ "$keep" =~ ^[1-9][0-9]*$ ]]; then
@@ -111,8 +123,14 @@ cmd_service() {
       }
       ;;
     retention)
-      [ "$#" -eq 1 ] || { _err "Usage: aap-demo service retention N"; return 1; }
-      [[ "$1" =~ ^[1-9][0-9]*$ ]] || { _err "Retention must be a positive integer"; return 1; }
+      [ "$#" -eq 1 ] || {
+        _err "Usage: aap-demo service retention N"
+        return 1
+      }
+      [[ "$1" =~ ^[1-9][0-9]*$ ]] || {
+        _err "Retention must be a positive integer"
+        return 1
+      }
       sudo /usr/local/libexec/aap-demo-state retention "$1"
       ;;
     status)

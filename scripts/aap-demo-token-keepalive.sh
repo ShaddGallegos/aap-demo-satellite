@@ -25,12 +25,12 @@ notify_invalid() {
   local message="$1"
   case "$(uname -s)" in
     Linux)
-      command -v notify-send >/dev/null 2>&1 &&
-        notify-send --urgency=critical "aap-demo offline token needs renewal" "$message" || true
+      command -v notify-send >/dev/null 2>&1 \
+        && notify-send --urgency=critical "aap-demo offline token needs renewal" "$message" || true
       ;;
     Darwin)
-      command -v osascript >/dev/null 2>&1 &&
-        osascript -e "display notification \"${message//\"/\\\"}\" with title \"aap-demo offline token needs renewal\" sound name \"Basso\"" \
+      command -v osascript >/dev/null 2>&1 \
+        && osascript -e "display notification \"${message//\"/\\\"}\" with title \"aap-demo offline token needs renewal\" sound name \"Basso\"" \
           >/dev/null 2>&1 || true
       ;;
   esac
@@ -101,7 +101,10 @@ read_crontab() {
 
 cron_quote() {
   case "$1" in
-    *$'\n'* | *$'\r'*) _err "Cron paths and settings must not contain newlines"; return 1 ;;
+    *$'\n'* | *$'\r'*)
+      _err "Cron paths and settings must not contain newlines"
+      return 1
+      ;;
   esac
   printf "'%s'" "${1//\'/\'\\\'\'}"
 }
@@ -225,7 +228,10 @@ status_keepalive() {
       launchctl print "gui/$(id -u)/${MAC_LABEL}"
       [ ! -f "$LOG_FILE" ] || tail -n 5 "$LOG_FILE"
       ;;
-    *) printf 'Unsupported platform\n' >&2; return 1 ;;
+    *)
+      printf 'Unsupported platform\n' >&2
+      return 1
+      ;;
   esac
 }
 
@@ -245,7 +251,10 @@ disable_keepalive() {
       launchctl bootout "gui/$(id -u)/${MAC_LABEL}" >/dev/null 2>&1 || true
       rm -f "$MAC_PLIST"
       ;;
-    *) printf 'Unsupported platform\n' >&2; return 1 ;;
+    *)
+      printf 'Unsupported platform\n' >&2
+      return 1
+      ;;
   esac
   echo "✓ aap-demo token keepalive disabled"
 }
@@ -257,7 +266,10 @@ case "$ACTION" in
       "$AAP_DEMO_ANSIBLE_VAULT" "$AAP_DEMO_VAULT_PYTHON"; do
       case "$path" in
         /*) ;;
-        *) _err "Cron requires absolute Vault, password-file, and tool paths"; exit 1 ;;
+        *)
+          _err "Cron requires absolute Vault, password-file, and tool paths"
+          exit 1
+          ;;
       esac
     done
     command -v crontab >/dev/null 2>&1 || {
@@ -277,7 +289,10 @@ case "$ACTION" in
     case "$(uname -s)" in
       Linux) install_linux ;;
       Darwin) install_macos ;;
-      *) echo "ERROR: Token keepalive supports Linux and macOS" >&2; exit 1 ;;
+      *)
+        echo "ERROR: Token keepalive supports Linux and macOS" >&2
+        exit 1
+        ;;
     esac
     echo "✓ aap-demo token keepalive enabled"
     ;;

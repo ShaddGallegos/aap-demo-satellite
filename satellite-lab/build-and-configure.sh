@@ -122,9 +122,9 @@ _satellite_create_maintenance_snapshot() {
   _log "▸ Creating libvirt checkpoint $name before Satellite maintenance"
   $VIRSH snapshot-create-as satellite "$name" \
     --description 'aap-demo pre-maintenance rollback checkpoint' --atomic || {
-      _err "Could not create the Satellite libvirt checkpoint; refusing maintenance"
-      return 1
-    }
+    _err "Could not create the Satellite libvirt checkpoint; refusing maintenance"
+    return 1
+  }
   SATELLITE_MAINTENANCE_SNAPSHOT="$name"
   _log "✓ Hypervisor rollback checkpoint ready: $name"
 }
@@ -172,8 +172,8 @@ _satellite_seed_discovery_image() {
   local cache_tmp cache_bytes guest_available_kib required_kib
   cache_tmp=$(mktemp) || return 1
 
-  if sudo test -s "$SAT_DISCOVERY_IMAGE_CACHE" && \
-    sudo tar -tf "$SAT_DISCOVERY_IMAGE_CACHE" >/dev/null 2>&1; then
+  if sudo test -s "$SAT_DISCOVERY_IMAGE_CACHE" \
+    && sudo tar -tf "$SAT_DISCOVERY_IMAGE_CACHE" >/dev/null 2>&1; then
     _log "✓ Reusing cached Satellite Discovery image: ${SAT_DISCOVERY_IMAGE_CACHE}"
   else
     _log "▸ Downloading Satellite Discovery image once into the libvirt cache..."
@@ -188,14 +188,26 @@ _satellite_seed_discovery_image() {
       rm -f -- "$cache_tmp"
       return 1
     fi
-    sudo install -d -m 0755 /var/lib/libvirt/images || { rm -f -- "$cache_tmp"; return 1; }
-    sudo install -m 0644 "$cache_tmp" "${SAT_DISCOVERY_IMAGE_CACHE}.new" || { rm -f -- "$cache_tmp"; return 1; }
-    sudo mv -f -- "${SAT_DISCOVERY_IMAGE_CACHE}.new" "$SAT_DISCOVERY_IMAGE_CACHE" || { rm -f -- "$cache_tmp"; return 1; }
+    sudo install -d -m 0755 /var/lib/libvirt/images || {
+      rm -f -- "$cache_tmp"
+      return 1
+    }
+    sudo install -m 0644 "$cache_tmp" "${SAT_DISCOVERY_IMAGE_CACHE}.new" || {
+      rm -f -- "$cache_tmp"
+      return 1
+    }
+    sudo mv -f -- "${SAT_DISCOVERY_IMAGE_CACHE}.new" "$SAT_DISCOVERY_IMAGE_CACHE" || {
+      rm -f -- "$cache_tmp"
+      return 1
+    }
     _log "✓ Cached Satellite Discovery image: ${SAT_DISCOVERY_IMAGE_CACHE}"
   fi
 
-  cache_bytes=$(sudo stat -c %s "$SAT_DISCOVERY_IMAGE_CACHE") || { rm -f -- "$cache_tmp"; return 1; }
-  required_kib=$(( (cache_bytes + 1023) / 1024 + 1024 * 1024 ))
+  cache_bytes=$(sudo stat -c %s "$SAT_DISCOVERY_IMAGE_CACHE") || {
+    rm -f -- "$cache_tmp"
+    return 1
+  }
+  required_kib=$(((cache_bytes + 1023) / 1024 + 1024 * 1024))
 
   # An interrupted prior transfer must not be mistaken for a usable cache.
   if $SAT_SSH "test -s '${SAT_DISCOVERY_IMAGE_GUEST_PATH}' && tar -tf '${SAT_DISCOVERY_IMAGE_GUEST_PATH}' >/dev/null 2>&1"; then
@@ -295,8 +307,8 @@ _satellite_maintenance_progress() {
 
 _satellite_run_maintenance_with_progress() {
   local checkpoint="$1" maintenance_pid rc=0
-  printf 'export SATELLITE_MAINTENANCE_CHECKPOINT=%q\nbash /root/maintain-satellite.sh\n' "$checkpoint" | \
-    $SAT_SSH 'bash -s' &
+  printf 'export SATELLITE_MAINTENANCE_CHECKPOINT=%q\nbash /root/maintain-satellite.sh\n' "$checkpoint" \
+    | $SAT_SSH 'bash -s' &
   maintenance_pid=$!
   while kill -0 "$maintenance_pid" 2>/dev/null; do
     _satellite_maintenance_progress
@@ -320,10 +332,16 @@ _satellite_prepare_fresh_nfs() {
 
   case "$nfs_root" in
     /*) ;;
-    *) _err "SATLAB_NFS_ROOT must be an absolute path"; return 1 ;;
+    *)
+      _err "SATLAB_NFS_ROOT must be an absolute path"
+      return 1
+      ;;
   esac
   case "$nfs_root" in
-    *'..'* | *'//'*) _err "SATLAB_NFS_ROOT contains an unsafe path component"; return 1 ;;
+    *'..'* | *'//'*)
+      _err "SATLAB_NFS_ROOT contains an unsafe path component"
+      return 1
+      ;;
   esac
 
   if [ -e "$marker" ]; then
@@ -756,7 +774,10 @@ _stage_sync_plan() {
   fi
   credentials_file=""
   if [ -n "$collection_token" ] || [ -n "$flatpak_username" ] || [ -n "$flatpak_token" ]; then
-    credentials_file=$(mktemp) || { unset collection_token; return 1; }
+    credentials_file=$(mktemp) || {
+      unset collection_token
+      return 1
+    }
     chmod 600 "$credentials_file"
     if [ -n "$collection_token" ]; then
       printf 'export SATELLITE_COLLECTIONS_AUTH_TOKEN=%q\n' "$collection_token" >"$credentials_file"

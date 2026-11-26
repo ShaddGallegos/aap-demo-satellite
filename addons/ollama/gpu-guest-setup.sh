@@ -4,7 +4,11 @@
 set -euo pipefail
 
 plugin_version="${AAP_DEMO_NVIDIA_DEVICE_PLUGIN_VERSION:-v0.17.4}"
-case "$plugin_version" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "ERROR: Invalid NVIDIA device plugin version." >&2; exit 2;; esac
+case "$plugin_version" in v[0-9]*.[0-9]*.[0-9]*) ;; *)
+  echo "ERROR: Invalid NVIDIA device plugin version." >&2
+  exit 2
+  ;;
+esac
 
 if ! grep -ql '0x10de' /sys/bus/pci/devices/*/vendor 2>/dev/null; then
   echo "ERROR: No NVIDIA PCI device is visible in the CRC guest." >&2

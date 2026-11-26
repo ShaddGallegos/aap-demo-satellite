@@ -24,9 +24,9 @@ LAB_GW=192.168.150.1
 DHCP_RANGE="192.168.150.100 192.168.150.200"
 DNS_ZONE=demo.lab
 DNS_REVERSE=150.168.192.in-addr.arpa
-DNS_FORWARDER=192.168.122.1      # libvirt dnsmasq on the 'default' network (host):
-                                 # resolves upstream; AAP/CRC is reached through the
-                                 # host's forwarded ports via the default gateway
+DNS_FORWARDER=192.168.122.1 # libvirt dnsmasq on the 'default' network (host):
+# resolves upstream; AAP/CRC is reached through the
+# host's forwarded ports via the default gateway
 # ---------------------------------------------------------------------------
 
 if [ -z "$ADMIN_PASS" ]; then
@@ -35,11 +35,14 @@ if [ -z "$ADMIN_PASS" ]; then
 fi
 
 hostnamectl set-hostname "$FQDN"
-grep -q "$FQDN" /etc/hosts || echo "$LAB_IP $FQDN satellite" >> /etc/hosts
+grep -q "$FQDN" /etc/hosts || echo "$LAB_IP $FQDN satellite" >>/etc/hosts
 
 # Detect the satlab-facing interface (the one holding LAB_IP)
 LAB_IF=$(ip -o -4 addr show to 192.168.150.0/24 | awk '{print $2}' | head -n1)
-[[ -n "$LAB_IF" ]] || { echo "ERROR: no interface with a 192.168.150.x address"; exit 1; }
+[[ -n "$LAB_IF" ]] || {
+  echo "ERROR: no interface with a 192.168.150.x address"
+  exit 1
+}
 echo "satlab interface: $LAB_IF"
 
 dnf -y update
@@ -111,7 +114,7 @@ satellite-installer --scenario satellite \
 
 # hammer CLI auth for root
 mkdir -p ~/.hammer/cli.modules.d
-cat > ~/.hammer/foreman.yml <<EOF
+cat >~/.hammer/foreman.yml <<EOF
 :foreman:
   :username: $ADMIN_USER
   :password: '$ADMIN_PASS'

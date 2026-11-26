@@ -16,12 +16,18 @@ set -euo pipefail
 # ---- editable variables ---------------------------------------------------
 EXPORT_DIR="${SATLAB_NFS_DIR:-/var/lib/satlab/pulp}"
 NFS_ROOT="${SATLAB_NFS_ROOT:-/var/lib/satlab/instances}"
-SAT_IP="${SATELLITE_LAB_IP:-192.168.122.20}"   # Satellite VM NIC1 (default net)
+SAT_IP="${SATELLITE_LAB_IP:-192.168.122.20}" # Satellite VM NIC1 (default net)
 EXPORT_OPTS="rw,sync,no_subtree_check,no_root_squash"
 # ---------------------------------------------------------------------------
 
-[[ $EUID -eq 0 ]] || { echo "ERROR: run as root (sudo)"; exit 1; }
-command -v exportfs >/dev/null 2>&1 || { echo "ERROR: nfs-utils not installed"; exit 1; }
+[[ $EUID -eq 0 ]] || {
+  echo "ERROR: run as root (sudo)"
+  exit 1
+}
+command -v exportfs >/dev/null 2>&1 || {
+  echo "ERROR: nfs-utils not installed"
+  exit 1
+}
 if [ "${SATLAB_NFS_REQUIRE_SCOPED:-0}" = 1 ]; then
   [[ "$EXPORT_DIR" =~ ^${NFS_ROOT}/satellite-[0-9]{8}T[0-9]{6}Z-[A-Za-z0-9]+/pulp$ ]] || {
     echo "ERROR: managed Satellite builds require a scoped per-install NFS export" >&2
@@ -42,7 +48,7 @@ if grep -qF "$EXPORT_DIR " /etc/exports 2>/dev/null; then
   # Replace any existing export of this dir with the current options.
   sed -i "\\|^$EXPORT_DIR |c\\$EXPORT_LINE" /etc/exports
 else
-  echo "$EXPORT_LINE" >> /etc/exports
+  echo "$EXPORT_LINE" >>/etc/exports
 fi
 echo "  $EXPORT_LINE"
 
@@ -74,7 +80,10 @@ exportfs -ra
 if ! systemctl is-active --quiet nfs-mountd; then
   systemctl restart nfs-mountd 2>/dev/null || true
 fi
-exportfs -v | grep "$EXPORT_DIR" || { echo "ERROR: export not active"; exit 1; }
+exportfs -v | grep "$EXPORT_DIR" || {
+  echo "ERROR: export not active"
+  exit 1
+}
 # Confirm the export answers a showmount from the host (what the VM checks).
 showmount -e 127.0.0.1 2>/dev/null | grep -q "$EXPORT_DIR" \
   || echo "  NOTE: showmount not answering yet; NFSv4 mount still works without mountd"

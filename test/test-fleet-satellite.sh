@@ -9,8 +9,14 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 PASSED=0
 FAILED=0
-_pass() { echo "✓ $1"; ((PASSED++)); }
-_fail() { echo "✗ $1"; ((FAILED++)); }
+_pass() {
+  echo "✓ $1"
+  ((PASSED++))
+}
+_fail() {
+  echo "✗ $1"
+  ((FAILED++))
+}
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -42,15 +48,22 @@ JSON
 }
 
 fleet_stack_ssh() {
-  local port="$1"; shift
+  local port="$1"
+  shift
   echo "SSH port=$port cmd=$*" >>"$LOG"
   cat >/dev/null 2>&1 || true
   return 0
 }
 
 # Stub the Satellite-side AK ensure to avoid real scp/ssh.
-ssh()  { echo "SAT_SSH $*" >>"$LOG"; return 0; }
-scp()  { echo "SAT_SCP $*" >>"$LOG"; return 0; }
+ssh() {
+  echo "SAT_SSH $*" >>"$LOG"
+  return 0
+}
+scp() {
+  echo "SAT_SCP $*" >>"$LOG"
+  return 0
+}
 
 if (
   _sat_ssh() {
@@ -121,7 +134,12 @@ fi
 # The remote script is passed as an SSH command argument (stdin carries the AK
 # name). Capture argv and inspect it.
 captured="$TMPDIR/remote.sh"
-fleet_stack_ssh() { shift; printf '%s\n' "$*" >"$captured"; cat >/dev/null 2>&1 || true; return 0; }
+fleet_stack_ssh() {
+  shift
+  printf '%s\n' "$*" >"$captured"
+  cat >/dev/null 2>&1 || true
+  return 0
+}
 _fleet_satellite_register_node 2201 "fleet-rhel9" >/dev/null 2>&1 || true
 
 if grep -q 'activationkey' "$captured" && grep -q 'org_label' "$captured"; then
@@ -184,7 +202,12 @@ fi
 # Source the remote script body and drive it with a malicious host to confirm
 # the case-validation rejects it before any URL/rpm use.
 remote_body="$TMPDIR/remote_body.sh"
-fleet_stack_ssh() { shift; printf '%s\n' "$*" >"$remote_body"; cat >/dev/null 2>&1 || true; return 0; }
+fleet_stack_ssh() {
+  shift
+  printf '%s\n' "$*" >"$remote_body"
+  cat >/dev/null 2>&1 || true
+  return 0
+}
 _fleet_satellite_register_node 2201 "fleet-rhel9" >/dev/null 2>&1 || true
 # Extract the heredoc script and run it with a hostile host on stdin.
 if bash -c '

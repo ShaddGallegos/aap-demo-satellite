@@ -43,10 +43,10 @@ fi
 # the bootstrap project, whose checkout is retained there.
 overlay_calls=()
 registered_calls=()
-AAP_USERNAME=admin
-AAP_PASSWORD=unused
-AAP_API=https://example.invalid/api/controller/v2
-APD_PROJECT_ID=27
+AAP_USERNAME="admin"
+AAP_PASSWORD="unused"
+AAP_API="https://example.invalid/api/controller/v2"
+APD_PROJECT_ID="27"
 apd_apd_org_id() { printf '2'; }
 curl() { printf '%s' '{"count":1,"results":[{"id":29}]}'; }
 apd_overlay_project_playbook() { overlay_calls+=("$1:$3"); }
@@ -77,8 +77,8 @@ else
 fi
 
 AAP_USERNAME="admin"
-AAP_PASSWORD=unused
-AAP_API=https://example.invalid/api/controller/v2
+AAP_PASSWORD="unused"
+AAP_API="https://example.invalid/api/controller/v2"
 SATELLITE_URL=https://external.example.test
 RETRY_RESULT=0
 TEMPLATE_RESPONSE='{"count":2}'
@@ -96,7 +96,10 @@ curl() {
 }
 
 apd_complete_satellite_install 0 >/dev/null
-[ "$RETRIES" -eq 0 ] || { echo "FAIL: successful install was retried" >&2; exit 1; }
+[ "$RETRIES" -eq 0 ] || {
+  echo "FAIL: successful install was retried" >&2
+  exit 1
+}
 
 RETRY_RESULT=1
 if apd_complete_satellite_install 1 >/dev/null 2>&1; then
@@ -190,22 +193,38 @@ curl() {
   done
   case "$url" in
     *'/inventory_sources/?'*)
-      printf '%s' '{"count":1,"results":[{"id":129,"inventory":3,"source_vars":"{}"}]}' ;;
+      printf '%s' '{"count":1,"results":[{"id":129,"inventory":3,"source_vars":"{}"}]}'
+      ;;
     *'/inventories/?'*) printf '%s' '{"count":1,"results":[{"id":2}]}' ;;
     *'/inventories/2/hosts/?'*)
-      printf '%s' '{"count":1,"results":[{"id":9,"name":"aap-fleet-node-1"}]}' ;;
+      printf '%s' '{"count":1,"results":[{"id":9,"name":"aap-fleet-node-1"}]}'
+      ;;
     *'/hosts/9/variable_data/'*)
-      printf '%s' '{"ansible_host":"192.0.2.1","ansible_port":2201,"ansible_password":"must-not-copy"}' ;;
+      printf '%s' '{"ansible_host":"192.0.2.1","ansible_port":2201,"ansible_password":"must-not-copy"}'
+      ;;
     *'/inventory_sources/129/update/'*) printf '%s' '{"id":79}' ;;
-    *'/inventory_sources/129/'*) printf '%s' "$payload" >"$TEST_DIR/source.json"; printf '{}' ;;
+    *'/inventory_sources/129/'*)
+      printf '%s' "$payload" >"$TEST_DIR/source.json"
+      printf '{}'
+      ;;
     *'/inventory_updates/79/'*) printf '%s' '{"status":"successful"}' ;;
     *'/workflow_job_templates/?'*) printf '%s' '{"count":1,"results":[{"id":135}]}' ;;
     *'/workflow_job_templates/135/workflow_nodes/?'*)
       printf '%s' '{"count":2,"results":[{"id":68,"extra_data":{"_hosts":"env_RHEL8_Dev"}},
-        {"id":67,"extra_data":{"content_view":"RHEL8"}}]}' ;;
-    *'/workflow_job_template_nodes/68/'*) printf '%s' "$payload" >"$TEST_DIR/hosts.json"; printf '{}' ;;
-    *'/workflow_job_template_nodes/67/'*) printf '%s' "$payload" >"$TEST_DIR/view.json"; printf '{}' ;;
-    *) echo "Unexpected API call: $url" >&2; return 1 ;;
+        {"id":67,"extra_data":{"content_view":"RHEL8"}}]}'
+      ;;
+    *'/workflow_job_template_nodes/68/'*)
+      printf '%s' "$payload" >"$TEST_DIR/hosts.json"
+      printf '{}'
+      ;;
+    *'/workflow_job_template_nodes/67/'*)
+      printf '%s' "$payload" >"$TEST_DIR/view.json"
+      printf '{}'
+      ;;
+    *)
+      echo "Unexpected API call: $url" >&2
+      return 1
+      ;;
   esac
 }
 apd_sync_satellite_lab_inventory >/dev/null

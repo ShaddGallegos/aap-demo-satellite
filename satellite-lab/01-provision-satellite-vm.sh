@@ -13,28 +13,29 @@ cd "$(dirname "$0")"
 # ---- editable variables ---------------------------------------------------
 VM_NAME=satellite
 VM_VCPUS=4
-VM_RAM=32768                                   # MiB
+VM_RAM=32768 # MiB
 VM_DISK=/var/lib/libvirt/images/${VM_NAME}.qcow2
-VM_DISK_SIZE=40                                # GiB (minimal OS; Pulp content on host NFS)
+VM_DISK_SIZE=40 # GiB (minimal OS; Pulp content on host NFS)
 # Install source. The ISO is downloaded automatically from the Red Hat CDN
 # (using the host's RHSM entitlement cert) when missing — no portal login.
 #   dvd (default): rhel-9.5-x86_64-dvd.iso  (~10 GB, fully offline install)
 #   cdn:           rhel-9.5-x86_64-boot.iso (~1 GB) + packages from the CDN
 RHEL_VERSION="${RHEL_VERSION:-9.5}"
-RHEL_INSTALL_SOURCE="${RHEL_INSTALL_SOURCE:-dvd}"   # dvd | cdn
-ISO_KIND=dvd; [ "$RHEL_INSTALL_SOURCE" = "cdn" ] && ISO_KIND=boot
+RHEL_INSTALL_SOURCE="${RHEL_INSTALL_SOURCE:-dvd}" # dvd | cdn
+ISO_KIND=dvd
+[ "$RHEL_INSTALL_SOURCE" = "cdn" ] && ISO_KIND=boot
 RHEL_ISO="${RHEL_ISO:-/var/lib/libvirt/images/rhel-${RHEL_VERSION}-x86_64-${ISO_KIND}.iso}"
-HOST_NET=default                               # libvirt network for NIC1 (NAT to host)
-LAB_NET=satlab                                 # from 00-network-setup.sh
-MAC_HOST="52:54:00:5a:7e:01"                   # must match satellite-vm.ks
+HOST_NET=default             # libvirt network for NIC1 (NAT to host)
+LAB_NET=satlab               # from 00-network-setup.sh
+MAC_HOST="52:54:00:5a:7e:01" # must match satellite-vm.ks
 MAC_LAB="52:54:00:5a:7e:02"
 
 # Secrets rendered into the kickstart. The orchestrator obtains ROOTPW from
 # aap_demo.satellite.root_password in the encrypted host Vault.
 ROOTPW="${ROOTPW:-}"
-RHSM_ORG="${RHSM_ORG:-}"                       # activation-key org id (preferred)
-RHSM_AK="${RHSM_AK:-}"                         # activation key name
-RHSM_USER="${RHSM_USER:-}"                     # fallback: username/password
+RHSM_ORG="${RHSM_ORG:-}"   # activation-key org id (preferred)
+RHSM_AK="${RHSM_AK:-}"     # activation key name
+RHSM_USER="${RHSM_USER:-}" # fallback: username/password
 RHSM_PASS="${RHSM_PASS:-}"
 # ---------------------------------------------------------------------------
 
@@ -47,7 +48,10 @@ VIRSH="virsh -c qemu:///system"
 
 case "$RHEL_INSTALL_SOURCE" in
   dvd | cdn) ;;
-  *) echo "ERROR: RHEL_INSTALL_SOURCE must be 'dvd' or 'cdn' (got '$RHEL_INSTALL_SOURCE')"; exit 1 ;;
+  *)
+    echo "ERROR: RHEL_INSTALL_SOURCE must be 'dvd' or 'cdn' (got '$RHEL_INSTALL_SOURCE')"
+    exit 1
+    ;;
 esac
 # Fetch the ISO automatically from the CDN when it is missing.
 if [ ! -f "$RHEL_ISO" ]; then
@@ -55,9 +59,18 @@ if [ ! -f "$RHEL_ISO" ]; then
   ISO_KIND="$ISO_KIND" RHEL_VERSION="$RHEL_VERSION" RHEL_ISO="$RHEL_ISO" \
     bash "$(dirname "$0")/00a-fetch-rhel-iso.sh"
 fi
-[[ -f $RHEL_ISO ]] || { echo "ERROR: $RHEL_ISO still not found after download"; exit 1; }
-$VIRSH net-info "$LAB_NET" >/dev/null 2>&1 || { echo "ERROR: run 00-network-setup.sh first"; exit 1; }
-$VIRSH net-info "$HOST_NET" >/dev/null 2>&1 || { echo "ERROR: libvirt network '$HOST_NET' not found"; exit 1; }
+[[ -f $RHEL_ISO ]] || {
+  echo "ERROR: $RHEL_ISO still not found after download"
+  exit 1
+}
+$VIRSH net-info "$LAB_NET" >/dev/null 2>&1 || {
+  echo "ERROR: run 00-network-setup.sh first"
+  exit 1
+}
+$VIRSH net-info "$HOST_NET" >/dev/null 2>&1 || {
+  echo "ERROR: libvirt network '$HOST_NET' not found"
+  exit 1
+}
 
 # Resolve the install source line rendered into the kickstart.
 #   dvd: no extra line — Anaconda installs from the DVD media.
@@ -87,7 +100,10 @@ ROOTPW_HASH=$(_ks_password_hash "$ROOTPW")
 HOST_SSH_PUBKEY="${SATELLITE_SSH_PUBKEY:-}"
 if [ -z "$HOST_SSH_PUBKEY" ]; then
   for k in "$HOME/.ssh/id_ed25519.pub" "$HOME/.ssh/id_rsa.pub" /root/.ssh/id_ed25519.pub; do
-    [ -f "$k" ] && { HOST_SSH_PUBKEY=$(cat "$k"); break; }
+    [ -f "$k" ] && {
+      HOST_SSH_PUBKEY=$(cat "$k")
+      break
+    }
   done
 fi
 
@@ -95,13 +111,13 @@ fi
 esc() { printf '%s' "${1//&/\\&}"; }
 RENDERED_KS=$(mktemp /tmp/satellite-vm.XXXXXX.ks)
 sed -e "s|__ROOTPW_HASH__|$(esc "$ROOTPW_HASH")|g" \
-    -e "s|__RHSM_ORG__|$(esc "$RHSM_ORG")|g" \
-    -e "s|__RHSM_AK__|$(esc "$RHSM_AK")|g" \
-    -e "s|__RHSM_USER__|$(esc "$RHSM_USER")|g" \
-    -e "s|__RHSM_PASS__|$(esc "$RHSM_PASS")|g" \
-    -e "s|__INSTALL_SOURCE__|$(esc "$INSTALL_SOURCE_LINE")|g" \
-    -e "s|__HOST_SSH_PUBKEY__|$(esc "$HOST_SSH_PUBKEY")|g" \
-    satellite-vm.ks > "$RENDERED_KS"
+  -e "s|__RHSM_ORG__|$(esc "$RHSM_ORG")|g" \
+  -e "s|__RHSM_AK__|$(esc "$RHSM_AK")|g" \
+  -e "s|__RHSM_USER__|$(esc "$RHSM_USER")|g" \
+  -e "s|__RHSM_PASS__|$(esc "$RHSM_PASS")|g" \
+  -e "s|__INSTALL_SOURCE__|$(esc "$INSTALL_SOURCE_LINE")|g" \
+  -e "s|__HOST_SSH_PUBKEY__|$(esc "$HOST_SSH_PUBKEY")|g" \
+  satellite-vm.ks >"$RENDERED_KS"
 chmod 600 "$RENDERED_KS"
 
 # Set up the host NFS export for /var/lib/pulp before the VM boots, so the

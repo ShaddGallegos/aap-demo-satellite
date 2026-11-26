@@ -4,7 +4,7 @@
 # 2) Red Hat connector (rhc) / Insights rollout across the fleet
 set -euo pipefail
 
-HYPERVISOR=192.168.122.1     # KVM host, reachable via the 'default' network NIC
+HYPERVISOR=192.168.122.1 # KVM host, reachable via the 'default' network NIC
 # The hypervisor's sshd refuses root login (PermitRootLogin no via the
 # csb-remote-access policy), so the compute resource connects as a dedicated
 # user in the host's libvirt group. Passed by build-and-configure.sh.
@@ -72,9 +72,9 @@ reconcile_remote_execution() {
   subnet=$(hammer --output json subnet info --name "$SATELLITE_SUBNET") || return 1
   jq -e --argjson proxy_id "$proxy_id" \
     'any(."Remote execution proxies"[]?; (.Id // .id) == $proxy_id)' <<<"$subnet" >/dev/null || {
-      echo "ERROR: Remote Execution Capsule was not assigned to subnet '$SATELLITE_SUBNET'" >&2
-      return 1
-    }
+    echo "ERROR: Remote Execution Capsule was not assigned to subnet '$SATELLITE_SUBNET'" >&2
+    return 1
+  }
   echo "  ✓ Remote Execution Capsule $SATELLITE_PROXY assigned to subnet $SATELLITE_SUBNET"
 }
 
@@ -123,8 +123,8 @@ echo "== 1. Libvirt compute resource and profile =="
 # The Libvirt provider uses qemu+ssh as the 'foreman' user -> the hypervisor
 # user (libvirt group member; the host's sshd refuses root login).
 sudo -u foreman mkdir -p /usr/share/foreman/.ssh
-[[ -f /usr/share/foreman/.ssh/id_ed25519 ]] || \
-  sudo -u foreman ssh-keygen -t ed25519 -N '' -f /usr/share/foreman/.ssh/id_ed25519
+[[ -f /usr/share/foreman/.ssh/id_ed25519 ]] \
+  || sudo -u foreman ssh-keygen -t ed25519 -N '' -f /usr/share/foreman/.ssh/id_ed25519
 # The foreman public key is authorized on the hypervisor by the orchestrator
 # (build-and-configure.sh runs on the host) before this script runs. Here we
 # only accept the host key and verify the connection non-interactively.
@@ -146,11 +146,11 @@ fi
 # Verify Satellite can see the satlab network + storage pools on the hypervisor.
 # These queries are not implemented for the Libvirt provider in some Satellite
 # versions (ERF42-7329); they are informational only, so never fail the build.
-hammer compute-resource networks --name "$COMPUTE_RESOURCE" || \
-  echo "  (networks query not supported for Libvirt here — continuing)"
+hammer compute-resource networks --name "$COMPUTE_RESOURCE" \
+  || echo "  (networks query not supported for Libvirt here — continuing)"
 if hammer compute-resource --help 2>&1 | grep -q 'storage-pools'; then
-  hammer compute-resource storage-pools --name "$COMPUTE_RESOURCE" || \
-    echo "  (storage-pools query not supported for Libvirt here — continuing)"
+  hammer compute-resource storage-pools --name "$COMPUTE_RESOURCE" \
+    || echo "  (storage-pools query not supported for Libvirt here — continuing)"
 else
   echo "  (storage-pool query is not provided by this Satellite CLI — continuing)"
 fi

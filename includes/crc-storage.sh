@@ -289,7 +289,10 @@ aap_demo_start_storage() {
     fi
     before="$total"
     mkdir -p "$(dirname "$pending")" || return 1
-    (umask 077; printf '%s %s\n' "$before" "$target" >"$pending") || return 1
+    (
+      umask 077
+      printf '%s %s\n' "$before" "$target" >"$pending"
+    ) || return 1
     echo "CRC filesystem is at least 90% full; growing the VM disk by 20% to ${target} GiB."
   fi
 

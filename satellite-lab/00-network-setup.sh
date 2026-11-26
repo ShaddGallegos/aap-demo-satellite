@@ -15,7 +15,10 @@ cd "$(dirname "$0")"
 VIRSH="virsh -c qemu:///system"
 
 # Sanity: the libvirt 'default' network must exist (Satellite's NIC1 lives here)
-$VIRSH net-info default >/dev/null 2>&1 || { echo "ERROR: libvirt network 'default' not found."; exit 1; }
+$VIRSH net-info default >/dev/null 2>&1 || {
+  echo "ERROR: libvirt network 'default' not found."
+  exit 1
+}
 
 # Define + start satlab
 if ! $VIRSH net-info satlab >/dev/null 2>&1; then
@@ -26,7 +29,7 @@ $VIRSH net-autostart satlab
 
 # L3 reachability between segments (satlab fleet -> host/upstream via forwarding)
 sysctl -w net.ipv4.ip_forward=1
-echo 'net.ipv4.ip_forward=1' > /etc/sysctl.d/99-satlab-forward.conf
+echo 'net.ipv4.ip_forward=1' >/etc/sysctl.d/99-satlab-forward.conf
 
 # If the host runs firewalld with the libvirt zone, permit satlab <-> default forwarding
 if systemctl is-active --quiet firewalld; then

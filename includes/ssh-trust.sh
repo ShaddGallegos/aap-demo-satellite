@@ -12,13 +12,19 @@ if [ -n "${_AAP_DEMO_SSH_TRUST_LOADED:-}" ]; then return 0; fi
 _AAP_DEMO_SSH_TRUST_LOADED=1
 
 _aap_demo_ssh_fingerprint_for() {
-  local host="$1" port="$2" entry key="${host}:${port}="
+  local host port entry key
+  host="$1"
+  port="$2"
+  key="${host}:${port}="
   local fingerprints="${AAP_DEMO_SSH_FINGERPRINTS:-}"
   local -a entries
   IFS=',' read -r -a entries <<<"$fingerprints"
   for entry in "${entries[@]}"; do
     case "$entry" in
-      "$key"*) printf '%s\n' "${entry#"$key"}"; return 0 ;;
+      "$key"*)
+        printf '%s\n' "${entry#"$key"}"
+        return 0
+        ;;
     esac
   done
   return 1
@@ -34,8 +40,8 @@ _aap_demo_ssh_known_host_entries() {
 }
 
 _aap_demo_ssh_entries_match_fingerprint() {
-  local entries="$1" expected="$2"
-  printf '%s\n' "$entries" | ssh-keygen -lf -E sha256 - 2>/dev/null \
+  local host_entries="$1" expected="$2"
+  printf '%s\n' "$host_entries" | ssh-keygen -lf -E sha256 - 2>/dev/null \
     | awk -v expected="$expected" '$2 == expected { found=1 } END { exit !found }'
 }
 
@@ -44,7 +50,7 @@ _aap_demo_ssh_entries_match_fingerprint() {
 aap_demo_ssh_prepare_trust() {
   local known_hosts="$1" host="$2" port="${3:-22}" mode expected entries scanned
   mode="${AAP_DEMO_SSH_TRUST_MODE:-tofu}"
-  case "$mode" in tofu|verify|strict) ;; *)
+  case "$mode" in tofu | verify | strict) ;; *)
     echo "ERROR: AAP_DEMO_SSH_TRUST_MODE must be tofu, verify, or strict" >&2
     return 2
     ;;

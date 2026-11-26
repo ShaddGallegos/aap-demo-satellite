@@ -26,10 +26,12 @@ test "$(cat "$TEST_DIR/ports")" = $'2201\n2203'
 ! grep -q 'fixture-secret\|fixture-user' "$TEST_DIR/output"
 FAIL_PORT=2201
 if fleet_rhc_connect >"$TEST_DIR/output" 2>&1; then
-  echo "FAIL: node enrollment failure ignored"; exit 1
+  echo "FAIL: node enrollment failure ignored"
+  exit 1
 fi
 ! grep -q 'All running Fleet nodes' "$TEST_DIR/output"
 if fleet_rhc_connect unexpected >/dev/null 2>&1; then
-  echo "FAIL: unsupported registration arguments accepted"; exit 1
+  echo "FAIL: unsupported registration arguments accepted"
+  exit 1
 fi
 echo "PASS: manual RHC enrollment uses stdin credentials, skips stopped nodes, and propagates failure"

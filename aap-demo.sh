@@ -528,8 +528,8 @@ if [ "$FULL_DEMO_LIGHTWELL" = true ] && [ "$COMMAND" != create ]; then
   exit 1
 fi
 if [ "$FULL_DEMO_GITEA" = true ] && ! {
-  { [ "$COMMAND" = create ] && [ "$FULL_DEMO" = true ]; } ||
-    { [ "$COMMAND" = enable ] && [ "${EXTRA_ARGS[0]:-}" = gitea ]; }
+  { [ "$COMMAND" = create ] && [ "$FULL_DEMO" = true ]; } \
+    || { [ "$COMMAND" = enable ] && [ "${EXTRA_ARGS[0]:-}" = gitea ]; }
 }; then
   echo "ERROR: --gitea/--gittea is standalone or used with create --full-demo" >&2
   exit 1
@@ -2281,8 +2281,8 @@ _full_demo_lightwell_enable() {
     if [ -f "$configuration" ]; then
       (
         umask 077
-        jq --argjson index "$index" '.app_index = $index' "$configuration" >"$configuration.tmp" &&
-          mv "$configuration.tmp" "$configuration"
+        jq --argjson index "$index" '.app_index = $index' "$configuration" >"$configuration.tmp" \
+          && mv "$configuration.tmp" "$configuration"
       ) || return 1
     fi
   fi
@@ -2304,7 +2304,10 @@ _full_demo_flatpak_registry_credentials_valid() {
     *[[:space:]]*) return 1 ;;
   esac
   netrc=$(mktemp) || return 2
-  chmod 600 "$netrc" || { rm -f -- "$netrc"; return 2; }
+  chmod 600 "$netrc" || {
+    rm -f -- "$netrc"
+    return 2
+  }
   printf 'machine registry.redhat.io login %s password %s\n' "$username" "$token" >"$netrc"
   http_code=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
     --netrc-file "$netrc" --connect-timeout 10 --max-time 30 \

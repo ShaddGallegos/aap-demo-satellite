@@ -13,11 +13,20 @@ _fleet_aap_api() {
   case "$1 $2" in
     'GET /credentials/'*) printf '{"count":1,"results":[{"id":3}]}' ;;
     'GET /inventories/2/hosts/'*) printf '{"count":1,"results":[{"id":4}]}' ;;
-    'PATCH /credentials/3/') printf '%s' "$3" >"$TEST_DIR/credential"; printf '{"id":3}' ;;
-    'PATCH /hosts/4/') printf '%s' "$3" >"$TEST_DIR/host"; printf '{"id":4}' ;;
+    'PATCH /credentials/3/')
+      printf '%s' "$3" >"$TEST_DIR/credential"
+      printf '{"id":3}'
+      ;;
+    'PATCH /hosts/4/')
+      printf '%s' "$3" >"$TEST_DIR/host"
+      printf '{"id":4}'
+      ;;
     'POST /inventories/2/ad_hoc_commands/') printf '{"id":29}' ;;
     'GET /ad_hoc_commands/29/') printf '{"status":"%s"}' "$PING_STATUS" ;;
-    *) echo "Unexpected API call: $1 $2" >&2; return 1 ;;
+    *)
+      echo "Unexpected API call: $1 $2" >&2
+      return 1
+      ;;
   esac
 }
 test "$(_fleet_aap_create_credential 1 1 "$TEST_DIR/ssh_key")" = 3
@@ -30,13 +39,15 @@ grep -q 'GET /inventories/2/hosts/?name=aap-fleet-node-1' "$TEST_DIR/requests"
 sleep() { :; }
 PING_STATUS=failed
 if _fleet_aap_run_ping 2 3 >/dev/null; then
-  echo "FAIL: failed AAP ping was accepted" >&2; exit 1
+  echo "FAIL: failed AAP ping was accepted" >&2
+  exit 1
 fi
 PING_STATUS=successful
 _fleet_aap_run_ping 2 3 >/dev/null
 PING_STATUS=running
 if ! _fleet_aap_run_ping 2 3 >"$TEST_DIR/pending-output"; then
-  echo "FAIL: queued AAP ping failed an otherwise successful Fleet registration" >&2; exit 1
+  echo "FAIL: queued AAP ping failed an otherwise successful Fleet registration" >&2
+  exit 1
 fi
 test "${FLEET_AAP_PING_PENDING:-false}" = true
 grep -q 'verification remains pending' "$TEST_DIR/pending-output"

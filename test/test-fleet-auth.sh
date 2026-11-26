@@ -40,8 +40,14 @@ curl() {
   offline_token=$(cat)
   case "${SSO_TEST_MODE:-normal}" in
     network) return 7 ;;
-    unavailable) printf '{"error":"temporarily_unavailable"}\n503'; return ;;
-    malformed) printf '{}\n200'; return ;;
+    unavailable)
+      printf '{"error":"temporarily_unavailable"}\n503'
+      return
+      ;;
+    malformed)
+      printf '{}\n200'
+      return
+      ;;
   esac
 
   if [ "$offline_token" = "valid-offline-token" ]; then

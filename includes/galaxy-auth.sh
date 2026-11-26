@@ -34,9 +34,9 @@ galaxy_offline_token_status() {
     --data-urlencode "refresh_token@-" \
     "https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token" \
     2>/dev/null) || {
-      unset token
-      return 2
-    }
+    unset token
+    return 2
+  }
   unset token
   http_code="${response##*$'\n'}"
   case "$http_code" in
@@ -270,7 +270,7 @@ PY
 configure_pah_remotes() {
   local auth_retry_attempt="${1:-0}"
   case "$auth_retry_attempt" in
-    0|1) ;;
+    0 | 1) ;;
     *)
       _err "Invalid PAH remote authorization retry state"
       return 1
@@ -338,13 +338,13 @@ configure_pah_remotes() {
     local poll_seconds="${PAH_SYNC_POLL_SECONDS:-5}"
     local max_attempts next_report=0
     case "$timeout_seconds" in
-      ''|*[!0-9]*)
+      '' | *[!0-9]*)
         _err "PAH_SYNC_TIMEOUT_SECONDS must be a positive number of seconds"
         return 1
         ;;
     esac
     case "$poll_seconds" in
-      ''|*[!0-9]*)
+      '' | *[!0-9]*)
         _err "PAH_SYNC_POLL_SECONDS must be a positive number of seconds"
         return 1
         ;;
@@ -353,10 +353,10 @@ configure_pah_remotes() {
       _err "PAH sync timeout must be at least 60 seconds and its poll interval must be 1-30 seconds"
       return 1
     fi
-    max_attempts=$(( (timeout_seconds + poll_seconds - 1) / poll_seconds ))
+    max_attempts=$(((timeout_seconds + poll_seconds - 1) / poll_seconds))
     case "$task_href" in
       /api/galaxy/*) task_href="${aap_base}${task_href}" ;;
-      https://*|http://*) ;;
+      https://* | http://*) ;;
       *)
         _err "${label} sync did not return a usable Pulp task URL"
         return 1
@@ -369,8 +369,11 @@ configure_pah_remotes() {
       }
       state=$(jq -r '.state // empty' <<<"$task" 2>/dev/null)
       case "$state" in
-        completed) echo "✓"; return 0 ;;
-        failed|canceled)
+        completed)
+          echo "✓"
+          return 0
+          ;;
+        failed | canceled)
           error=$(jq -r '.error.description // .error.traceback // "Pulp reported no error detail"' <<<"$task" 2>/dev/null | head -c 400)
           # Pulp occasionally receives a transient NXDOMAIN/SERVFAIL while
           # downloading an S3 redirect target. It can also mark a task failed
@@ -395,7 +398,7 @@ configure_pah_remotes() {
           return 1
           ;;
       esac
-      elapsed=$(( (attempt - 1) * poll_seconds ))
+      elapsed=$(((attempt - 1) * poll_seconds))
       if [ "$elapsed" -ge "$next_report" ]; then
         printf '  %s sync still running (%dm%02ds; waiting up to %dm; task: %s)\n' \
           "$label" "$((elapsed / 60))" "$((elapsed % 60))" "$((timeout_seconds / 60))" "$task_href"
@@ -410,7 +413,7 @@ configure_pah_remotes() {
   pah_transient_retry_delay() {
     local retry_delay_seconds="${PAH_DNS_RETRY_DELAY_SECONDS:-15}"
     case "$retry_delay_seconds" in
-      ''|*[!0-9]*)
+      '' | *[!0-9]*)
         _err "PAH_DNS_RETRY_DELAY_SECONDS must be a positive number of seconds"
         return 1
         ;;
@@ -430,9 +433,9 @@ configure_pah_remotes() {
       response=$(curl -sk --fail --connect-timeout 10 --max-time 30 -H "${auth_header}" \
         -X POST -H "Content-Type: application/json" -d '{"mirror": false}' \
         "${repo_url}sync/" 2>/dev/null) || {
-          _err "Could not start ${label} sync"
-          return 1
-        }
+        _err "Could not start ${label} sync"
+        return 1
+      }
       task_href=$(jq -r '.task // .pulp_href // empty' <<<"$response" 2>/dev/null)
       [ -n "$task_href" ] || {
         _err "${label} sync did not return a Pulp task"
@@ -462,9 +465,9 @@ configure_pah_remotes() {
         -H "Content-Type: application/json" \
         -d "$(jq -n --arg token "${GALAXY_TOKEN}" '{token: $token}')" \
         "${remote_url}" 2>/dev/null) || {
-          _err "Could not update the ${label} remote token"
-          return 1
-        }
+        _err "Could not update the ${label} remote token"
+        return 1
+      }
 
       # Pulp can return the updated remote directly, a task for an asynchronous
       # update, or a successful empty response depending on the component
@@ -542,9 +545,9 @@ configure_pah_remotes() {
           -H "Content-Type: application/json" \
           -d "{\"remote\": \"${remote_href}\"}" \
           "${repo_url}" >/dev/null || {
-            _err "Could not link the rh-certified remote to its repository"
-            return 1
-          }
+          _err "Could not link the rh-certified remote to its repository"
+          return 1
+        }
       fi
     fi
 
@@ -619,9 +622,9 @@ configure_pah_remotes() {
       -H "Content-Type: application/json" \
       -d "{\"remote\": \"${validated_remote}\"}" \
       "${validated_repo_url}" >/dev/null || {
-        _err "Could not link the rh-validated remote to its repository"
-        return 1
-      }
+      _err "Could not link the rh-validated remote to its repository"
+      return 1
+    }
     echo "✓"
 
     printf "  Syncing validated... "

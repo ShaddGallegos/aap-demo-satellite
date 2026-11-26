@@ -35,7 +35,10 @@ cleanup() {
         -H 'Accept: application/json, text/event-stream' -d "$initialize" "$url")"; then
         case "$revoked_status" in
           401 | 403) echo "PASS: revoked validation token is rejected" ;;
-          *) echo "ERROR: revoked token check returned unexpected HTTP $revoked_status." >&2; status=1 ;;
+          *)
+            echo "ERROR: revoked token check returned unexpected HTTP $revoked_status." >&2
+            status=1
+            ;;
         esac
       else
         echo "ERROR: could not verify rejection of the revoked validation token." >&2
@@ -47,7 +50,10 @@ cleanup() {
   exit "$status"
 }
 trap cleanup EXIT
-fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+fail() {
+  printf 'FAIL: %s\n' "$*" >&2
+  exit 1
+}
 
 route="$(wire_aap_route_host)"
 password="$(wire_aap_admin_password)"

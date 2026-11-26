@@ -33,8 +33,8 @@ _fleet_redhat_resolve_download_url() {
   local checksum="$1"
   local access_token="$2"
   local response
-  response=$(printf 'header = "Authorization: Bearer %s"\n' "$access_token" |
-    curl --config - --silent --show-error --proto '=https' --max-redirs 0 \
+  response=$(printf 'header = "Authorization: Bearer %s"\n' "$access_token" \
+    | curl --config - --silent --show-error --proto '=https' --max-redirs 0 \
       --write-out '\n%{http_code}\n%{redirect_url}' \
       "${FLEET_REDHAT_API_BASE}/images/${checksum}/download") || {
     _err "Unable to resolve the image through the Red Hat RHSM API"
@@ -92,8 +92,8 @@ _fleet_verify_managed_image() {
   [ "$actual_sha256" = "$expected_sha256" ] || return 1
 
   local format
-  format=$(qemu-img info --output=json "$image_path" 2>/dev/null |
-    python3 -c 'import json,sys; print(json.load(sys.stdin).get("format", ""))' 2>/dev/null) || return 1
+  format=$(qemu-img info --output=json "$image_path" 2>/dev/null \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("format", ""))' 2>/dev/null) || return 1
   [ "$format" = "qcow2" ]
 }
 

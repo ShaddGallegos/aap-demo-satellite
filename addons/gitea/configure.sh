@@ -44,11 +44,11 @@ if [ ! -s /etc/gitea/ca/ca.crt ]; then
     -addext 'keyUsage=critical,keyCertSign,cRLSign' \
     -keyout /etc/gitea/ca/ca.key -out /etc/gitea/ca/ca.crt 2>/dev/null
 fi
-if [ ! -s /etc/gitea/https.crt ] ||
-  ! openssl x509 -in /etc/gitea/https.crt -noout -checkip "$ip" >/dev/null ||
-  ! openssl x509 -in /etc/gitea/https.crt -noout -checkend 604800 >/dev/null ||
-  ! openssl x509 -in /etc/gitea/https.crt -noout -ext authorityKeyIdentifier |
-    grep -q 'Authority Key Identifier'; then
+if [ ! -s /etc/gitea/https.crt ] \
+  || ! openssl x509 -in /etc/gitea/https.crt -noout -checkip "$ip" >/dev/null \
+  || ! openssl x509 -in /etc/gitea/https.crt -noout -checkend 604800 >/dev/null \
+  || ! openssl x509 -in /etc/gitea/https.crt -noout -ext authorityKeyIdentifier \
+  | grep -q 'Authority Key Identifier'; then
   openssl req -new -newkey rsa:3072 -nodes -subj '/CN=gitea.demo.lab' \
     -keyout /etc/gitea/https.key -out /etc/gitea/https.csr 2>/dev/null
   printf 'subjectAltName=IP:%s,DNS:gitea.demo.lab\nbasicConstraints=critical,CA:FALSE\nextendedKeyUsage=serverAuth\nkeyUsage=critical,digitalSignature,keyEncipherment\nauthorityKeyIdentifier=keyid,issuer\nsubjectKeyIdentifier=hash\n' \

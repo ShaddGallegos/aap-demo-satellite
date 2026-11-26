@@ -16,8 +16,14 @@ run_tier() {
   local env_vars=() args=()
   while [ $# -gt 0 ]; do
     case "$1" in
-      *=*) env_vars+=("$1"); shift ;;
-      *) args+=("$1"); shift ;;
+      *=*)
+        env_vars+=("$1")
+        shift
+        ;;
+      *)
+        args+=("$1")
+        shift
+        ;;
     esac
   done
   env NO_COLOR=1 AAP_DEMO_TIER_NO_EXEC=1 "${env_vars[@]}" bash "$TIER_SCRIPT" ${args[@]+"${args[@]}"}

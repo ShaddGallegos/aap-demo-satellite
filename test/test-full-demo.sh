@@ -389,11 +389,12 @@ fi
 grep -Fq -- '--lightwell is supported only by create' "$LOG_FILE.output"
 parser=$(sed -n '/^# Parse command line arguments$/,/^# Check for unprocessed pending flag$/p' "$AAP_DEMO_SH")
 while IFS='|' read -r args expected; do
-  output=$(bash -s -- $args <<EOF
+  output=$(
+    bash -s -- $args <<EOF
 $parser
 printf '%s|%s|%s|%s|%s|%s' "\$COMMAND" "\$FULL_DEMO" "\$FULL_DEMO_SATELLITE" "\$FULL_DEMO_LIGHTSPEED" "\$FULL_DEMO_GITEA" "\$FULL_DEMO_LIGHTWELL"
 EOF
-)
+  )
   [[ "$output" == "$expected" ]] || {
     echo "FAIL: profile dependencies were not selected for '$args': $output"
     exit 1
