@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "ao",
+  "summary": "Installs the Automation Orchestrator operator and its owned local resources.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Reconciles the owned operator resources, catalog, and AutomationOrchestrator custom resource.", "failure_boundary": "Stops before applying workload resources when the cluster, catalog, storage, or pull-secret prerequisites are unavailable."},
+  "dependencies": {"addons": ["eda", "mcp-server", "ollama"], "services": ["Kubernetes API", "OLM", "AAP controller API"]},
+  "compatibility": {"conflicts": []},
+  "inputs": [{"name": "AO_LLM_PROVIDER", "source": "environment:AO_LLM_PROVIDER", "required": false, "secret": false}],
+  "resources": {"namespaces": ["automation-orchestrator"], "custom_resources": ["AutomationOrchestrator"], "catalog_sources": ["aap-demo AO catalog"]},
+  "readiness": ["The owned operator subscription and AutomationOrchestrator workload are ready.", "AAP controller wiring succeeds without exposing credentials."],
+  "security": {"secret_storage": "Generated and supplied credentials are handled through Kubernetes secrets or the encrypted credential Vault.", "network_trust": "Catalog and AAP connections retain configured cluster and ingress trust.", "external_actions": "No workflow run or external service action is launched automatically."}
+}

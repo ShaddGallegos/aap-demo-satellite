@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "satellite-manifest",
+  "summary": "Creates and downloads a Satellite subscription manifest using the managed Red Hat offline token.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Reuses the named allocation and verifies the downloaded manifest artifact.", "failure_boundary": "Stops before allocation or download when the token, account permission, or RHSM API request fails."},
+  "dependencies": {"addons": [], "services": ["Red Hat RHSM management API"]},
+  "compatibility": {"conflicts": []},
+  "inputs": [{"name": "MANIFEST_SAT_VERSION", "source": "environment:MANIFEST_SAT_VERSION", "required": false, "secret": false}],
+  "resources": {"allocations": ["aap-demo-satellite"], "artifacts": ["Satellite subscription manifest"]},
+  "readiness": ["The downloaded manifest is valid and ready for the local Satellite lab."],
+  "security": {"secret_storage": "The Red Hat offline token is read from the encrypted credential Vault.", "network_trust": "RHSM API calls use HTTPS and do not expose the token in process arguments.", "external_actions": "The addon creates only the selected subscription allocation and local manifest artifact."}
+}

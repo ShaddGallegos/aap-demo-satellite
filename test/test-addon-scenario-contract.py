@@ -47,4 +47,9 @@ source = (ROOT / "aap-demo.sh").read_text(encoding="utf-8")
 if 'aap_demo_validate_addon_contract "$addon_dir" || return 1' not in source:
     raise AssertionError("enable must validate an addon scenario contract before deployment")
 
-print("PASS: addon scenario contracts validate structure and secret sources")
+available = source.split('AVAILABLE_ADDONS="', 1)[1].split('"', 1)[0].split()
+missing = [name for name in available if not (ROOT / "addons" / name / "scenario.json").is_file()]
+if missing:
+    raise AssertionError(f"public addons missing scenario contracts: {', '.join(missing)}")
+
+print("PASS: addon scenario contracts validate structure, secret sources, and public coverage")

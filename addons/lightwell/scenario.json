@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "lightwell",
+  "summary": "Prepares the owned Lightwell CI/CD simulation with approval-gated Automation Orchestrator wiring.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Reuses the owned repository, runner, AAP inventory, credentials, and workflow without resetting user branch content.", "failure_boundary": "Stops before changing CI/CD wiring when the selected Fleet node, Gitea service, AAP API, or ownership checks fail."},
+  "dependencies": {"addons": ["ao", "fleet", "gitea"], "services": ["AAP controller API", "local Gitea API", "OpenFlake change API"]},
+  "compatibility": {"conflicts": []},
+  "inputs": [{"name": "LIGHTWELL_APP_NODE", "source": "environment:LIGHTWELL_APP_NODE", "required": false, "secret": false}],
+  "resources": {"repositories": ["owned Lightwell CI repository"], "runners": ["repository-scoped CI runner"], "workflows": ["approval-gated Lightwell CI workflow"]},
+  "readiness": ["The selected owned Fleet node is reachable through AAP.", "The reviewed workflow is imported without launching a deployment."],
+  "security": {"secret_storage": "AAP and runner credentials are stored in the encrypted credential Vault or owned AAP credential objects.", "network_trust": "Gitea, AAP, and OpenFlake connections retain verified TLS.", "external_actions": "No production deployment occurs without the workflow approval gate."}
+}

@@ -32,9 +32,9 @@ To include the isolated non-live regression suite in the report:
 python3 scripts/scenario-harness.py --run-unit --output /tmp/aap-demo-scenario-matrix.md
 ```
 
-Use `--strict` in CI or review tooling when incomplete contract coverage must
-fail the command. It currently reports incomplete coverage until every public
-addon has a scenario contract.
+Use `--strict` in CI or review tooling when invalid or incomplete contract
+coverage must fail the command. The current public addon set is fully
+contracted; adding a new public addon without a contract makes strict mode fail.
 
 Live matrix execution is intentionally not available from this harness. It
 requires a disposable approved lab, supplied subscriptions and external

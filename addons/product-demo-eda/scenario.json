@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "product-demo-eda",
+  "summary": "Imports the guarded Event-Driven Ansible Product Demo integration without creating external event infrastructure.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Reuses the guarded Infrastructure demo template and leaves imported AAP content intact on disable.", "failure_boundary": "Stops before import unless explicit EDA opt-in, EDA readiness, and Infrastructure demo prerequisites are satisfied."},
+  "dependencies": {"addons": ["eda", "product-demo-infrastructure"], "services": ["Kubernetes API", "AAP controller API"]},
+  "compatibility": {"conflicts": []},
+  "inputs": [{"name": "PRODUCT_DEMOS_ENABLE_EDA", "source": "environment:PRODUCT_DEMOS_ENABLE_EDA", "required": true, "secret": false}],
+  "resources": {"templates": ["guarded EDA integration template"], "projects": ["Product Demos Infrastructure project"]},
+  "readiness": ["EDA is enabled in AAP and the Infrastructure template is imported."],
+  "security": {"secret_storage": "No Kafka, cloud, or host credential is collected by the guarded import.", "network_trust": "AAP access uses the configured controller trust path.", "external_actions": "No Kafka broker, event source, activation, cloud resource, or workflow run is created."}
+}

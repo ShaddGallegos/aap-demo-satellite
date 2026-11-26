@@ -23,13 +23,16 @@ with tempfile.TemporaryDirectory() as directory:
         raise AssertionError(result.stderr)
     text = report.read_text(encoding="utf-8")
     assert "Full non-empty powerset: 33,554,431 combinations" in text
-    assert "Contract coverage: 5/25 public addons" in text
+    assert "Contract coverage: 25/25 public addons" in text
     assert "product-demo-satellite, product-demos-base" in text
-    assert "### Missing scenario contracts" in text
+    assert "### Missing scenario contracts" not in text
+    assert "### Declared incompatible combinations" in text
+    assert "`portal` + `portal-operator`" in text
+    assert "- `portal, portal-operator`" not in text
     assert report.stat().st_mode & 0o777 == 0o600
     strict = subprocess.run(
         ["python3", str(HARNESS), "--strict"], text=True, capture_output=True, check=False
     )
-    assert strict.returncode == 1
+    assert strict.returncode == 0
 
 print("PASS: scenario harness reports bounded coverage and incomplete contracts safely")

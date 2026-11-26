@@ -12,6 +12,7 @@
     "addons": ["product-demos-base"],
     "services": ["AAP controller API", "Satellite API", "AAP controller task pod"]
   },
+  "compatibility": {"conflicts": []},
   "inputs": [
     {
       "name": "SATELLITE_URL",

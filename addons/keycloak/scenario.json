@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "keycloak",
+  "summary": "Deploys an owned local Keycloak OIDC provider without changing AAP or AO authentication automatically.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Reuses the owned namespace and local state while protecting unowned namespaces.", "failure_boundary": "Stops before deployment or deletion when cluster access or ownership validation fails."},
+  "dependencies": {"addons": [], "services": ["Kubernetes API", "OIDC clients"]},
+  "compatibility": {"conflicts": []},
+  "inputs": [{"name": "KEYCLOAK_REALM", "source": "environment:KEYCLOAK_REALM", "required": false, "secret": false}],
+  "resources": {"namespaces": ["aap-demo-keycloak"], "deployments": ["Keycloak"], "state_directories": ["keycloak"]},
+  "readiness": ["The owned Keycloak deployment is ready and its realm is available."],
+  "security": {"secret_storage": "Generated client secrets remain in the managed local state and must not be copied into shared config.", "network_trust": "OIDC configuration uses explicit trusted local endpoints.", "external_actions": "Authentication mapping requires a separate explicit configure action."}
+}

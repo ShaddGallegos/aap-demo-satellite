@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "local-cache",
+  "summary": "Manages local OCI image archives to speed repeatable local cluster setup.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Validates and replaces only invalid or stale owned cache entries.", "failure_boundary": "Stops before cache mutation when OCI export or digest verification fails."},
+  "dependencies": {"addons": [], "services": ["local container storage", "OCI image registry"]},
+  "compatibility": {"conflicts": []},
+  "inputs": [],
+  "resources": {"archives": ["owned OCI cache archives"], "state_directories": ["local image cache"]},
+  "readiness": ["Cached OCI archives pass digest and platform validation."],
+  "security": {"secret_storage": "No secret value is collected or retained by cache metadata.", "network_trust": "Image pulls follow configured registry trust policy.", "external_actions": "Cache operations are local and do not publish images."}
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "ollama",
+  "summary": "Deploys the owned local Ollama model service for optional demo AI integrations.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Reuses the selected storage and model configuration when it remains valid.", "failure_boundary": "Stops before rollout when storage, image pull, model download, or requested GPU capacity is unavailable."},
+  "dependencies": {"addons": [], "services": ["Kubernetes API", "container registry"]},
+  "compatibility": {"conflicts": []},
+  "inputs": [{"name": "OLLAMA_GPU", "source": "environment:OLLAMA_GPU", "required": false, "secret": false}],
+  "resources": {"namespaces": ["aap-demo-ollama"], "deployments": ["Ollama"], "persistent_volume_claims": ["Ollama model storage"]},
+  "readiness": ["The owned Ollama deployment is ready and the selected model is available."],
+  "security": {"secret_storage": "No model API key is required for the local default profile.", "network_trust": "Model pulls use configured registry trust.", "external_actions": "No hosted LLM provider is contacted by the local profile."}
+}

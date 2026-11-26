@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "apme-eap",
+  "summary": "Deploys the opt-in APME early-access portal demonstration using its owned namespace and playbooks.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Reuses the addon state and reconciles owned APME resources.", "failure_boundary": "Stops before deployment when required AAP, cluster, or reviewed GitHub configuration is unavailable."},
+  "dependencies": {"addons": [], "services": ["Kubernetes API", "AAP controller API", "APME content source"]},
+  "compatibility": {"conflicts": []},
+  "inputs": [{"name": "APME_EAP_VERSION", "source": "environment:APME_EAP_VERSION", "required": false, "secret": false}],
+  "resources": {"namespaces": ["apme"], "playbooks": ["APME EAP deployment playbooks"], "state_files": ["apme-eap-vars.yml"]},
+  "readiness": ["The owned APME deployment reports ready.", "AAP integration resources are present only after their prerequisites succeed."],
+  "security": {"secret_storage": "Optional GitHub credentials are supplied outside the contract and must not be stored in the shared config file.", "network_trust": "Registry and API access use the configured trusted endpoints.", "external_actions": "No external GitHub change is made automatically."}
+}

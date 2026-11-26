@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "eda",
+  "summary": "Enables Event-Driven Ansible in the existing AAP custom resource.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Leaves EDA enabled when it is already enabled and does not create event sources.", "failure_boundary": "Stops before patching when the AAP custom resource is absent."},
+  "dependencies": {"addons": [], "services": ["Kubernetes API", "AAP custom resource"]},
+  "compatibility": {"conflicts": []},
+  "inputs": [],
+  "resources": {"custom_resources": ["AnsibleAutomationPlatform.spec.eda"], "services": ["AAP Event-Driven Ansible"]},
+  "readiness": ["The AAP custom resource reports EDA enabled."],
+  "security": {"secret_storage": "No credential value is collected by this addon.", "network_trust": "Uses the local Kubernetes API trust configuration.", "external_actions": "No event source, rulebook activation, or external broker is created."}
+}

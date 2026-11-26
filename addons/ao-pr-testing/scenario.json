@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "ao-pr-testing",
+  "summary": "Configures the opt-in AO pull-request review workflow and OpenShift MCP integration.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Reconciles only the named AO workflow, MCP integration, and owned AAP records.", "failure_boundary": "Stops before webhook or workflow creation when AO, MCP, or reviewed source-control configuration is unavailable."},
+  "dependencies": {"addons": ["ao", "mcp-server"], "services": ["AAP controller API", "Automation Orchestrator", "GitHub API"]},
+  "compatibility": {"conflicts": []},
+  "inputs": [{"name": "AO_PR_TESTING_GITHUB_REPOSITORY", "source": "environment:AO_PR_TESTING_GITHUB_REPOSITORY", "required": false, "secret": false}],
+  "resources": {"workflows": ["aap-demo PR Validation"], "integrations": ["aap-demo OpenShift MCP"], "credentials": ["aap-demo GitHub PR Comment Token"]},
+  "readiness": ["The owned MCP integration is reachable from AO.", "The review workflow is present but is not launched automatically."],
+  "security": {"secret_storage": "Source-control credentials must be supplied through reviewed AAP credential handling and are never recorded in the contract.", "network_trust": "AAP and MCP connections retain configured TLS trust.", "external_actions": "No pull request comment, webhook delivery, or workflow run occurs without an external event."}
+}

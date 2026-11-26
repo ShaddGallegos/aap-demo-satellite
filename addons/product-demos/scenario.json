@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "product-demos",
+  "summary": "Installs the selected upstream Product Demos domains through owned AAP templates.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Reuses Product Demos base resources and reconciles selected owned domain templates.", "failure_boundary": "Stops before domain setup when the cluster, AAP, bootstrap project, or required execution environment is unavailable."},
+  "dependencies": {"addons": ["product-demos-base"], "services": ["Kubernetes API", "AAP controller API", "Product Demos content repository"]},
+  "compatibility": {"conflicts": []},
+  "inputs": [{"name": "PRODUCT_DEMOS_DOMAINS", "source": "environment:PRODUCT_DEMOS_DOMAINS", "required": false, "secret": false}],
+  "resources": {"projects": ["Product Demos bootstrap project"], "templates": ["APD domain setup templates"], "execution_environments": ["Product Demos EE"]},
+  "readiness": ["Selected owned domain templates and base resources are available in AAP."],
+  "security": {"secret_storage": "Domain-specific credentials remain separate from shared Product Demos setup.", "network_trust": "AAP and pinned upstream content use configured trust controls.", "external_actions": "Templates are imported; customer infrastructure is not provisioned automatically."}
+}

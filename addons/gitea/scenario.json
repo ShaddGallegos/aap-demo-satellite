@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "gitea",
+  "summary": "Runs the retained local Gitea service outside the cluster for demo source control.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Starts or reuses the owned Gitea VM and retained service data.", "failure_boundary": "Stops before deployment when local virtualization, storage, or the managed SSH identity is unavailable."},
+  "dependencies": {"addons": ["fleet"], "services": ["QEMU/libvirt", "local NFS storage"]},
+  "compatibility": {"conflicts": []},
+  "inputs": [],
+  "resources": {"virtual_machines": ["aap-demo-gitea"], "repositories": ["owned local Gitea repositories"], "state_directories": ["gitea"]},
+  "readiness": ["The owned Gitea service is reachable through its managed local address."],
+  "security": {"secret_storage": "The service uses the managed encrypted Fleet SSH identity; no password value is stored in this contract.", "network_trust": "Repository access uses the managed local CA and SSH trust controls.", "external_actions": "No remote repository or vendor account is created."}
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "fleet",
+  "summary": "Validates and manages owned local QEMU practice nodes and their optional AAP registration.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Reuses owned node metadata, overlays, and AAP records when they exist.", "failure_boundary": "Stops before VM creation or AAP registration when image, virtualization, SSH, or controller prerequisites fail."},
+  "dependencies": {"addons": [], "services": ["QEMU/libvirt", "AAP controller API", "Red Hat image service"]},
+  "compatibility": {"conflicts": []},
+  "inputs": [{"name": "FLEET_IMAGE", "source": "environment:FLEET_IMAGE", "required": false, "secret": false}],
+  "resources": {"virtual_machines": ["aap-fleet-node-*"], "inventory": ["Fleet"], "credential_references": ["Fleet SSH Key"]},
+  "readiness": ["Each selected node has verified SSH access.", "Registered nodes pass the AAP ad-hoc ping check."],
+  "security": {"secret_storage": "The shared Fleet SSH private key is stored in the encrypted credential Vault.", "network_trust": "SSH trust uses the configured local-lab or fingerprint-verification mode.", "external_actions": "Image download and optional registration require explicit configured entitlement access."}
+}

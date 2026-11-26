@@ -12,6 +12,7 @@
     "addons": [],
     "services": ["Kubernetes API", "OLM", "Red Hat operator CatalogSource"]
   },
+  "compatibility": {"conflicts": []},
   "inputs": [
     {"name": "OPENSHIFT_DELIVERY_CATALOG_SOURCE", "source": "environment:OPENSHIFT_DELIVERY_CATALOG_SOURCE", "required": false, "secret": false},
     {"name": "OPENSHIFT_DELIVERY_CATALOG_NAMESPACE", "source": "environment:OPENSHIFT_DELIVERY_CATALOG_NAMESPACE", "required": false, "secret": false},

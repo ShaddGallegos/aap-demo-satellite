@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "opa",
+  "summary": "Deploys the owned Open Policy Agent demonstration service and AAP policy examples.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Reconciles owned OPA resources and named AAP templates.", "failure_boundary": "Stops before policy deployment when AAP, the cluster, or pinned policy content is unavailable."},
+  "dependencies": {"addons": [], "services": ["Kubernetes API", "AAP controller API", "policy content repository"]},
+  "compatibility": {"conflicts": []},
+  "inputs": [{"name": "OPA_MANIFEST_REF", "source": "environment:OPA_MANIFEST_REF", "required": false, "secret": false}],
+  "resources": {"deployments": ["OPA server"], "templates": ["owned OPA policy examples"], "projects": ["owned OPA policy project"]},
+  "readiness": ["The owned OPA service is ready and its AAP examples are present."],
+  "security": {"secret_storage": "AAP authentication uses managed credentials and is not stored in this contract.", "network_trust": "Pinned policy content and AAP APIs use configured trust controls.", "external_actions": "No policy is enforced against customer workloads automatically."}
+}

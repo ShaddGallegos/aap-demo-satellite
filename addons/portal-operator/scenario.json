@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "portal-operator",
+  "summary": "Deploys the separate Technology Preview Automation Portal Operator path.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Captures ownership before reconciling the operator, subscription, portal custom resource, and owned AAP records.", "failure_boundary": "Stops before changing shared operator resources when catalog, ownership, or AAP prerequisites fail."},
+  "dependencies": {"addons": [], "services": ["Kubernetes API", "OLM", "AAP controller API"]},
+  "compatibility": {"conflicts": ["portal"]},
+  "inputs": [{"name": "PORTAL_OPERATOR_CHANNEL", "source": "environment:PORTAL_OPERATOR_CHANNEL", "required": false, "secret": false}],
+  "resources": {"namespaces": ["automation-portal"], "subscriptions": ["automation-portal-operator"], "custom_resources": ["AutomationPortal"]},
+  "readiness": ["The owned operator subscription and portal custom resource are ready."],
+  "security": {"secret_storage": "Owned AAP OAuth credentials are retained in protected addon state and are not written to the contract.", "network_trust": "Catalog and AAP endpoints follow configured cluster trust controls.", "external_actions": "The operator path does not modify the Helm Portal release."}
+}

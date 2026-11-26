@@ -16,6 +16,7 @@
             "Red Hat operator CatalogSource"
         ]
     },
+  "compatibility": {"conflicts": []},
     "inputs": [
         {
             "name": "ACM_CATALOG_SOURCE",

@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "setup-pah",
+  "summary": "Configures Private Automation Hub remotes on the running AAP instance.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Reuses the encrypted Automation Hub token and reconciles owned remotes and synchronization settings.", "failure_boundary": "Stops before remote configuration when token validation, AAP access, or Pulp synchronization fails."},
+  "dependencies": {"addons": [], "services": ["AAP controller API", "Automation Hub API", "AAP Pulp service"]},
+  "compatibility": {"conflicts": []},
+  "inputs": [],
+  "resources": {"remotes": ["Certified and Validated Content remotes"], "repositories": ["AAP Private Automation Hub repositories"]},
+  "readiness": ["Owned remotes are configured and their Pulp synchronization tasks complete."],
+  "security": {"secret_storage": "The Automation Hub offline token is stored in the encrypted credential Vault.", "network_trust": "AAP and Automation Hub requests retain TLS verification.", "external_actions": "Only the configured AAP Private Automation Hub remotes are changed."}
+}

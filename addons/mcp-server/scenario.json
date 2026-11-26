@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "mcp-server",
+  "summary": "Deploys the owned local MCP service used by supported AAP demo integrations.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Reconciles the owned namespace, deployment, route, and configuration.", "failure_boundary": "Stops before rollout when cluster readiness or required trusted configuration is unavailable."},
+  "dependencies": {"addons": [], "services": ["Kubernetes API", "AAP controller API"]},
+  "compatibility": {"conflicts": []},
+  "inputs": [],
+  "resources": {"namespaces": ["aap-mcp-server"], "deployments": ["AAP MCP server"], "routes": ["MCP service route"]},
+  "readiness": ["The owned MCP deployment and route are ready."],
+  "security": {"secret_storage": "MCP credentials are scoped to the managed integration and are not included in reports.", "network_trust": "The service uses configured ingress and CA trust.", "external_actions": "The server does not create vendor tickets or make autonomous repairs."}
+}

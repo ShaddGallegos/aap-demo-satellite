@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "lightspeed",
+  "summary": "Deploys the local Ansible Lightspeed assistant backed by the owned Ollama service.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Reconciles the owned Lightspeed resources and AAP integration.", "failure_boundary": "Stops before rollout when Ollama, AAP, catalog, or trusted service configuration is unavailable."},
+  "dependencies": {"addons": ["ollama"], "services": ["Kubernetes API", "AAP controller API", "OLM"]},
+  "compatibility": {"conflicts": []},
+  "inputs": [{"name": "LIGHTSPEED_NAMESPACE", "source": "environment:LIGHTSPEED_NAMESPACE", "required": false, "secret": false}],
+  "resources": {"custom_resources": ["Ansible Lightspeed"], "services": ["Lightspeed chatbot"], "secrets": ["owned chatbot configuration"]},
+  "readiness": ["The owned Lightspeed workload is ready.", "The configured Ollama endpoint responds through trusted in-cluster networking."],
+  "security": {"secret_storage": "Owned chatbot configuration uses Kubernetes secrets; model credentials are not written to the contract.", "network_trust": "AAP and Ollama integration retains certificate validation and explicit CA configuration.", "external_actions": "No cloud model provider is selected automatically."}
+}

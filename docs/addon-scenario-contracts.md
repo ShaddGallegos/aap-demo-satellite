@@ -7,7 +7,7 @@ tags: [addons, automation, idempotency, security]
 
 # Addon scenario contracts
 
-An addon can provide `addons/<name>/scenario.json`. This is a public,
+Every public addon provides `addons/<name>/scenario.json`. This is a public,
 non-secret contract for how the scenario is managed. The Bash command validates
 it before invoking that addon's `deploy.sh`.
 
@@ -15,6 +15,7 @@ The contract records:
 
 - lifecycle entry points, idempotency promise, and failure boundary;
 - addon and service dependencies;
+- explicit incompatible addon combinations;
 - variable sources, with secret inputs restricted to encrypted Vault paths;
 - owned resources, readiness checks, and security constraints.
 

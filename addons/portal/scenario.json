@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "portal",
+  "summary": "Deploys the owned Helm-based Automation Portal demonstration.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Reconciles the named Helm release, namespace, and owned AAP OAuth integration.", "failure_boundary": "Stops before Helm deployment when architecture, trusted AAP API access, or chart prerequisites fail."},
+  "dependencies": {"addons": [], "services": ["Kubernetes API", "Helm", "AAP controller API"]},
+  "compatibility": {"conflicts": ["portal-operator"]},
+  "inputs": [{"name": "PORTAL_LIGHTSPEED", "source": "environment:PORTAL_LIGHTSPEED", "required": false, "secret": false}],
+  "resources": {"namespaces": ["redhat-rhaap-portal"], "helm_releases": ["redhat-rhaap-portal"], "oauth_applications": ["ansible-automation-portal"]},
+  "readiness": ["The owned Portal Helm release is ready.", "The AAP API integration validates against the configured CA."],
+  "security": {"secret_storage": "Generated OAuth values are retained only in owned protected configuration.", "network_trust": "AAP API requests require a trusted CA and do not disable TLS verification.", "external_actions": "Portal AI remains opt-in and no hosted provider is selected automatically."}
+}

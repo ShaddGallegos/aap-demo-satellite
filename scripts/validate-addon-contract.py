@@ -16,6 +16,7 @@ REQUIRED_TOP_LEVEL = {
     "summary",
     "lifecycle",
     "dependencies",
+    "compatibility",
     "inputs",
     "resources",
     "readiness",
@@ -23,6 +24,7 @@ REQUIRED_TOP_LEVEL = {
 }
 REQUIRED_LIFECYCLE = {"enable", "disable", "idempotency", "failure_boundary"}
 REQUIRED_DEPENDENCIES = {"addons", "services"}
+REQUIRED_COMPATIBILITY = {"conflicts"}
 REQUIRED_INPUT = {"name", "source", "required", "secret"}
 REQUIRED_SECURITY = {"secret_storage", "network_trust", "external_actions"}
 
@@ -60,8 +62,12 @@ def validate(contract: Any, path: Path) -> None:
     require_keys(root, REQUIRED_TOP_LEVEL, "contract")
     if root["schema_version"] != "1.0":
         fail("schema_version must be '1.0'")
-    if root["name"] != path.parent.name:
-        fail(f"name must match addon directory '{path.parent.name}'")
+    # Some historical addon names are symlinks to the canonical implementation
+    # (for example ao-eap -> ao). Validate the canonical directory so aliases
+    # do not require duplicate contracts or drift from the owned scenario.
+    canonical_name = path.resolve().parent.name
+    if root["name"] != canonical_name:
+        fail(f"name must match canonical addon directory '{canonical_name}'")
     string_at(root["summary"], "summary")
 
     lifecycle = object_at(root["lifecycle"], "lifecycle")
@@ -75,6 +81,12 @@ def validate(contract: Any, path: Path) -> None:
     require_keys(dependencies, REQUIRED_DEPENDENCIES, "dependencies")
     for field in REQUIRED_DEPENDENCIES:
         string_list(dependencies[field], f"dependencies.{field}")
+
+    compatibility = object_at(root["compatibility"], "compatibility")
+    require_keys(compatibility, REQUIRED_COMPATIBILITY, "compatibility")
+    conflicts = string_list(compatibility["conflicts"], "compatibility.conflicts")
+    if root["name"] in conflicts or len(conflicts) != len(set(conflicts)):
+        fail("compatibility.conflicts must not contain the addon itself or duplicates")
 
     inputs = root["inputs"]
     if not isinstance(inputs, list):

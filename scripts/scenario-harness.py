@@ -25,6 +25,7 @@ RUNNER = ROOT / "test" / "run-unit-tests.sh"
 class Scenario:
     name: str
     dependencies: tuple[str, ...]
+    conflicts: tuple[str, ...]
 
 
 def public_addons() -> list[str]:
@@ -47,9 +48,10 @@ def contracts() -> tuple[dict[str, Scenario], list[str]]:
             raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
             name = raw["name"]
             dependencies = tuple(raw["dependencies"]["addons"])
-            if not isinstance(name, str) or not all(isinstance(item, str) for item in dependencies):
-                raise ValueError("name/dependencies.addons has an invalid type")
-            loaded[name] = Scenario(name, dependencies)
+            conflicts = tuple(raw["compatibility"]["conflicts"])
+            if not isinstance(name, str) or not all(isinstance(item, str) for item in dependencies + conflicts):
+                raise ValueError("name/dependencies.addons/compatibility.conflicts has an invalid type")
+            loaded[name] = Scenario(name, dependencies, conflicts)
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
             invalid.append(f"{path.relative_to(ROOT)}: {error}")
     return loaded, invalid
@@ -60,11 +62,16 @@ def closure(names: tuple[str, ...], known: dict[str, Scenario]) -> tuple[str, ..
     pending = list(names)
     while pending:
         current = pending.pop()
-        for dependency in known.get(current, Scenario(current, ())).dependencies:
+        for dependency in known.get(current, Scenario(current, (), ())).dependencies:
             if dependency not in selected:
                 selected.add(dependency)
                 pending.append(dependency)
     return tuple(sorted(selected))
+
+
+def compatible(names: tuple[str, ...], known: dict[str, Scenario]) -> bool:
+    selected = set(names)
+    return all(not (set(known[name].conflicts) & (selected - {name})) for name in names if name in known)
 
 
 def cases(known: dict[str, Scenario]) -> list[tuple[str, ...]]:
@@ -73,7 +80,14 @@ def cases(known: dict[str, Scenario]) -> list[tuple[str, ...]]:
     names = sorted(known)
     raw = [(name,) for name in names]
     raw.extend(itertools.combinations(names, 2))
-    return sorted({closure(case, known) for case in raw}, key=lambda item: (len(item), item))
+    planned: set[tuple[str, ...]] = set()
+    for case in raw:
+        if not compatible(case, known):
+            continue
+        closed = closure(case, known)
+        if compatible(closed, known):
+            planned.add(closed)
+    return sorted(planned, key=lambda item: (len(item), item))
 
 
 def render(
@@ -83,6 +97,7 @@ def render(
     missing = sorted(set(public) - set(known))
     unpublished = sorted(directories - set(public))
     dependencies = sorted({item for scenario in known.values() for item in scenario.dependencies})
+    conflicts = sorted({tuple(sorted((scenario.name, item))) for scenario in known.values() for item in scenario.conflicts})
     unresolved = sorted(set(dependencies) - directories)
     powerset = (2 ** len(public)) - 1
     lines = [
@@ -108,6 +123,11 @@ def render(
     else:
         lines.append("- None")
     lines.extend(["", "## Gaps and blockers", ""])
+    if conflicts:
+        lines.append("### Declared incompatible combinations")
+        lines.append("")
+        lines.extend(f"- `{left}` + `{right}`" for left, right in conflicts)
+        lines.append("")
     if missing:
         lines.append("### Missing scenario contracts")
         lines.append("")

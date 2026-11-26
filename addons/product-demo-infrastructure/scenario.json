@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "name": "product-demo-infrastructure",
+  "summary": "Imports the upstream Infrastructure Product Demo template without launching it.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Reuses Product Demos base resources and reconciles the owned setup template.", "failure_boundary": "Stops before template creation when AAP or Product Demos base resources are unavailable."},
+  "dependencies": {"addons": ["product-demos-base"], "services": ["Kubernetes API", "AAP controller API"]},
+  "compatibility": {"conflicts": []},
+  "inputs": [{"name": "PRODUCT_DEMOS_REF", "source": "environment:PRODUCT_DEMOS_REF", "required": false, "secret": false}],
+  "resources": {"templates": ["APD | Install Infrastructure Demos"], "projects": ["Product Demos bootstrap project"]},
+  "readiness": ["The owned Infrastructure template is present in AAP and has not been launched."],
+  "security": {"secret_storage": "Cloud, broker, and managed-host credentials are not collected by the import.", "network_trust": "AAP and pinned Product Demos content retain configured trust controls.", "external_actions": "No cloud, broker, managed host, or demo job is created automatically."}
+}

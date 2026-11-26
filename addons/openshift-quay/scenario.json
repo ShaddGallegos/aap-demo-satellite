@@ -12,6 +12,7 @@
     "addons": [],
     "services": ["Kubernetes API", "OLM", "Red Hat operator CatalogSource"]
   },
+  "compatibility": {"conflicts": []},
   "inputs": [
     {"name": "QUAY_CATALOG_SOURCE", "source": "environment:QUAY_CATALOG_SOURCE", "required": false, "secret": false},
     {"name": "QUAY_CATALOG_NAMESPACE", "source": "environment:QUAY_CATALOG_NAMESPACE", "required": false, "secret": false},
