@@ -69,7 +69,9 @@ unset -f apd_apd_org_id apd_overlay_project_playbook apd_register_project_playbo
 configure_block=$(sed -n '/^apd_configure_satellite_lab_templates()/,/^apd_sync_satellite_lab_inventory()/p' "$satellite_lib")
 if grep -Fq -- '--argjson bootstrap "$APD_PROJECT_ID"' <<<"$configure_block" \
   && grep -Fq '{project: $bootstrap, execution_environment: $ee, playbook: "setup-satellite-lab.yml"' <<<"$configure_block" \
-  && grep -Fq '{project: $bootstrap, execution_environment: $ee, playbook: "register-satellite-lab.yml"' <<<"$configure_block"; then
+  && grep -Fq '{project: $bootstrap, execution_environment: $ee, playbook: "register-satellite-lab.yml"' <<<"$configure_block" \
+  && grep -Fq 'apd_satellite_template "$name" "$APD_PROJECT_ID"' <<<"$configure_block" \
+  && grep -Fq 'apd_satellite_template "$name" "$APD_SATELLITE_PROJECT_ID"' <<<"$configure_block"; then
   echo "PASS: local Satellite templates use the retained bootstrap project"
 else
   echo "FAIL: local Satellite templates must use the retained bootstrap project" >&2

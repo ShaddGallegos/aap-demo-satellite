@@ -165,7 +165,7 @@ fi
 apd_rerun_satellite_setup() {
   local setup_name="SETUP | Satellite"
   local template_id job_id
-  template_id=$(apd_satellite_template "$setup_name" | jq -er '.id') || return 1
+  template_id=$(apd_satellite_template "$setup_name" "$APD_PROJECT_ID" | jq -er '.id') || return 1
   if [ -z "$template_id" ]; then
     echo "  ⚠ $setup_name template not found; skipping re-run" >&2
     return 1

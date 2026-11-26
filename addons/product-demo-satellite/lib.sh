@@ -45,11 +45,16 @@ apd_discover_satellite_lab() {
 }
 
 apd_satellite_template() {
-  local encoded org_id
+  local encoded org_id project_id="${2:-}" endpoint
   encoded=$(jq -rn --arg name "$1" '$name | @uri')
-  org_id=$(apd_apd_org_id) || return 1
+  if [ -n "$project_id" ]; then
+    endpoint="${AAP_API}/job_templates/?name=${encoded}&project=${project_id}"
+  else
+    org_id=$(apd_apd_org_id) || return 1
+    endpoint="${AAP_API}/job_templates/?name=${encoded}&organization=${org_id}"
+  fi
   curl -fsSk -u "${AAP_USERNAME}:${AAP_PASSWORD}" \
-    "${AAP_API}/job_templates/?name=${encoded}&organization=${org_id}" \
+    "$endpoint" \
     | jq -ce 'if .count == 1 then .results[0] else error("Expected one APD Satellite template") end'
 }
 
@@ -102,7 +107,14 @@ apd_configure_satellite_lab_templates() {
     "https://${SATELLITE_LAB_HOST:-satellite.demo.lab}/pub/katello-server-ca.crt") || return 1
   for name in "SETUP | Satellite" "SATELLITE | Publish Content View Version" \
     "SATELLITE | Promote Content View Version" "LINUX | Register with Satellite"; do
-    template=$(apd_satellite_template "$name") || return 1
+    case "$name" in
+      "SETUP | Satellite" | "LINUX | Register with Satellite")
+        template=$(apd_satellite_template "$name" "$APD_PROJECT_ID") || return 1
+        ;;
+      *)
+        template=$(apd_satellite_template "$name" "$APD_SATELLITE_PROJECT_ID") || return 1
+        ;;
+    esac
     payload=$(jq -cn --argjson template "$template" --argjson profile "$APD_SATELLITE_LAB" \
       --argjson project "$APD_SATELLITE_PROJECT_ID" --argjson bootstrap "$APD_PROJECT_ID" \
       --argjson ee "$APD_EE_ID" --arg ca "$ca" '
