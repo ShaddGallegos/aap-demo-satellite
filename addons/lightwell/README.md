@@ -194,8 +194,10 @@ and dedicated AO webhook service account. It is not application-data cleanup.
 Missing service URLs fail before authentication. Missing inventory, credentials,
 or model bindings fail before resource creation. For TLS failures, repair the
 service certificate chain and trust store rather than disabling validation.
-If setup reports token-revocation failure, inspect and revoke the temporary
-`aap-demo lightwell setup` token in the gateway before retrying.
+Setup retries transient AAP/gateway HTTP 502, 503, and 504 responses while it
+reads project state or revokes its temporary token. If token revocation still
+fails after those retries, inspect and revoke the temporary `aap-demo lightwell
+setup` token in the gateway before retrying.
 
 Live qualification passed authenticated OpenFlake HTTPS, runner-to-AO trusted
 HTTPS, native short-lived AO caller authentication, two metadata-only CI runs,

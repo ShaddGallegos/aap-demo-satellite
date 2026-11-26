@@ -7,6 +7,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../../includes/secure-curl.sh
 source "${SCRIPT_DIR}/../../includes/secure-curl.sh"
+# shellcheck source=../../includes/ingress-ca-trust.sh
+source "${SCRIPT_DIR}/../../includes/ingress-ca-trust.sh"
 AAP_NAMESPACE="${AAP_NAMESPACE:-${NAMESPACE:-aap-operator}}"
 PORTAL_NAMESPACE="${PORTAL_NAMESPACE:-redhat-rhaap-portal}"
 ACTION="${1:-deploy}"
@@ -27,6 +29,26 @@ CHART_REPO="openshift-helm-charts/redhat-rhaap-portal"
 DEFAULT_PLUGIN_VERSION="2.2"
 PORTAL_LIGHTSPEED="${PORTAL_LIGHTSPEED:-false}"
 PORTAL_OLLAMA_URL="${PORTAL_OLLAMA_URL:-http://ollama.aap-demo-ollama.svc.cluster.local:11434/v1}"
+
+# The local AAP route uses the cluster ingress CA.  Never downgrade the AAP
+# API connection to insecure TLS: deploy installs this CA before addons run.
+# A caller may supply a different trusted bundle for a non-local route.
+AAP_API_CA_FILE="${AAP_API_CA_FILE:-}"
+
+configure_aap_api_tls() {
+  if [ -z "$AAP_API_CA_FILE" ]; then
+    AAP_API_CA_FILE=$(get_ingress_ca_cert_path)
+  fi
+  if [ ! -s "$AAP_API_CA_FILE" ]; then
+    echo "ERROR: trusted ingress CA is unavailable for the AAP API: $AAP_API_CA_FILE" >&2
+    echo "Run 'aap-demo trust-ca' or set AAP_API_CA_FILE to the trusted CA bundle." >&2
+    return 1
+  fi
+}
+
+aap_api_curl() {
+  curl --cacert "$AAP_API_CA_FILE" "$@"
+}
 
 # OAuth app name in AAP
 OAUTH_APP_NAME="${OAUTH_APP_NAME:-ansible-automation-portal}"
@@ -81,9 +103,13 @@ cleanup() {
 
     if [ -n "$aap_route" ] && [ -n "$admin_pass" ] && [ -n "$app_id" ]; then
       echo "Deleting OAuth application (ID: $app_id) from AAP"
-      curl -k -u "admin:$admin_pass" \
-        -X DELETE "https://$aap_route/api/gateway/v1/applications/$app_id/" \
-        -H "Content-Type: application/json" &>/dev/null || true
+      if configure_aap_api_tls; then
+        aap_api_curl -u "admin:$admin_pass" \
+          -X DELETE "https://$aap_route/api/gateway/v1/applications/$app_id/" \
+          -H "Content-Type: application/json" &>/dev/null || true
+      else
+        echo "WARNING: skipping AAP OAuth application cleanup because trusted TLS is unavailable" >&2
+      fi
     fi
   fi
 
@@ -377,7 +403,7 @@ get_aap_credentials() {
   fi
 
   # Test connectivity
-  if ! curl -k -u "admin:$ADMIN_PASS" "https://$AAP_ROUTE/api/gateway/v1/ping/" \
+  if ! aap_api_curl -u "admin:$ADMIN_PASS" "https://$AAP_ROUTE/api/gateway/v1/ping/" \
     --max-time 10 &>/dev/null; then
     echo "❌ Cannot reach AAP at https://$AAP_ROUTE"
     exit 1
@@ -391,7 +417,7 @@ select_organization() {
 
   # List organizations
   local orgs_json
-  orgs_json=$(curl -k -u "admin:$ADMIN_PASS" \
+  orgs_json=$(aap_api_curl -u "admin:$ADMIN_PASS" \
     "https://$AAP_ROUTE/api/gateway/v1/organizations/" \
     -H "Content-Type: application/json" 2>/dev/null)
 
@@ -401,7 +427,7 @@ select_organization() {
   if [ "$org_count" -eq 0 ]; then
     echo "Creating default organization..."
     local create_response
-    create_response=$(curl -k -u "admin:$ADMIN_PASS" \
+    create_response=$(aap_api_curl -u "admin:$ADMIN_PASS" \
       -X POST "https://$AAP_ROUTE/api/gateway/v1/organizations/" \
       -H "Content-Type: application/json" \
       -d '{"name": "Default", "description": "Default organization for portal"}' \
@@ -434,7 +460,7 @@ create_oauth_app() {
   local encoded_app_name
   encoded_app_name=$(jq -rn --arg n "$OAUTH_APP_NAME" '$n|@uri')
   local existing_app
-  existing_app=$(curl -k -u "admin:$ADMIN_PASS" \
+  existing_app=$(aap_api_curl -u "admin:$ADMIN_PASS" \
     "https://$AAP_ROUTE/api/gateway/v1/applications/?name=${encoded_app_name}" \
     -H "Content-Type: application/json" 2>/dev/null)
 
@@ -460,7 +486,7 @@ create_oauth_app() {
     # No saved secret — delete and recreate the OAuth app
     if [ -z "$CLIENT_SECRET" ]; then
       echo "OAuth app exists but client secret unavailable — recreating..."
-      curl -k -u "admin:$ADMIN_PASS" \
+      aap_api_curl -u "admin:$ADMIN_PASS" \
         -X DELETE "https://$AAP_ROUTE/api/gateway/v1/applications/$OAUTH_APP_ID/" \
         -H "Content-Type: application/json" &>/dev/null || true
       existing_count=0
@@ -472,7 +498,7 @@ create_oauth_app() {
   if [ "$existing_count" -eq 0 ]; then
     # Create new OAuth app with placeholder redirect URI
     local oauth_response
-    oauth_response=$(curl -k -u "admin:$ADMIN_PASS" \
+    oauth_response=$(aap_api_curl -u "admin:$ADMIN_PASS" \
       -X POST "https://$AAP_ROUTE/api/gateway/v1/applications/" \
       -H "Content-Type: application/json" \
       -d "{
@@ -518,7 +544,7 @@ enable_oauth_tokens() {
 
   # Check current setting
   local settings
-  settings=$(curl -k -u "admin:$ADMIN_PASS" \
+  settings=$(aap_api_curl -u "admin:$ADMIN_PASS" \
     "https://$AAP_ROUTE/api/gateway/v1/settings/" \
     -H "Content-Type: application/json" 2>/dev/null)
 
@@ -531,7 +557,7 @@ enable_oauth_tokens() {
   fi
 
   # Enable setting
-  curl -k -u "admin:$ADMIN_PASS" \
+  aap_api_curl -u "admin:$ADMIN_PASS" \
     -X PATCH "https://$AAP_ROUTE/api/gateway/v1/settings/" \
     -H "Content-Type: application/json" \
     -d '{"ALLOW_OAUTH2_FOR_EXTERNAL_USERS": true}' \
@@ -544,7 +570,7 @@ create_api_token() {
   echo "Generating AAP API token..."
 
   local token_response
-  token_response=$(curl -k -u "admin:$ADMIN_PASS" \
+  token_response=$(aap_api_curl -u "admin:$ADMIN_PASS" \
     -X POST "https://$AAP_ROUTE/api/gateway/v1/tokens/" \
     -H "Content-Type: application/json" \
     -d "{
@@ -1024,7 +1050,7 @@ update_oauth_redirect() {
   # Update OAuth app with real redirect URI (rhaap provider uses /api/auth/rhaap/handler/frame)
   local redirect_uri="https://$PORTAL_ROUTE/api/auth/rhaap/handler/frame"
 
-  curl -k -u "admin:$ADMIN_PASS" \
+  aap_api_curl -u "admin:$ADMIN_PASS" \
     -X PATCH "https://$AAP_ROUTE/api/gateway/v1/applications/$OAUTH_APP_ID/" \
     -H "Content-Type: application/json" \
     -d "{\"redirect_uris\": \"$redirect_uri\"}" \
@@ -1126,6 +1152,7 @@ display_success() {
 
 main() {
   check_prerequisites
+  configure_aap_api_tls
   validate_portal_lightspeed
   cleanup_legacy_install
   setup_portal_namespace

@@ -46,6 +46,24 @@ rm -f "${MOCK_BIN}/helm"
 # shellcheck source=/dev/null
 source "${DEPLOY_SCRIPT}"
 
+printf '%s\n' 'test ingress CA' >"${TEST_DIR}/ingress-ca.crt"
+AAP_API_CA_FILE="${TEST_DIR}/ingress-ca.crt"
+curl() { printf '%s\n' "$*" >"${TEST_DIR}/aap-api-curl.args"; }
+if configure_aap_api_tls \
+  && aap_api_curl --fail --silent https://aap.example.test/api/gateway/v1/ping/ \
+  && grep -Fq -- "--cacert ${AAP_API_CA_FILE}" "${TEST_DIR}/aap-api-curl.args"; then
+  pass "uses_trusted_ca_for_aap_api_requests"
+else
+  fail "uses_trusted_ca_for_aap_api_requests"
+fi
+unset -f curl
+
+if rg -q 'curl -k' "${DEPLOY_SCRIPT}"; then
+  fail "does_not_disable_aap_api_tls_verification"
+else
+  pass "does_not_disable_aap_api_tls_verification"
+fi
+
 write_mock_helm 'v3.10.0+g123456'
 if helm_version_ok; then
   pass "accepts_minimum_supported_helm"

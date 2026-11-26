@@ -31,14 +31,21 @@ command to extend that limit when necessary. `PAH_SYNC_POLL_SECONDS` controls
 the status interval from `1` to `30` seconds; neither setting is a secret or is
 stored in the Vault.
 
+A failed Pulp task caused by a transient DNS lookup failure for Red Hat's
+S3-backed content host, or by Pulp reporting that its worker disappeared, is
+retried once after 15 seconds. Set `PAH_DNS_RETRY_DELAY_SECONDS` (`1`–`60`) to
+change that delay. A repeated transient failure stops setup with the Pulp error
+so a persistent resolver or worker outage remains visible.
+
 Certified Content is required for the demo. The installer also tries to sync
 Validated Content, but some otherwise-valid subscriptions do not grant access
-to that catalog. A `401` or `403` for either catalog prompts once for a hidden
-replacement token; it is validated and written to the Vault only when valid,
-then the remote setup retries. If Validated Content still returns `401` or
-`403`, it is shown as a warning and the installation continues with Certified
-Content. An authorization failure for Certified Content after that retry remains
-fatal.
+to that catalog. A `401` or `403` first revalidates the saved token with Red
+Hat SSO. Only an SSO-rejected token prompts once for a hidden replacement; it
+is validated and written to the Vault only when valid, then the remote setup
+retries. A token that remains valid at SSO is preserved: a Validated Content
+denial becomes an entitlement warning, while a Certified Content denial remains
+a clear fatal error. This prevents an existing valid Vault token from being
+needlessly replaced.
 
 ### Steps
 

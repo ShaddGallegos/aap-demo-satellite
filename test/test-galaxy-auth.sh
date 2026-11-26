@@ -123,6 +123,17 @@ test ! -e "$TEST_DIR/prompt"
 cmp "$AAP_DEMO_VAULT_FILE" "$TEST_DIR/original-vault"
 [ "$(aap_demo_vault_get aap_demo.redhat.offline_token)" = rejected-token ]
 
+# A quiet workflow must fail clearly instead of blocking behind its progress
+# display waiting for a hidden secret prompt.
+aap_demo_vault_delete ah_offline_token
+rm -f "$TEST_DIR/prompt"
+rc=0
+QUIET=true ensure_galaxy_credentials >"$TEST_DIR/output" 2>&1 || rc=$?
+[ "$rc" -eq 1 ]
+grep -q "run 'aap-demo enable setup-pah' interactively" "$TEST_DIR/output"
+test ! -e "$TEST_DIR/prompt"
+cp "$TEST_DIR/original-vault" "$AAP_DEMO_VAULT_FILE"
+
 # A transient failure preserves a stored token and never prompts.
 export TEST_SSO_UNREACHABLE=true
 rc=0
@@ -148,13 +159,28 @@ ensure_galaxy_credentials >/dev/null 2>&1
 [ "$(aap_demo_vault_get ah_offline_token)" = compatible-token ]
 [ "$(aap_demo_vault_get aap_demo.redhat.offline_token)" = rejected-token ]
 
-# A remote authorization failure forces one hidden replacement prompt even when
-# the stored token is still valid at Red Hat SSO.
+# A remote authorization failure with a still-valid SSO token is an entitlement
+# problem, not a reason to overwrite or re-prompt for the saved credential.
 rm -f "$TEST_DIR/prompt"
-printf 'compatible-token\n' >"$TEST_DIR/input"
-refresh_galaxy_credentials_after_remote_failure "Validated Content" >/dev/null 2>&1
-grep -q 'Automation Hub offline token (hidden)' "$TEST_DIR/prompt"
+rc=0
+refresh_galaxy_credentials_after_remote_failure "Validated Content" >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 4 ]
+test ! -e "$TEST_DIR/prompt"
 [ "$(aap_demo_vault_get ah_offline_token)" = compatible-token ]
+
+# A quiet full-demo phase must never issue a second secret prompt. It reports
+# the rejected credential and leaves the saved Vault entry untouched instead.
+aap_demo_vault_set ah_offline_token rejected-token
+GALAXY_TOKEN=rejected-token
+rm -f "$TEST_DIR/prompt"
+rc=0
+QUIET=true refresh_galaxy_credentials_after_remote_failure "Certified Content" >"$TEST_DIR/output" 2>&1 || rc=$?
+[ "$rc" -eq 1 ]
+grep -q 'non-interactive workflow will not prompt again' "$TEST_DIR/output"
+test ! -e "$TEST_DIR/prompt"
+[ "$(aap_demo_vault_get ah_offline_token)" = rejected-token ]
+aap_demo_vault_set ah_offline_token compatible-token
+GALAXY_TOKEN=compatible-token
 
 # Legacy plaintext imports are validated before saving, and retained on failure.
 aap_demo_vault_delete ah_offline_token

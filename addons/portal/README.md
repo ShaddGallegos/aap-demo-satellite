@@ -29,6 +29,10 @@ See [ADR-002](../../docs/adr/002-portal-helm-deployment.md) for full architectur
 ### AAP Requirements
 
 - AAP 2.6+ deployed in OpenShift (via `aap-demo deploy`)
+- The local ingress CA saved by `aap-demo deploy`. The addon verifies the AAP
+  API certificate with this CA; it does not disable TLS verification. Run
+  `aap-demo trust-ca` if the CA is missing, or set `AAP_API_CA_FILE` to a
+  trusted CA bundle for a non-local AAP route.
 - Admin user with permissions to:
   - Create organizations
   - Create OAuth applications

@@ -144,10 +144,10 @@ that a VM is already configured. It preserves existing installer settings,
 applies package updates and supported adjacent minor upgrades through
 `satellite-maintain`, then refreshes/imports the manifest without rebuilding
 the VM or synchronizing repositories. Each changing step requires a successful
-full offline backup and maintenance checks. Allow for Satellite downtime and
-automatic reboots; backup or check failures stop the run.
+libvirt checkpoint and maintenance checks. Allow for Satellite downtime and
+automatic reboots; checkpoint or check failures stop the run.
 See the [lab maintenance guide](../../satellite-lab/README.md#existing-installations-and-maintenance)
-for backup storage and failure recovery.
+for checkpoint and failure recovery.
 See the [manifest addon guide](../../addons/satellite-manifest/README.md)
 for supported subscription names, permissions, and a manifest-only command.
 

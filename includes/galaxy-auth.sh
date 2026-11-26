@@ -135,12 +135,34 @@ ensure_galaxy_credentials() {
     rc=$?
   fi
   [ "$rc" -ne 2 ] || return 2
+  if [ "${QUIET:-false}" = true ]; then
+    _err "Automation Hub offline token is missing or invalid; run 'aap-demo enable setup-pah' interactively to configure it"
+    return 1
+  fi
   prompt_galaxy_credentials
 }
 
 refresh_galaxy_credentials_after_remote_failure() {
-  local label="$1"
-  printf '  ⚠ Automation Hub token was rejected while accessing %s. Enter a replacement token to retry once.\n' "$label" >&2
+  local label="$1" rc
+  # A 401/403 returned by a Pulp remote is not itself proof that the Vault
+  # token is bad. It can also mean the account lacks that content entitlement.
+  # Revalidate first so a valid saved token is never needlessly prompted for or
+  # replaced behind a setup spinner.
+  if galaxy_offline_token_status "$GALAXY_TOKEN"; then
+    printf '  ⚠ Automation Hub token is valid at Red Hat SSO, but %s denied content access; not prompting for a replacement. Verify the account entitlement.\n' "$label" >&2
+    return 4
+  else
+    rc=$?
+  fi
+  if [ "$rc" -eq 2 ]; then
+    _err "Could not revalidate the Automation Hub token after ${label} denied access; credentials were preserved"
+    return 2
+  fi
+  if [ "${QUIET:-false}" = true ]; then
+    _err "Automation Hub token was rejected by Red Hat SSO while accessing ${label}; the non-interactive workflow will not prompt again. Run 'aap-demo enable setup-pah' interactively to replace it before retrying."
+    return 1
+  fi
+  printf '  ⚠ Automation Hub token was rejected by Red Hat SSO while accessing %s. Enter a replacement token to retry once.\n' "$label" >&2
   # Do not delete the stored token first. A cancelled prompt, rejected
   # replacement, or SSO outage must leave the encrypted Vault unchanged.
   prompt_galaxy_credentials
@@ -350,6 +372,16 @@ configure_pah_remotes() {
         completed) echo "✓"; return 0 ;;
         failed|canceled)
           error=$(jq -r '.error.description // .error.traceback // "Pulp reported no error detail"' <<<"$task" 2>/dev/null | head -c 400)
+          # Pulp occasionally receives a transient NXDOMAIN/SERVFAIL while
+          # downloading an S3 redirect target. It can also mark a task failed
+          # when its worker restarts while cleaning a completed task directory.
+          # Neither condition invalidates the remote or its token; signal the
+          # caller to start one fresh sync task after a short delay.
+          if printf '%s' "$error" | grep -Eqi 'domain name not found|temporary failure in name resolution|name or service not known|dns.*(fail|error)|could not resolve host|worker has gone missing|worker.*(restart|lost|missing)'; then
+            printf '  %s⚠ %s sync %s due to a transient DNS or Pulp-worker failure; retrying is safe.%s\n' \
+              "${_YELLOW}" "$label" "$state" "${_NC}" >&2
+            return 4
+          fi
           # A valid Hub token can still lack the optional Validated Content
           # entitlement.  Let the caller distinguish that authorization case
           # from a broken Pulp task or network failure.
@@ -375,50 +407,92 @@ configure_pah_remotes() {
     return 1
   }
 
+  pah_transient_retry_delay() {
+    local retry_delay_seconds="${PAH_DNS_RETRY_DELAY_SECONDS:-15}"
+    case "$retry_delay_seconds" in
+      ''|*[!0-9]*)
+        _err "PAH_DNS_RETRY_DELAY_SECONDS must be a positive number of seconds"
+        return 1
+        ;;
+    esac
+    if [ "$retry_delay_seconds" -lt 1 ] || [ "$retry_delay_seconds" -gt 60 ]; then
+      _err "PAH_DNS_RETRY_DELAY_SECONDS must be between 1 and 60 seconds"
+      return 1
+    fi
+    printf '%s' "$retry_delay_seconds"
+  }
+
   pah_sync_repository() {
-    local repo_href="$1" label="$2" response task_href repo_url
+    local repo_href="$1" label="$2" response task_href repo_url sync_attempt sync_rc retry_delay_seconds
+    retry_delay_seconds=$(pah_transient_retry_delay) || return 1
     repo_url=$(pah_resource_url "$repo_href") || return 1
-    response=$(curl -sk --fail --connect-timeout 10 --max-time 30 -H "${auth_header}" \
-      -X POST -H "Content-Type: application/json" -d '{"mirror": false}' \
-      "${repo_url}sync/" 2>/dev/null) || {
-        _err "Could not start ${label} sync"
+    for sync_attempt in 1 2; do
+      response=$(curl -sk --fail --connect-timeout 10 --max-time 30 -H "${auth_header}" \
+        -X POST -H "Content-Type: application/json" -d '{"mirror": false}' \
+        "${repo_url}sync/" 2>/dev/null) || {
+          _err "Could not start ${label} sync"
+          return 1
+        }
+      task_href=$(jq -r '.task // .pulp_href // empty' <<<"$response" 2>/dev/null)
+      [ -n "$task_href" ] || {
+        _err "${label} sync did not return a Pulp task"
         return 1
       }
-    task_href=$(jq -r '.task // .pulp_href // empty' <<<"$response" 2>/dev/null)
-    [ -n "$task_href" ] || {
-      _err "${label} sync did not return a Pulp task"
-      return 1
-    }
-    pah_wait_sync_task "$task_href" "$label"
+      if pah_wait_sync_task "$task_href" "$label"; then
+        return 0
+      else
+        sync_rc=$?
+      fi
+      if [ "$sync_rc" -eq 4 ] && [ "$sync_attempt" -eq 1 ]; then
+        printf '  %s⚠ %s sync will retry once in %ss after the transient failure.%s\n' \
+          "${_YELLOW}" "$label" "$retry_delay_seconds" "${_NC}" >&2
+        sleep "$retry_delay_seconds"
+        continue
+      fi
+      return "$sync_rc"
+    done
   }
 
   pah_update_remote_token() {
-    local remote_url="$1" label="$2" response task_href detail
-    response=$(curl -sk --fail --connect-timeout 10 --max-time 30 -H "${auth_header}" \
-      -X PATCH \
-      -H "Content-Type: application/json" \
-      -d "$(jq -n --arg token "${GALAXY_TOKEN}" '{token: $token}')" \
-      "${remote_url}" 2>/dev/null) || {
-        _err "Could not update the ${label} remote token"
-        return 1
-      }
+    local remote_url="$1" label="$2" response task_href detail update_attempt update_rc retry_delay_seconds
+    retry_delay_seconds=$(pah_transient_retry_delay) || return 1
+    for update_attempt in 1 2; do
+      response=$(curl -sk --fail --connect-timeout 10 --max-time 30 -H "${auth_header}" \
+        -X PATCH \
+        -H "Content-Type: application/json" \
+        -d "$(jq -n --arg token "${GALAXY_TOKEN}" '{token: $token}')" \
+        "${remote_url}" 2>/dev/null) || {
+          _err "Could not update the ${label} remote token"
+          return 1
+        }
 
-    # Pulp can return the updated remote directly, a task for an asynchronous
-    # update, or a successful empty response depending on the component
-    # version and whether the token value actually changed.
-    [ -z "$response" ] && return 0
-    if jq -e '.pulp_href' >/dev/null 2>&1 <<<"$response"; then
-      return 0
-    fi
-    task_href=$(jq -r '.task // empty' <<<"$response" 2>/dev/null)
-    if [ -n "$task_href" ]; then
-      printf '  Applying %s remote token update... ' "$label"
-      pah_wait_sync_task "$task_href" "${label} remote update"
-      return $?
-    fi
-    detail=$(jq -r '.detail // .errors[0].detail // "no Pulp resource or task was returned"' <<<"$response" 2>/dev/null | head -c 400)
-    _err "${label} remote update returned an invalid response: ${detail}"
-    return 1
+      # Pulp can return the updated remote directly, a task for an asynchronous
+      # update, or a successful empty response depending on the component
+      # version and whether the token value actually changed.
+      [ -z "$response" ] && return 0
+      if jq -e '.pulp_href' >/dev/null 2>&1 <<<"$response"; then
+        return 0
+      fi
+      task_href=$(jq -r '.task // empty' <<<"$response" 2>/dev/null)
+      if [ -n "$task_href" ]; then
+        printf '  Applying %s remote token update... ' "$label"
+        if pah_wait_sync_task "$task_href" "${label} remote update"; then
+          return 0
+        else
+          update_rc=$?
+        fi
+        if [ "$update_rc" -eq 4 ] && [ "$update_attempt" -eq 1 ]; then
+          printf '  %s⚠ %s remote update will retry once in %ss after the transient failure.%s\n' \
+            "${_YELLOW}" "$label" "$retry_delay_seconds" "${_NC}" >&2
+          sleep "$retry_delay_seconds"
+          continue
+        fi
+        return "$update_rc"
+      fi
+      detail=$(jq -r '.detail // .errors[0].detail // "no Pulp resource or task was returned"' <<<"$response" 2>/dev/null | head -c 400)
+      _err "${label} remote update returned an invalid response: ${detail}"
+      return 1
+    done
   }
 
   # Configure console.redhat.com remotes if token present
@@ -551,7 +625,7 @@ configure_pah_remotes() {
     echo "✓"
 
     printf "  Syncing validated... "
-    local validated_sync_rc=0
+    local validated_sync_rc=0 refresh_rc=0
     if pah_sync_repository "$validated_repo" "rh-validated"; then
       :
     else
@@ -562,8 +636,14 @@ configure_pah_remotes() {
           configure_pah_remotes 1
           return $?
         fi
-        printf '  %s⚠ Validated Content token replacement was not completed; continuing with Certified Content only.%s\n' \
-          "${_YELLOW}" "${_NC}" >&2
+        refresh_rc=$?
+        if [ "$refresh_rc" -eq 4 ]; then
+          printf '  %s⚠ Validated Content is not entitled for the saved Automation Hub token; continuing with Certified Content only.%s\n' \
+            "${_YELLOW}" "${_NC}" >&2
+        else
+          printf '  %s⚠ Validated Content token replacement was not completed; continuing with Certified Content only.%s\n' \
+            "${_YELLOW}" "${_NC}" >&2
+        fi
       elif [ "$validated_sync_rc" -eq 3 ]; then
         printf '  %s⚠ Validated Content is unavailable to this Automation Hub token; continuing with Certified Content only.%s\n' \
           "${_YELLOW}" "${_NC}" >&2

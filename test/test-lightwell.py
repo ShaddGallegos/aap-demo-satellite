@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -190,6 +191,39 @@ class LightwellTests(unittest.TestCase):
                     lightwell.provision(self.api, self.ao, self.importer, self.bindings, config)
                 self.assertEqual(self.api.writes, [])
                 self.assertEqual(self.ao.writes, [])
+
+    def test_client_retries_transient_get_without_retrying_writes(self) -> None:
+        class Parent:
+            calls: list[tuple[str, str]] = []
+
+            def __init__(self, *_args: object) -> None:
+                pass
+
+            def request(self, path: str, method: str = "GET", _payload: object = None) -> dict:
+                self.calls.append((path, method))
+                if method == "GET" and len(self.calls) < 3:
+                    raise RuntimeError(f"{method} {path} returned HTTP 503: unavailable")
+                if method == "POST":
+                    raise RuntimeError(f"{method} {path} returned HTTP 503: unavailable")
+                return {"results": []}
+
+        with patch.object(lightwell, "load_helper", return_value=SimpleNamespace(AAP=Parent)):
+            with patch.dict(
+                os.environ,
+                {"LIGHTWELL_AAP_ROUTE": "aap.example.test", "LIGHTWELL_AO_ROUTE": "ao.example.test"},
+            ):
+                api, _ = lightwell.clients({"aap_token": "aap", "ao_token": "ao"})
+        with patch.object(lightwell.time, "sleep") as sleep:
+            self.assertEqual(api.request("/projects/154/"), {"results": []})
+            with self.assertRaisesRegex(RuntimeError, "POST /projects/154/update/ returned HTTP 503"):
+                api.request("/projects/154/update/", "POST")
+        self.assertEqual(Parent.calls, [
+            ("/projects/154/", "GET"),
+            ("/projects/154/", "GET"),
+            ("/projects/154/", "GET"),
+            ("/projects/154/update/", "POST"),
+        ])
+        self.assertEqual(sleep.call_count, 2)
 
     def test_native_activation_publishes_only_the_reviewed_safe_version(self) -> None:
         document = workflow()
@@ -576,8 +610,13 @@ _full_demo_lightwell_enable
 @unittest.skipIf(os.name == "nt", "Bash-only addon lifecycle")
 class DeployLifecycleTests(unittest.TestCase):
     def test_temporary_token_is_revoked_on_success_and_provision_failure(self) -> None:
-        for provision_status, revoke_status in ((0, 0), (1, 0), (0, 1)):
-            with self.subTest(provision=provision_status, revoke=revoke_status):
+        for provision_status, revoke_codes, expected_status in (
+            (0, "204", 0),
+            (1, "204", 1),
+            (0, "error", 1),
+            (0, "503,204", 0),
+        ):
+            with self.subTest(provision=provision_status, revoke=revoke_codes):
                 with tempfile.TemporaryDirectory() as directory:
                     root = Path(directory)
                     addon = root / "addons/lightwell"
@@ -611,7 +650,14 @@ set -euo pipefail
 printf '%s\\n' "$*" >>"$MOCK_REQUESTS"
 if [[ "$*" == *"-X DELETE"* ]]; then
   echo revoked >>"$MOCK_REQUESTS"
-  exit "$MOCK_REVOKE_STATUS"
+  attempt=0
+  [ -f "$MOCK_DELETE_ATTEMPTS" ] && attempt=$(cat "$MOCK_DELETE_ATTEMPTS")
+  attempt=$((attempt + 1))
+  printf '%s' "$attempt" >"$MOCK_DELETE_ATTEMPTS"
+  IFS=, read -r -a responses <<<"$MOCK_REVOKE_CODES"
+  response="${responses[$((attempt - 1))]:-${responses[${#responses[@]} - 1]}}"
+  if [ "$response" = error ]; then exit 1; fi
+  printf '%s' "$response"
 elif [[ "$*" == *"/api/gateway/v1/tokens/"* ]]; then
   printf '{"id":7,"token":"synthetic-token"}'
 elif [[ "$*" == *"/auth/login"* ]]; then
@@ -622,7 +668,10 @@ fi
 """)
                     for executable in bin_dir.iterdir():
                         executable.chmod(0o700)
+                    (bin_dir / "sleep").write_text("#!/bin/sh\nexit 0\n")
+                    (bin_dir / "sleep").chmod(0o700)
                     requests = root / "requests"
+                    delete_attempts = root / "delete-attempts"
                     result = subprocess.run(
                         ["bash", str(addon / "deploy.sh")],
                         env={
@@ -632,22 +681,24 @@ fi
                             "LIGHTWELL_GITEA_URL": "https://git.example.test",
                             "LIGHTWELL_OPENFLAKE_URL": "https://changes.example.test",
                             "MOCK_PROVISION_STATUS": str(provision_status),
-                            "MOCK_REVOKE_STATUS": str(revoke_status),
+                            "MOCK_REVOKE_CODES": revoke_codes,
+                            "MOCK_DELETE_ATTEMPTS": str(delete_attempts),
                             "MOCK_REQUESTS": str(requests),
                         },
                         capture_output=True,
                         text=True,
                         timeout=15,
                     )
-                    self.assertEqual(
-                        result.returncode == 0, not (provision_status or revoke_status)
-                    )
+                    self.assertEqual(result.returncode, expected_status)
                     calls = requests.read_text()
                     self.assertIn("revoked", calls)
                     for secret in ("synthetic-password", "synthetic-token", "synthetic-ao-token"):
                         self.assertNotIn(secret, calls + result.stdout + result.stderr)
-                    if revoke_status:
+                    if revoke_codes == "error":
                         self.assertIn("Could not revoke temporary AAP setup token", result.stderr)
+                    if revoke_codes == "503,204":
+                        self.assertIn("retrying in 5s", result.stderr)
+                        self.assertEqual(delete_attempts.read_text(), "2")
                     self.assertEqual(
                         (root / "state/lightwell/services.json").exists(),
                         provision_status == 0,

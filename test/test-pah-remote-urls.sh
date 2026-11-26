@@ -58,9 +58,22 @@ curl() {
         printf '%s\n' '{"state":"completed"}'
       fi
       ;;
-    *'/tasks/update/'*) printf '%s\n' '{"state":"completed"}' ;;
+    *'/tasks/update/'*)
+      if [ "${PAH_TEST_UPDATE_WORKER_FAILURE_ONCE:-false}" = true ] && [ ! -e "$TEST_DIR/first-update-worker-failure" ]; then
+        : >"$TEST_DIR/first-update-worker-failure"
+        printf '%s\n' '{"state":"failed","error":{"description":"Worker has gone missing."}}'
+      else
+        printf '%s\n' '{"state":"completed"}'
+      fi
+      ;;
     *'/tasks/'*)
-      if [ "${PAH_TEST_PENDING_ONCE:-false}" = true ] && [ ! -e "$TEST_DIR/first-task-pending" ]; then
+      if [ "${PAH_TEST_DNS_FAILURE_ONCE:-false}" = true ] && [ ! -e "$TEST_DIR/first-task-dns-failure" ]; then
+        : >"$TEST_DIR/first-task-dns-failure"
+        printf '%s\n' '{"state":"failed","error":{"description":"Cannot connect to host automation-hub-prd.s3.us-east-2.amazonaws.com:443 ssl:default [Domain name not found]"}}'
+      elif [ "${PAH_TEST_WORKER_FAILURE_ONCE:-false}" = true ] && [ ! -e "$TEST_DIR/first-task-worker-failure" ]; then
+        : >"$TEST_DIR/first-task-worker-failure"
+        printf '%s\n' '{"state":"failed","error":{"description":"Worker has gone missing."}}'
+      elif [ "${PAH_TEST_PENDING_ONCE:-false}" = true ] && [ ! -e "$TEST_DIR/first-task-pending" ]; then
         : >"$TEST_DIR/first-task-pending"
         printf '%s\n' '{"state":"running"}'
       else
@@ -83,7 +96,7 @@ curl() {
   esac
 }
 
-PAH_TEST_PENDING_ONCE=true PAH_TEST_VALIDATED_DENIED=true PAH_TEST_ASYNC_UPDATE=true PAH_SYNC_TIMEOUT_SECONDS=60 PAH_SYNC_POLL_SECONDS=30 \
+PAH_TEST_DNS_FAILURE_ONCE=true PAH_TEST_PENDING_ONCE=true PAH_TEST_VALIDATED_DENIED=true PAH_TEST_ASYNC_UPDATE=true PAH_SYNC_TIMEOUT_SECONDS=60 PAH_SYNC_POLL_SECONDS=30 PAH_DNS_RETRY_DELAY_SECONDS=1 \
   configure_pah_remotes >"$TEST_DIR/output" 2>&1
 
 if grep -Fq '/api/galaxy/pulp/api/v3/api/galaxy/pulp/api/v3/' "$REQUEST_LOG"; then
@@ -95,8 +108,19 @@ for resource in remotes/ansible/collection/certified repositories/ansible/ansibl
   grep -Fq "https://aap.example.test/api/galaxy/pulp/api/v3/${resource}/" "$REQUEST_LOG"
 done
 grep -Fq 'rh-certified sync still running (0m00s; waiting up to 1m; task:' "$TEST_DIR/output"
+grep -Fq 'rh-certified sync will retry once in 1s after the transient failure.' "$TEST_DIR/output"
 grep -Fq 'Applying rh-certified remote token update...' "$TEST_DIR/output"
 grep -Fq 'Validated Content is unavailable to this Automation Hub token; continuing with Certified Content only.' "$TEST_DIR/output"
 [ "$PAH_REFRESH_CALLS" -eq 1 ]
+
+rm -f "$TEST_DIR/first-task-dns-failure" "$TEST_DIR/first-task-pending"
+PAH_TEST_WORKER_FAILURE_ONCE=true PAH_SYNC_TIMEOUT_SECONDS=60 PAH_SYNC_POLL_SECONDS=30 PAH_DNS_RETRY_DELAY_SECONDS=1 \
+  configure_pah_remotes >"$TEST_DIR/worker-output" 2>&1
+grep -Fq 'rh-certified sync will retry once in 1s after the transient failure.' "$TEST_DIR/worker-output"
+
+rm -f "$TEST_DIR/first-task-worker-failure"
+PAH_TEST_ASYNC_UPDATE=true PAH_TEST_UPDATE_WORKER_FAILURE_ONCE=true PAH_SYNC_TIMEOUT_SECONDS=60 PAH_SYNC_POLL_SECONDS=30 PAH_DNS_RETRY_DELAY_SECONDS=1 \
+  configure_pah_remotes >"$TEST_DIR/update-worker-output" 2>&1
+grep -Fq 'rh-certified remote update will retry once in 1s after the transient failure.' "$TEST_DIR/update-worker-output"
 
 echo "PASS: existing PAH resources use their Pulp hrefs exactly once"

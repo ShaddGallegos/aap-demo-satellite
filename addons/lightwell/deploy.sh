@@ -49,11 +49,31 @@ token_id=$(jq -er '.id | select(type == "number")' <<<"$token_response") || {
   exit 1
 }
 cleanup() {
-  if ! curl -fsS --connect-timeout 10 --max-time 60 -X DELETE -u "admin:$aap_password" \
-    "https://$LIGHTWELL_AAP_ROUTE/api/gateway/v1/tokens/$token_id/" >/dev/null; then
-    echo "ERROR: Could not revoke temporary AAP setup token $token_id" >&2
-    return 1
-  fi
+  local attempt http_code curl_status
+  for attempt in $(seq 1 6); do
+    if http_code=$(curl -sS --connect-timeout 10 --max-time 60 --output /dev/null \
+      --write-out '%{http_code}' -X DELETE -u "admin:$aap_password" \
+      "https://$LIGHTWELL_AAP_ROUTE/api/gateway/v1/tokens/$token_id/"); then
+      curl_status=0
+    else
+      curl_status=$?
+    fi
+    if [ "$curl_status" -eq 0 ]; then
+      case "$http_code" in
+        2?? | 404) return 0 ;;
+        502 | 503 | 504)
+          if [ "$attempt" -lt 6 ]; then
+            echo "WARNING: Gateway returned HTTP $http_code while revoking temporary AAP setup token; retrying in 5s ($attempt/5)" >&2
+            sleep 5
+            continue
+          fi
+          ;;
+      esac
+    fi
+    break
+  done
+  echo "ERROR: Could not revoke temporary AAP setup token $token_id" >&2
+  return 1
 }
 finish() {
   local status=$?

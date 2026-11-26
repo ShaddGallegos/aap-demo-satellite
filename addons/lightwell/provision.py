@@ -10,6 +10,7 @@ import os
 import ssl
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -428,6 +429,10 @@ def clients(access: dict):
     helper = load_helper("lightwell_aap", "provision-aap-demos.py")
 
     class LabAPI(helper.AAP):
+        TRANSIENT_HTTP_STATUSES = {"502", "503", "504"}
+        TRANSIENT_READ_ATTEMPTS = 6
+        TRANSIENT_RETRY_SECONDS = 5
+
         def find(self, endpoint: str, name: str) -> dict[str, Any] | None:
             response = self.request(f"/{endpoint}/?name={urllib.parse.quote(name)}&page_size=2")
             records = response.get("results", [])
@@ -436,15 +441,30 @@ def clients(access: dict):
             return next(iter(records), None)
 
         def request(self, path: str, method: str = "GET", payload: Any = None) -> Any:
-            try:
-                return super().request(path, method, payload)
-            except RuntimeError as error:
-                status = str(error).partition(" returned HTTP ")[2].partition(":")[0]
-                if status.isdigit():
-                    raise RuntimeError(
-                        f"{method} {path.partition('?')[0]} returned HTTP {status}"
-                    ) from None
-                raise
+            attempts = self.TRANSIENT_READ_ATTEMPTS if method == "GET" else 1
+            for attempt in range(1, attempts + 1):
+                try:
+                    return super().request(path, method, payload)
+                except RuntimeError as error:
+                    status = str(error).partition(" returned HTTP ")[2].partition(":")[0]
+                    if (
+                        method == "GET"
+                        and status in self.TRANSIENT_HTTP_STATUSES
+                        and attempt < attempts
+                    ):
+                        print(
+                            f"  ⚠ API returned HTTP {status} for {path.partition('?')[0]}; "
+                            f"retrying in {self.TRANSIENT_RETRY_SECONDS}s "
+                            f"({attempt}/{attempts - 1})"
+                        )
+                        time.sleep(self.TRANSIENT_RETRY_SECONDS)
+                        continue
+                    if status.isdigit():
+                        raise RuntimeError(
+                            f"{method} {path.partition('?')[0]} returned HTTP {status}"
+                        ) from None
+                    raise
+            raise RuntimeError("unreachable")
 
     api = LabAPI(os.environ["LIGHTWELL_AAP_ROUTE"], access["aap_token"])
     ao = LabAPI(os.environ["LIGHTWELL_AO_ROUTE"], access["ao_token"])

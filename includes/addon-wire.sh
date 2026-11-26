@@ -867,7 +867,7 @@ wire_apd_galaxy_if_present() {
   if ! wire_apd_installed; then
     return 0
   fi
-  if ! aap_demo_vault_get "aap_demo.galaxy.offline_token" >/dev/null 2>&1 \
+  if ! aap_demo_vault_get "ah_offline_token" >/dev/null 2>&1 \
     && [ ! -s "${GALAXY_TOKEN_FILE:-${AAP_DEMO_DIR}/galaxy-token}" ]; then
     return 0
   fi
