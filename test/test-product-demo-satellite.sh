@@ -76,6 +76,14 @@ else
   exit 1
 fi
 
+installer_playbook="$REPO_ROOT/addons/product-demo-satellite/playbooks/install-satellite-lab.yml"
+if grep -Fq "'organization': 'Ansible Product Demos (APD)'" "$installer_playbook"; then
+  echo "PASS: local Satellite templates are created in the APD organization"
+else
+  echo "FAIL: local Satellite templates must not fall back to the Default organization" >&2
+  exit 1
+fi
+
 AAP_USERNAME="admin"
 AAP_PASSWORD="unused"
 AAP_API="https://example.invalid/api/controller/v2"

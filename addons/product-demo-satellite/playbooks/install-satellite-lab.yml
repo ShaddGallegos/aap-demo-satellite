@@ -16,6 +16,7 @@
       ansible.builtin.set_fact:
         satellite_lab_templates: >-
           {{ controller_templates | map('combine', {
+            'organization': 'Ansible Product Demos (APD)',
             'notification_templates_started': [],
             'notification_templates_success': [],
             'notification_templates_error': []
