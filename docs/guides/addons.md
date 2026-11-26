@@ -136,6 +136,20 @@ See [OpenShift security proof of concept](../openshift-security.md) for the
 catalog prerequisites, ownership boundary, and the deliberate RHACS follow-up
 steps.
 
+## OpenShift Quay proof of concept
+
+The optional Quay scenario installs only an aap-demo-owned Red Hat Quay Operator
+subscription. It creates no Quay registry, storage, route, user, robot account,
+mirror, scan, credential, or image content:
+
+```bash
+aap-demo enable openshift-quay
+```
+
+See [OpenShift Quay proof of concept](../openshift-quay.md) for catalog
+prerequisites, ownership boundary, and the required design decisions before a
+registry instance is created.
+
 ## Automation Hub content synchronization
 
 `aap-demo enable setup-pah` reads the separate Automation Hub offline token from

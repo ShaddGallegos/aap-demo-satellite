@@ -14,6 +14,7 @@ VALIDATOR = ROOT / "scripts" / "validate-addon-contract.py"
 SATELLITE = ROOT / "addons" / "product-demo-satellite" / "scenario.json"
 DELIVERY = ROOT / "addons" / "openshift-delivery" / "scenario.json"
 SECURITY = ROOT / "addons" / "openshift-security" / "scenario.json"
+QUAY = ROOT / "addons" / "openshift-quay" / "scenario.json"
 
 
 def check(arguments: list[str], expected: int) -> subprocess.CompletedProcess[str]:
@@ -28,6 +29,7 @@ def check(arguments: list[str], expected: int) -> subprocess.CompletedProcess[st
 check([str(SATELLITE)], 0)
 check([str(DELIVERY)], 0)
 check([str(SECURITY)], 0)
+check([str(QUAY)], 0)
 with tempfile.TemporaryDirectory() as directory:
     addon = Path(directory) / "product-demo-satellite"
     addon.mkdir()

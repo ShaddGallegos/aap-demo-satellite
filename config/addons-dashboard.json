@@ -282,6 +282,19 @@
     "namespace": "rhacs-operator",
     "prefix": "rhacs-operator"
    }
+  },
+  {
+   "id": "openshift-quay",
+   "name": "OpenShift Quay Proof of Concept",
+   "category": "Cloud-native registry",
+   "description": "Optionally install the owned Red Hat Quay Operator subscription. It discovers a supported catalog channel and creates no QuayRegistry, storage, route, user, robot account, mirror, scan, credential, or image content.",
+   "dependencies": [],
+   "availability": "Requires OLM and a reachable Red Hat operator CatalogSource; reserves about 2 GiB RAM and 4 GiB VM storage.",
+   "health": {
+    "type": "pod-prefix",
+    "namespace": "aap-demo-quay-operator",
+    "prefix": "quay-operator"
+   }
   }
  ]
 }

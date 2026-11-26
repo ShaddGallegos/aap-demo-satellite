@@ -125,7 +125,7 @@ for command in deploy status watch clean redeploy redeploy-all idle preflight di
 done
 for addon in fleet mcp-server ao ollama setup-pah portal portal-operator apme-eap \
   eda product-demos product-demo-satellite product-demo-infrastructure product-demo-eda \
-  opa local-cache openshift-delivery openshift-security; do
+  opa local-cache openshift-delivery openshift-security openshift-quay; do
   if ! grep -Eq "^[[:space:]]+${addon}[[:space:]]" <<<"$help_output"; then
     echo "FAIL: --help is missing addon: $addon"
     exit 1

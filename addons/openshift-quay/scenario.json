@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "name": "openshift-quay",
+  "summary": "Installs an owned Red Hat Quay Operator subscription as an optional registry proof-of-concept prerequisite.",
+  "lifecycle": {
+    "enable": "deploy.sh",
+    "disable": "deploy.sh --delete",
+    "idempotency": "Reuses only the operator namespace, OperatorGroup, and Subscription marked as owned by aap-demo; the operator channel is discovered from the configured catalog.",
+    "failure_boundary": "The addon stops before applying resources when OLM, the configured CatalogSource, package metadata, or ownership checks are unavailable."
+  },
+  "dependencies": {
+    "addons": [],
+    "services": ["Kubernetes API", "OLM", "Red Hat operator CatalogSource"]
+  },
+  "inputs": [
+    {"name": "QUAY_CATALOG_SOURCE", "source": "environment:QUAY_CATALOG_SOURCE", "required": false, "secret": false},
+    {"name": "QUAY_CATALOG_NAMESPACE", "source": "environment:QUAY_CATALOG_NAMESPACE", "required": false, "secret": false},
+    {"name": "QUAY_OPERATOR_NAMESPACE", "source": "environment:QUAY_OPERATOR_NAMESPACE", "required": false, "secret": false},
+    {"name": "QUAY_WAIT_SECONDS", "source": "environment:QUAY_WAIT_SECONDS", "required": false, "secret": false}
+  ],
+  "resources": {
+    "namespaces": ["aap-demo-quay-operator"],
+    "operator_groups": ["aap-demo-quay-operator"],
+    "subscriptions": ["aap-demo-quay-operator"]
+  },
+  "readiness": [
+    "The managed Red Hat Quay subscription reports a Succeeded installed CSV.",
+    "The configured CatalogSource exposes a default channel for quay-operator."
+  ],
+  "security": {
+    "secret_storage": "The scenario accepts no passwords, tokens, pull secrets, robot accounts, or credentials.",
+    "network_trust": "Catalog access follows the cluster's configured registry and CatalogSource trust policy.",
+    "external_actions": "No QuayRegistry, storage, route, user, robot account, mirror, scan, credential, or image content is created automatically."
+  }
+}

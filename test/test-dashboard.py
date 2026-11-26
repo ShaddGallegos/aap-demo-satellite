@@ -502,6 +502,17 @@ class DashboardUnitTests(unittest.TestCase):
         inventory["pods"][-1]["phase"] = "Pending"
         self.assertEqual(dashboard.addon_state(self.addons["openshift-security"], inventory), "degraded")
 
+    def test_quay_health_requires_quay_operator(self) -> None:
+        inventory = fixture_inventory()
+        inventory["addons"].append("openshift-quay")
+        inventory["pods"].append({
+            "namespace": "aap-demo-quay-operator", "name": "quay-operator-controller-manager-abc",
+            "phase": "Running", "ready_containers": 1, "total_containers": 1,
+        })
+        self.assertEqual(dashboard.addon_state(self.addons["openshift-quay"], inventory), "running")
+        inventory["pods"][-1]["ready_containers"] = 0
+        self.assertEqual(dashboard.addon_state(self.addons["openshift-quay"], inventory), "degraded")
+
     def test_operation_output_redacts_credentials(self) -> None:
         output = (
             "\x1b[0;31mAuthorization: Bearer secret-token\x1b[0m\n"

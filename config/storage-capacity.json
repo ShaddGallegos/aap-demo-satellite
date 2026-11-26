@@ -126,6 +126,11 @@
       "vm_gib": 4,
       "host_gib": 0,
       "description": "RHACS Operator images and logs only. RHACS Central, SecuredCluster services, database storage, scan data, and customer telemetry are deliberately not included."
+    },
+    "openshift-quay": {
+      "vm_gib": 4,
+      "host_gib": 0,
+      "description": "Red Hat Quay Operator images and logs only. A QuayRegistry, registry storage, database, scanning data, image content, and customer credentials are deliberately not included."
     }
   }
 }
