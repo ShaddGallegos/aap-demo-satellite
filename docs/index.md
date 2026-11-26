@@ -22,6 +22,8 @@ The [project home page](../README.md) is the short start. These pages are the re
 - [Add-ons](guides/addons.md) - Practice machines, product demos, and extras that still use the older command.
 - [Addon scenario contracts](addon-scenario-contracts.md) - Lifecycle, dependency,
   ownership, readiness, and security boundaries for complex addons.
+- [Scenario matrix harness](scenario-harness.md) - Bounded non-live combination
+  planning, contract-gap reporting, and isolated regression evidence.
 - [OpenShift delivery proof of concept](openshift-delivery.md) - Opt-in GitOps and
   Pipelines operators without creating customer workloads.
 - [OpenShift security proof of concept](openshift-security.md) - Opt-in RHACS

@@ -4,10 +4,13 @@ include lint.mk
 
 .DEFAULT_GOAL := help
 
-.PHONY: aap-demo help
+.PHONY: aap-demo help scenario-harness
 
 aap-demo: ## Deploy AAP 2.7
 	@./aap-demo.sh deploy
+
+scenario-harness: ## Report safe bounded addon-combination coverage
+	@python3 scripts/scenario-harness.py
 
 help: ## Show this help
 	@echo ""
