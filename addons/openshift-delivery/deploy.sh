@@ -15,6 +15,7 @@ CATALOG_SOURCE="${OPENSHIFT_DELIVERY_CATALOG_SOURCE:-redhat-operators}"
 GITOPS_PACKAGE="openshift-gitops-operator"
 PIPELINES_PACKAGE="openshift-pipelines-operator-rh"
 WAIT_SECONDS="${OPENSHIFT_DELIVERY_WAIT_SECONDS:-900}"
+source "$SCRIPT_DIR/../lib/olm-scenario.sh"
 
 valid_dns_label() {
   [[ "$1" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]
@@ -39,56 +40,15 @@ validate_settings() {
 }
 
 resource_is_owned_or_absent() {
-  local resource="$1" name="$2" namespace="${3:-}" manifest owner
-  if [ -n "$namespace" ]; then
-    if ! manifest=$(kubectl get "$resource" "$name" -n "$namespace" -o json 2>/dev/null); then
-      return 0
-    fi
-  else
-    if ! manifest=$(kubectl get "$resource" "$name" -o json 2>/dev/null); then
-      return 0
-    fi
-  fi
-  owner=$(jq -r '.metadata.labels["aap-demo/openshift-delivery"] // ""' <<<"$manifest") || return 1
-  [ "$owner" = managed ]
+  aap_demo_olm_resource_owned_or_absent "aap-demo/openshift-delivery" "$@"
 }
 
 package_is_available() {
-  local package="$1" manifest channel catalog
-  manifest=$(kubectl get packagemanifest "$package" -n "$CATALOG_NAMESPACE" -o json 2>/dev/null) || return 1
-  catalog=$(jq -r '.metadata.labels.catalog // ""' <<<"$manifest") || return 1
-  [ "$catalog" = "$CATALOG_SOURCE" ] || return 1
-  channel=$(jq -r '.status.defaultChannel // ""' <<<"$manifest") || return 1
-  [ -n "$channel" ] || return 1
-  printf '%s\n' "$channel"
+  aap_demo_olm_package_channel "$1" "$CATALOG_NAMESPACE" "$CATALOG_SOURCE"
 }
 
 wait_for_subscription() {
-  local name="$1" namespace="$2" elapsed=0 csv phase
-  while [ "$elapsed" -lt "$WAIT_SECONDS" ]; do
-    csv=$(kubectl get subscription "$name" -n "$namespace" \
-      -o jsonpath='{.status.installedCSV}' 2>/dev/null || true)
-    if [ -n "$csv" ]; then
-      phase=$(kubectl get csv "$csv" -n "$namespace" \
-        -o jsonpath='{.status.phase}' 2>/dev/null || true)
-      case "$phase" in
-        Succeeded)
-          echo "  ✓ ${name} is ready (${csv})"
-          return 0
-          ;;
-        Failed)
-          echo "ERROR: ${name} install CSV failed: ${csv}" >&2
-          kubectl describe csv "$csv" -n "$namespace" >&2 || true
-          return 1
-          ;;
-      esac
-    fi
-    sleep 5
-    elapsed=$((elapsed + 5))
-  done
-  echo "ERROR: Timed out after ${WAIT_SECONDS}s waiting for ${name}" >&2
-  echo "  Check: kubectl get subscription,csv -n ${namespace}" >&2
-  return 1
+  aap_demo_olm_wait_subscription "$1" "$2" "$WAIT_SECONDS" "$1"
 }
 
 preflight() {

@@ -16,14 +16,7 @@ PACKAGE_NAME="rhacs-operator"
 SUBSCRIPTION_NAME="aap-demo-rhacs-operator"
 OPERATOR_GROUP_NAME="aap-demo-rhacs-operator"
 WAIT_SECONDS="${RHACS_WAIT_SECONDS:-900}"
-
-valid_dns_label() {
-  [[ "$1" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]
-}
-
-valid_channel() {
-  [[ "$1" =~ ^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$ ]]
-}
+source "$SCRIPT_DIR/../lib/olm-scenario.sh"
 
 validate_settings() {
   local value
@@ -32,63 +25,11 @@ validate_settings() {
     return 1
   }
   for value in "$OPERATOR_NAMESPACE" "$CATALOG_NAMESPACE" "$CATALOG_SOURCE"; do
-    valid_dns_label "$value" || {
+    aap_demo_olm_valid_dns_label "$value" || {
       echo "ERROR: RHACS namespaces and CatalogSource names must be DNS-safe identifiers" >&2
       return 1
     }
   done
-}
-
-resource_is_owned_or_absent() {
-  local resource="$1" name="$2" namespace="${3:-}" manifest owner
-  if [ -n "$namespace" ]; then
-    if ! manifest=$(kubectl get "$resource" "$name" -n "$namespace" -o json 2>/dev/null); then
-      return 0
-    fi
-  else
-    if ! manifest=$(kubectl get "$resource" "$name" -o json 2>/dev/null); then
-      return 0
-    fi
-  fi
-  owner=$(jq -r '.metadata.labels["aap-demo/openshift-security"] // ""' <<<"$manifest") || return 1
-  [ "$owner" = managed ]
-}
-
-package_channel() {
-  local manifest catalog channel
-  manifest=$(kubectl get packagemanifest "$PACKAGE_NAME" -n "$CATALOG_NAMESPACE" -o json 2>/dev/null) || return 1
-  catalog=$(jq -r '.metadata.labels.catalog // ""' <<<"$manifest") || return 1
-  [ "$catalog" = "$CATALOG_SOURCE" ] || return 1
-  channel=$(jq -r '.status.defaultChannel // ""' <<<"$manifest") || return 1
-  printf '%s\n' "$channel"
-}
-
-wait_for_subscription() {
-  local elapsed=0 csv phase
-  while [ "$elapsed" -lt "$WAIT_SECONDS" ]; do
-    csv=$(kubectl get subscription "$SUBSCRIPTION_NAME" -n "$OPERATOR_NAMESPACE" \
-      -o jsonpath='{.status.installedCSV}' 2>/dev/null || true)
-    if [ -n "$csv" ]; then
-      phase=$(kubectl get csv "$csv" -n "$OPERATOR_NAMESPACE" \
-        -o jsonpath='{.status.phase}' 2>/dev/null || true)
-      case "$phase" in
-        Succeeded)
-          echo "  ✓ RHACS Operator is ready (${csv})"
-          return 0
-          ;;
-        Failed)
-          echo "ERROR: RHACS Operator install CSV failed: ${csv}" >&2
-          kubectl describe csv "$csv" -n "$OPERATOR_NAMESPACE" >&2 || true
-          return 1
-          ;;
-      esac
-    fi
-    sleep 5
-    elapsed=$((elapsed + 5))
-  done
-  echo "ERROR: Timed out after ${WAIT_SECONDS}s waiting for the RHACS Operator" >&2
-  echo "  Check: kubectl get subscription,csv -n ${OPERATOR_NAMESPACE}" >&2
-  return 1
 }
 
 preflight() {
@@ -109,15 +50,15 @@ preflight() {
     echo "  Configure Red Hat operator catalog access before enabling this optional scenario." >&2
     return 1
   }
-  resource_is_owned_or_absent namespace "$OPERATOR_NAMESPACE" || {
+  aap_demo_olm_resource_owned_or_absent "aap-demo/openshift-security" namespace "$OPERATOR_NAMESPACE" || {
     echo "ERROR: Refusing to change an unowned RHACS operator namespace" >&2
     return 1
   }
-  resource_is_owned_or_absent operatorgroup "$OPERATOR_GROUP_NAME" "$OPERATOR_NAMESPACE" || {
+  aap_demo_olm_resource_owned_or_absent "aap-demo/openshift-security" operatorgroup "$OPERATOR_GROUP_NAME" "$OPERATOR_NAMESPACE" || {
     echo "ERROR: Refusing to change an unowned RHACS OperatorGroup" >&2
     return 1
   }
-  resource_is_owned_or_absent subscription "$SUBSCRIPTION_NAME" "$OPERATOR_NAMESPACE" || {
+  aap_demo_olm_resource_owned_or_absent "aap-demo/openshift-security" subscription "$SUBSCRIPTION_NAME" "$OPERATOR_NAMESPACE" || {
     echo "ERROR: Refusing to change an unowned RHACS Subscription" >&2
     return 1
   }
@@ -126,11 +67,11 @@ preflight() {
 deploy() {
   local channel rendered
   preflight || return 1
-  channel=$(package_channel) || {
+  channel=$(aap_demo_olm_package_channel "$PACKAGE_NAME" "$CATALOG_NAMESPACE" "$CATALOG_SOURCE") || {
     echo "ERROR: Package ${PACKAGE_NAME} is not available from ${CATALOG_SOURCE}" >&2
     return 1
   }
-  valid_channel "$channel" || {
+  aap_demo_olm_valid_channel "$channel" || {
     echo "ERROR: Catalog returned an unsafe RHACS operator channel name" >&2
     return 1
   }
@@ -144,7 +85,7 @@ deploy() {
     "$SCRIPT_DIR/rhacs-operator.yaml") || return 1
   printf '%s\n' "$rendered" | kubectl apply -f - >/dev/null
   echo "Waiting for the RHACS Operator..."
-  wait_for_subscription
+  aap_demo_olm_wait_subscription "$SUBSCRIPTION_NAME" "$OPERATOR_NAMESPACE" "$WAIT_SECONDS" "RHACS Operator"
   echo "✓ RHACS Operator prerequisite is ready"
   echo "  No Central, SecuredCluster, init bundle, policy, scan, credential, or customer workload was created."
 }
@@ -155,7 +96,7 @@ remove() {
     return 1
   }
   if kubectl get namespace "$OPERATOR_NAMESPACE" >/dev/null 2>&1; then
-    resource_is_owned_or_absent namespace "$OPERATOR_NAMESPACE" || {
+    aap_demo_olm_resource_owned_or_absent "aap-demo/openshift-security" namespace "$OPERATOR_NAMESPACE" || {
       echo "ERROR: Refusing to delete an unowned RHACS operator namespace" >&2
       return 1
     }
