@@ -53,6 +53,8 @@ source "${SCRIPT_DIR}/includes/cmd-status.sh"
 source "${SCRIPT_DIR}/includes/workflow-journal.sh"
 # shellcheck source=includes/integration-check.sh
 source "${SCRIPT_DIR}/includes/integration-check.sh"
+# shellcheck source=includes/addon-contract.sh
+source "${SCRIPT_DIR}/includes/addon-contract.sh"
 # shellcheck source=includes/steward.sh
 source "${SCRIPT_DIR}/includes/steward.sh"
 # shellcheck source=includes/reports.sh
@@ -3647,6 +3649,7 @@ cmd_enable() {
     echo "Addon '$addon' has no deploy.sh"
     return 1
   fi
+  aap_demo_validate_addon_contract "$addon_dir" || return 1
 
   local subcmd="${1:-}"
   local _skip_addon_save=false

@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "name": "product-demo-satellite",
+  "summary": "Reconciles the local Satellite Product Demo scenario in AAP.",
+  "lifecycle": {
+    "enable": "deploy.sh",
+    "disable": "deploy.sh --delete",
+    "idempotency": "Reuses APD resources, overlays owned playbooks in the retained bootstrap project, and reconciles only managed templates and credentials.",
+    "failure_boundary": "If local playbook staging fails, the addon stops before changing Satellite credentials."
+  },
+  "dependencies": {
+    "addons": ["product-demos-base"],
+    "services": ["AAP controller API", "Satellite API", "AAP controller task pod"]
+  },
+  "inputs": [
+    {
+      "name": "SATELLITE_URL",
+      "source": "environment:SATELLITE_URL",
+      "required": false,
+      "secret": false
+    },
+    {
+      "name": "SATELLITE_USERNAME",
+      "source": "environment:SATELLITE_USERNAME",
+      "required": false,
+      "secret": false
+    },
+    {
+      "name": "SATELLITE_PASSWORD",
+      "source": "vault:aap_demo.satellite.admin_password",
+      "required": true,
+      "secret": true
+    },
+    {
+      "name": "SAT_ORG",
+      "source": "environment:SAT_ORG",
+      "required": false,
+      "secret": false
+    }
+  ],
+  "resources": {
+    "playbooks": [
+      "install-satellite-lab.yml",
+      "setup-satellite-lab.yml",
+      "register-satellite-lab.yml"
+    ],
+    "templates": [
+      "SETUP | Satellite",
+      "LINUX | Register with Satellite"
+    ],
+    "credentials": ["Satellite Credential", "Satellite Inventory"],
+    "inventory_sources": ["Satellite Inventory"]
+  },
+  "readiness": [
+    "AAP controller API is reachable and authenticated.",
+    "The APD bootstrap project has a retained task-pod checkout.",
+    "A unique RHEL9 or RHEL10 Satellite content profile is published.",
+    "Satellite setup completes with managed credentials before Fleet registration or inventory synchronization."
+  ],
+  "security": {
+    "secret_storage": "SATELLITE_PASSWORD is read from the encrypted credential Vault when it is not explicitly supplied for the process.",
+    "network_trust": "AAP and Satellite connections retain certificate validation; CA content is configured explicitly when required.",
+    "external_actions": "The addon changes only owned AAP resources and the local Satellite lab; it does not open vendor tickets or send external email."
+  }
+}
