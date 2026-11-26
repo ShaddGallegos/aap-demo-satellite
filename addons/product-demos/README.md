@@ -32,6 +32,13 @@ Install a subset of domains:
 PRODUCT_DEMOS_DOMAINS="linux cloud" aap-demo enable product-demos
 ```
 
+After the base installer job succeeds, AAP can need a short time to expose its
+project, execution environment, and installer credential through the controller
+API. The addon waits up to 90 seconds by default instead of failing that normal
+handoff. Set `APD_RESOURCE_READY_TIMEOUT_SECONDS` and
+`APD_RESOURCE_READY_DELAY_SECONDS` only when diagnosing an unusually slow
+controller.
+
 Include Satellite in bulk install (only if you have a configured Satellite server):
 
 ```bash

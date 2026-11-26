@@ -19,5 +19,14 @@
         name: infra.aap_configuration.dispatch
       vars:
         controller_dependency_check: false
+        # The local overlay owns these AAP records because the base installer
+        # only creates the APD foundation. Do not update the source before its
+        # placeholder Satellite credentials are replaced below.
+        controller_credentials: "{{ controller_credentials | default([]) }}"
+        controller_inventories: "{{ controller_inventories | default([]) }}"
+        controller_inventory_sources: "{{ controller_inventory_sources | default([]) }}"
         controller_templates: "{{ satellite_lab_templates }}"
+        controller_workflows: "{{ controller_workflows | default([]) }}"
         controller_launch_jobs: []
+        aap_configuration_dispatcher_exclude_roles:
+          - controller_inventory_source_update

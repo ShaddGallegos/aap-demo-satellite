@@ -62,17 +62,27 @@ apd_stage_satellite_lab_playbooks() {
   apd_overlay_project_playbook "$APD_PROJECT_ID" \
     "$APD_SATELLITE_DIR/playbooks/install-satellite-lab.yml" install-satellite-lab.yml || return 1
   apd_register_project_playbooks "$APD_PROJECT_ID" install-satellite-lab.yml || return 1
+  # AAP 2.7 indexes a synchronized SCM project but does not retain its
+  # checkout on the controller task volume. The aap-demo-owned bootstrap
+  # project does retain its checkout, so it is the stable home for local
+  # overlays. Keep APD_SATELLITE_PROJECT_ID for unmodified upstream templates.
   for playbook in setup-satellite-lab.yml register-satellite-lab.yml; do
-    apd_overlay_project_playbook "$APD_SATELLITE_PROJECT_ID" \
+    apd_overlay_project_playbook "$APD_PROJECT_ID" \
       "$APD_SATELLITE_DIR/playbooks/$playbook" "$playbook" || return 1
   done
-  apd_register_project_playbooks "$APD_SATELLITE_PROJECT_ID" \
+  apd_register_project_playbooks "$APD_PROJECT_ID" \
     setup-satellite-lab.yml register-satellite-lab.yml || return 1
 }
 
 apd_install_satellite_lab() {
   local template_id job_id
+  # This marker lets the caller distinguish a failure to stage the local
+  # playbooks from a later AAP job failure.  Staging is a prerequisite for
+  # the managed Satellite credentials, so credential wiring must never run
+  # after a staging failure.
+  APD_SATELLITE_LAB_PLAYBOOKS_STAGED=false
   apd_stage_satellite_lab_playbooks || return 1
+  APD_SATELLITE_LAB_PLAYBOOKS_STAGED=true
   template_id=$(apd_ensure_domain_job_template satellite "$APD_PROJECT_ID" "$APD_EE_ID" "$APD_CRED_ID") || return 1
   curl -fsSk -u "${AAP_USERNAME}:${AAP_PASSWORD}" -X PATCH \
     -H "Content-Type: application/json" -d '{"playbook":"install-satellite-lab.yml"}' \
@@ -94,16 +104,17 @@ apd_configure_satellite_lab_templates() {
     "SATELLITE | Promote Content View Version" "LINUX | Register with Satellite"; do
     template=$(apd_satellite_template "$name") || return 1
     payload=$(jq -cn --argjson template "$template" --argjson profile "$APD_SATELLITE_LAB" \
-      --argjson project "$APD_SATELLITE_PROJECT_ID" --argjson ee "$APD_EE_ID" --arg ca "$ca" '
+      --argjson project "$APD_SATELLITE_PROJECT_ID" --argjson bootstrap "$APD_PROJECT_ID" \
+      --argjson ee "$APD_EE_ID" --arg ca "$ca" '
       ($template.extra_vars | if . == "" then {} else fromjson end) as $vars
       | {extra_vars: ($vars + {organization: $profile.organization.name})}
       | if $template.name == "SETUP | Satellite" then
-          . + {project: $project, execution_environment: $ee, playbook: "setup-satellite-lab.yml",
+          . + {project: $bootstrap, execution_environment: $ee, playbook: "setup-satellite-lab.yml",
             extra_vars: {satellite_organization: $profile.organization.name,
               satellite_lab_content_views: $profile.content_views,
               satellite_lab_environments: $profile.environments}}
         elif $template.name == "LINUX | Register with Satellite" then
-          . + {project: $project, execution_environment: $ee, playbook: "register-satellite-lab.yml",
+          . + {project: $bootstrap, execution_environment: $ee, playbook: "register-satellite-lab.yml",
             extra_vars: ($vars + {org_id: $profile.organization.label, env: "DEV", satellite_lab_ca_pem: $ca})}
         elif $template.name == "SATELLITE | Publish Content View Version" then
           .extra_vars += {env: "DEV", lifecycle_environment: "DEV"}

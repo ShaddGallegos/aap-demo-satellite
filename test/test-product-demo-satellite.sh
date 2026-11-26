@@ -4,6 +4,68 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$REPO_ROOT/addons/product-demo-satellite/lib.sh"
 
+install_playbook="$REPO_ROOT/addons/product-demo-satellite/playbooks/install-satellite-lab.yml"
+for variable in controller_credentials controller_inventories controller_inventory_sources controller_workflows; do
+  if ! grep -Fq "$variable:" "$install_playbook"; then
+    echo "FAIL: local Satellite installer does not reconcile $variable" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'controller_inventory_source_update' "$install_playbook"; then
+  echo "FAIL: local Satellite installer can sync placeholder credentials" >&2
+  exit 1
+fi
+echo "PASS: local Satellite installer creates APD resources before wiring credentials"
+
+satellite_lib="$REPO_ROOT/addons/product-demo-satellite/lib.sh"
+satellite_deploy="$REPO_ROOT/addons/product-demo-satellite/deploy.sh"
+if grep -Fq 'APD_SATELLITE_LAB_PLAYBOOKS_STAGED=false' "$satellite_lib" \
+  && grep -Fq 'APD_SATELLITE_LAB_PLAYBOOKS_STAGED=true' "$satellite_lib" \
+  && grep -Fq 'credentials were not changed' "$satellite_deploy"; then
+  echo "PASS: staging failures stop before Satellite credential wiring"
+else
+  echo "FAIL: staging failures must stop before Satellite credential wiring" >&2
+  exit 1
+fi
+
+# The upstream APD SCM project is indexed by AAP but does not retain a local
+# checkout on the controller task volume. All aap-demo-owned overlays must use
+# the bootstrap project, whose checkout is retained there.
+overlay_calls=()
+registered_calls=()
+AAP_USERNAME=admin
+AAP_PASSWORD=unused
+AAP_API=https://example.invalid/api/controller/v2
+APD_PROJECT_ID=27
+apd_apd_org_id() { printf '2'; }
+curl() { printf '%s' '{"count":1,"results":[{"id":29}]}'; }
+apd_overlay_project_playbook() { overlay_calls+=("$1:$3"); }
+apd_register_project_playbooks() {
+  local project_id="$1"
+  shift
+  registered_calls+=("${project_id}:$*")
+}
+apd_stage_satellite_lab_playbooks
+if [ "$APD_SATELLITE_PROJECT_ID" = 29 ] \
+  && [ "${overlay_calls[*]}" = '27:install-satellite-lab.yml 27:setup-satellite-lab.yml 27:register-satellite-lab.yml' ] \
+  && [ "${registered_calls[*]}" = '27:install-satellite-lab.yml 27:setup-satellite-lab.yml register-satellite-lab.yml' ]; then
+  echo "PASS: local Satellite overlays use the retained bootstrap project"
+else
+  echo "FAIL: local Satellite overlays must not depend on the transient upstream project checkout" >&2
+  exit 1
+fi
+unset -f apd_apd_org_id apd_overlay_project_playbook apd_register_project_playbooks
+
+configure_block=$(sed -n '/^apd_configure_satellite_lab_templates()/,/^apd_sync_satellite_lab_inventory()/p' "$satellite_lib")
+if grep -Fq -- '--argjson bootstrap "$APD_PROJECT_ID"' <<<"$configure_block" \
+  && grep -Fq '{project: $bootstrap, execution_environment: $ee, playbook: "setup-satellite-lab.yml"' <<<"$configure_block" \
+  && grep -Fq '{project: $bootstrap, execution_environment: $ee, playbook: "register-satellite-lab.yml"' <<<"$configure_block"; then
+  echo "PASS: local Satellite templates use the retained bootstrap project"
+else
+  echo "FAIL: local Satellite templates must use the retained bootstrap project" >&2
+  exit 1
+fi
+
 AAP_USERNAME="admin"
 AAP_PASSWORD=unused
 AAP_API=https://example.invalid/api/controller/v2

@@ -168,6 +168,12 @@ aap-demo diagnose
 
 Wait until AAP finishes reconciling, then re-run `aap-demo enable product-demos`.
 
+After the base job succeeds, AAP can briefly need to expose the bootstrap
+project, execution environment, and installer credential through that same API.
+Every Product Demos domain addon waits for this propagation before creating a
+template. The default wait is 90 seconds; change it only for diagnosis with
+`APD_RESOURCE_READY_TIMEOUT_SECONDS` and `APD_RESOURCE_READY_DELAY_SECONDS`.
+
 ### Bootstrap project sync does not complete
 
 The addon explicitly starts an SCM update for the bootstrap project, then waits

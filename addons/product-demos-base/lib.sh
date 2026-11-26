@@ -108,6 +108,19 @@ apd_default_bootstrap_project_id() {
       '[.results[] | select(.summary_fields.organization.id == $org)] | .[0].id // empty'
 }
 
+apd_default_inventory_id() {
+  local org_id="${DEFAULT_ORG_ID:-$(apd_default_org_id)}"
+
+  [ -n "$org_id" ] || return 1
+  curl -sk -u "${AAP_USERNAME}:${AAP_PASSWORD}" \
+    "${AAP_API}/inventories/?organization=${org_id}&page_size=200" 2>&1 \
+    | jq -r --argjson org "$org_id" '
+        [.results[] | select((.summary_fields.organization.id // -1) == $org)] as $inventories
+        | (($inventories | map(select(.name == "Demo Inventory"))) + $inventories)
+        | .[0].id // empty
+      '
+}
+
 apd_cleanup_default_org_apd_projects() {
   local org_id="${DEFAULT_ORG_ID:-$(apd_default_org_id)}"
   local project_ids
@@ -202,9 +215,14 @@ apd_ensure_domain_job_template() {
   local ee_id="$3"
   local cred_id="$4"
 
-  local template_name extra_vars template_id encoded_name
+  local template_name extra_vars template_id encoded_name inventory_id
   template_name=$(apd_domain_template_name "$demo")
   extra_vars=$(apd_domain_extra_vars_yaml "$demo")
+  inventory_id="${APD_INVENTORY_ID:-$(apd_default_inventory_id)}"
+  if [ -z "$inventory_id" ]; then
+    echo "❌ ERROR: Cannot resolve an inventory in the Default organization" >&2
+    return 1
+  fi
 
   local template_payload template_result
   template_payload=$(jq -n \
@@ -212,13 +230,14 @@ apd_ensure_domain_job_template() {
     --arg desc "Install Ansible Product Demos ${demo} domain via setup_demo.yml" \
     --arg extra_vars "$extra_vars" \
     --argjson project_id "$project_id" \
+    --argjson inventory_id "$inventory_id" \
     --argjson ee_id "$ee_id" \
     --argjson org_id "${DEFAULT_ORG_ID}" \
     '{
       name: $name,
       description: $desc,
       job_type: "run",
-      inventory: 1,
+      inventory: $inventory_id,
       project: $project_id,
       playbook: "setup_demo.yml",
       ask_variables_on_launch: false,
@@ -373,11 +392,26 @@ EOF
   kubectl create token "$sa" -n "$ns" --duration=1h
 }
 
+apd_default_execution_credential_id() {
+  local org_id="$1"
+  local credential_type_id="$2"
+
+  curl -sk -u "${AAP_USERNAME}:${AAP_PASSWORD}" \
+    "${AAP_API}/credentials/?name=$(jq -rn --arg n 'aap-demo Execution OpenShift' '$n|@uri')" 2>&1 \
+    | jq -r --argjson org "$org_id" --argjson type "$credential_type_id" '
+        [.results[]
+          | select(.summary_fields.organization.id == $org)
+          | select(.summary_fields.credential_type.id == $type)
+          | .id]
+        | .[0] // empty
+      '
+}
+
 apd_reconcile_default_execution_credential() {
   # AAP reads a container group's Kubernetes credential before it creates an
   # execution pod.  Reconcile it immediately before every APD launch because
   # an APD configuration import can replace the credential inputs.
-  local group credential_id credential_type_id org_id create_result patch_result
+  local group credential_id credential_type_id org_id create_result patch_result group_id
 
   apd_discover_openshift_connection || return 1
   group=$(curl -sk -u "${AAP_USERNAME}:${AAP_PASSWORD}" \
@@ -395,25 +429,33 @@ apd_reconcile_default_execution_credential() {
     }
     org_id="${DEFAULT_ORG_ID:-$(apd_default_org_id)}"
     [ -n "$org_id" ] || return 1
-    create_result=$(curl -sk -u "${AAP_USERNAME}:${AAP_PASSWORD}" \
-      -X POST -H "Content-Type: application/json" \
-      -d "$(jq -n \
-        --arg name "aap-demo Execution OpenShift" \
-        --argjson org "$org_id" \
-        --argjson type "$credential_type_id" \
-        --arg host "$OPENSHIFT_API_HOST" --arg token "$OPENSHIFT_BEARER_TOKEN" \
-        '{name: $name, organization: $org, credential_type: $type,
-          inputs: {host: $host, bearer_token: $token, verify_ssl: false}}')" \
-      "${AAP_API}/credentials/" 2>&1) || return 1
-    credential_id=$(printf '%s' "$create_result" | jq -r '.id // empty')
-    [ -n "$credential_id" ] || {
-      echo "❌ ERROR: Could not create the default execution credential" >&2
-      return 1
-    }
+    credential_id=$(apd_default_execution_credential_id "$org_id" "$credential_type_id")
+    if [ -n "$credential_id" ]; then
+      echo "  ✓ Reusing the existing aap-demo execution credential" >&2
+    else
+      create_result=$(curl -sk -u "${AAP_USERNAME}:${AAP_PASSWORD}" \
+        -X POST -H "Content-Type: application/json" \
+        -d "$(jq -n \
+          --arg name "aap-demo Execution OpenShift" \
+          --argjson org "$org_id" \
+          --argjson type "$credential_type_id" \
+          --arg host "$OPENSHIFT_API_HOST" --arg token "$OPENSHIFT_BEARER_TOKEN" \
+          '{name: $name, organization: $org, credential_type: $type,
+            inputs: {host: $host, bearer_token: $token, verify_ssl: false}}')" \
+        "${AAP_API}/credentials/" 2>&1) || return 1
+      credential_id=$(printf '%s' "$create_result" | jq -r '.id // empty')
+      [ -n "$credential_id" ] || {
+        echo "❌ ERROR: Could not create the default execution credential" >&2
+        return 1
+      }
+      echo "  ✓ Created the aap-demo execution credential" >&2
+    fi
+    group_id=$(printf '%s' "$group" | jq -r '.results[0].id // empty')
+    [ -n "$group_id" ] || return 1
     curl -sk -u "${AAP_USERNAME}:${AAP_PASSWORD}" \
       -X PATCH -H "Content-Type: application/json" \
       -d "{\"credential\": ${credential_id}}" \
-      "${AAP_API}/instance_groups/$(printf '%s' "$group" | jq -r '.results[0].id')/" >/dev/null || return 1
+      "${AAP_API}/instance_groups/${group_id}/" >/dev/null || return 1
   fi
 
   patch_result=$(curl -sk -u "${AAP_USERNAME}:${AAP_PASSWORD}" \
@@ -612,10 +654,10 @@ apd_configure_galaxy_credentials() {
   local apd_org_id token cred_name cred_id patch_result
   local -a cred_names=("Automation Hub Certified Content" "Automation Hub Validated Content")
 
-  token=$(aap_demo_vault_get "aap_demo.galaxy.offline_token" 2>/dev/null || true)
+  token=$(aap_demo_vault_get "ah_offline_token" 2>/dev/null || true)
   if [ -z "$token" ] && [ -s "$token_file" ]; then
     token=$(tr -d '[:space:]' <"$token_file")
-    if [ -n "$token" ] && aap_demo_vault_set "aap_demo.galaxy.offline_token" "$token"; then
+    if [ -n "$token" ] && aap_demo_vault_set "ah_offline_token" "$token"; then
       rm -f "$token_file"
     fi
   fi
@@ -688,6 +730,7 @@ apd_resolve_domain_install_ids() {
   fi
   export DEFAULT_ORG_ID
 
+  APD_INVENTORY_ID=$(apd_default_inventory_id)
   APD_PROJECT_ID=$(apd_default_bootstrap_project_id)
   if [ -z "$APD_PROJECT_ID" ]; then
     APD_PROJECT_ID=$(curl -sk -u "${AAP_USERNAME}:${AAP_PASSWORD}" \
@@ -703,13 +746,49 @@ apd_resolve_domain_install_ids() {
     "${AAP_API}/credentials/?name=$(jq -rn --arg n "APD Installer - AAP Admin" '$n|@uri')" 2>&1 \
     | jq -r '.results[0].id // empty')
 
-  if [ -z "$APD_PROJECT_ID" ] || [ -z "$APD_EE_ID" ] || [ -z "$APD_CRED_ID" ]; then
-    echo "❌ ERROR: Missing bootstrap project, execution environment, or installer credential" >&2
-    echo "  project=${APD_PROJECT_ID:-missing} ee=${APD_EE_ID:-missing} credential=${APD_CRED_ID:-missing}" >&2
+  if [ -z "$APD_PROJECT_ID" ] || [ -z "$APD_INVENTORY_ID" ] || [ -z "$APD_EE_ID" ] || [ -z "$APD_CRED_ID" ]; then
+    echo "❌ ERROR: Missing bootstrap project, Default-org inventory, execution environment, or installer credential" >&2
+    echo "  project=${APD_PROJECT_ID:-missing} inventory=${APD_INVENTORY_ID:-missing} ee=${APD_EE_ID:-missing} credential=${APD_CRED_ID:-missing}" >&2
     return 1
   fi
 
-  export APD_PROJECT_ID APD_EE_ID APD_CRED_ID
+  export APD_PROJECT_ID APD_INVENTORY_ID APD_EE_ID APD_CRED_ID
+}
+
+# The base installer is an asynchronous controller job.  A successful job can
+# be visible a few seconds before all of the project, execution environment,
+# and credential API records are returned by the controller.  Do not turn that
+# normal propagation delay into a failed full-demo workflow.
+apd_wait_for_domain_install_ids() {
+  local ee_name="${1:-Product Demos EE}"
+  local timeout="${APD_RESOURCE_READY_TIMEOUT_SECONDS:-90}"
+  local delay="${APD_RESOURCE_READY_DELAY_SECONDS:-3}"
+  local started elapsed
+
+  if ! [[ "$timeout" =~ ^[1-9][0-9]*$ ]] || ! [[ "$delay" =~ ^[1-9][0-9]*$ ]]; then
+    echo "❌ ERROR: APD resource readiness timeout and delay must be positive integers" >&2
+    return 1
+  fi
+
+  started=$(date +%s)
+  while true; do
+    if apd_resolve_domain_install_ids "$ee_name" >/dev/null 2>&1; then
+      echo "✓ Product Demos base resources are ready"
+      return 0
+    fi
+
+    elapsed=$(( $(date +%s) - started ))
+    if [ "$elapsed" -ge "$timeout" ]; then
+      echo "❌ ERROR: Product Demos base resources were not ready after ${timeout}s" >&2
+      # Run once without suppressing output so the user gets the precise
+      # missing record rather than only a timeout message.
+      apd_resolve_domain_install_ids "$ee_name"
+      return 1
+    fi
+
+    echo "  Waiting for Product Demos base resources (${elapsed}s/${timeout}s)..."
+    sleep "$delay"
+  done
 }
 
 apd_install_domain_demo() {
@@ -855,22 +934,30 @@ apd_overlay_project_playbook() {
 
   echo "Overlaying ${dest_name} into bootstrap project (skip version ping)..."
 
-  local project_dir task_pod
-  task_pod=$(apd_find_controller_task_pod || true)
-
-  if [ -z "$task_pod" ]; then
-    echo "  ⚠ Could not find controller task pod; skipping playbook overlay" >&2
-    return 1
-  fi
-
-  project_dir=$(kubectl exec -n "$NAMESPACE" "$task_pod" -- awx-manage shell -c "
+  local project_dir task_pod attempt
+  project_dir=""
+  task_pod=""
+  # A controller task pod can roll immediately after the base import. Retry
+  # discovery rather than making a transient pod handoff look like a missing
+  # project or playbook.
+  for attempt in $(seq 1 5); do
+    task_pod=$(apd_find_controller_task_pod || true)
+    if [ -n "$task_pod" ]; then
+      project_dir=$(kubectl exec -n "$NAMESPACE" "$task_pod" -- awx-manage shell -c "
 from awx.main.models import Project
 p = Project.objects.get(pk=${project_id})
 print(p.get_project_path() or '')
 " 2>/dev/null | grep '^/' | tail -1 | tr -d '\r')
+      [ -n "$project_dir" ] && break
+    fi
+    if [ "$attempt" -lt 5 ]; then
+      echo "  Waiting for controller task pod/project path (${attempt}/4)..." >&2
+      sleep 2
+    fi
+  done
 
   if [ -z "$project_dir" ]; then
-    echo "  ⚠ Could not resolve project directory on task pod ${task_pod}" >&2
+    echo "  ⚠ Could not resolve project directory on controller task pod" >&2
     return 1
   fi
 

@@ -115,7 +115,8 @@ echo ""
 # A first install creates these credentials; reconcile them after installation.
 echo ""
 
-apd_resolve_domain_install_ids || exit 1
+echo "Resolving Product Demos base resources..."
+apd_wait_for_domain_install_ids || exit 1
 if apd_satellite_is_lab; then
   apd_discover_satellite_lab || exit 1
 fi
@@ -135,6 +136,18 @@ if apd_satellite_is_lab; then
   apd_install_satellite_lab || install_rc=$?
 else
   apd_install_domain_demo "$DEMO_CATEGORY" || install_rc=$?
+fi
+
+# The local Satellite overlay creates the managed placeholder credentials.
+# Do not continue to credential wiring if a transient controller task-pod
+# handoff (or any other staging error) prevented that overlay from being
+# installed.  Continuing would only produce the misleading "Credential is
+# missing" message and could leave a partial configuration behind.
+if [ "$SATELLITE_LAB_MODE" = true ] \
+  && [ "${APD_SATELLITE_LAB_PLAYBOOKS_STAGED:-false}" != true ]; then
+  echo "ERROR: Satellite demo playbooks could not be staged in AAP; credentials were not changed." >&2
+  echo "Re-run 'aap-demo enable product-demo-satellite' after the controller task pod is ready." >&2
+  exit 1
 fi
 
 # Wire the credentials now that the install created them.

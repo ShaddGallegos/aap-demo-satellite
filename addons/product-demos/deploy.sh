@@ -76,7 +76,8 @@ if ! command -v jq &>/dev/null; then
 fi
 
 apd_init_aap_connection || exit 1
-apd_resolve_domain_install_ids "$PRODUCT_DEMOS_EE_NAME" || exit 1
+echo "Resolving Product Demos base resources..."
+apd_wait_for_domain_install_ids "$PRODUCT_DEMOS_EE_NAME" || exit 1
 
 echo "Creating per-domain install job templates..."
 FAILED_DOMAINS=()

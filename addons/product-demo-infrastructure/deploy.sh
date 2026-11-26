@@ -34,7 +34,8 @@ fi
 
 command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required" >&2; exit 1; }
 apd_init_aap_connection
-apd_resolve_domain_install_ids "$PRODUCT_DEMOS_EE_NAME"
+echo "Resolving Product Demos base resources..."
+apd_wait_for_domain_install_ids "$PRODUCT_DEMOS_EE_NAME"
 template_id=$(apd_ensure_domain_job_template "$DEMO_CATEGORY" "$APD_PROJECT_ID" "$APD_EE_ID" "$APD_CRED_ID")
 
 echo "✓ Infrastructure demo template imported (ID: ${template_id}): $(apd_domain_template_name "$DEMO_CATEGORY")"

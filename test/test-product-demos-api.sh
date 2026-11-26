@@ -41,6 +41,8 @@ export APD_API_WAIT_DELAY=0
 
 MOCK_ORGS_BODY=""
 MOCK_CONFIG_BODY=""
+MOCK_INVENTORIES_BODY=""
+MOCK_CREDENTIALS_BODY=""
 ORGS_CALLS=0
 
 curl() {
@@ -58,6 +60,12 @@ curl() {
       ;;
     *"/config/"*)
       printf '%s' "$MOCK_CONFIG_BODY"
+      ;;
+    *"/inventories/"*)
+      printf '%s' "$MOCK_INVENTORIES_BODY"
+      ;;
+    *"/credentials/"*)
+      printf '%s' "$MOCK_CREDENTIALS_BODY"
       ;;
     *)
       echo "unexpected curl url: $url" >&2
@@ -80,6 +88,8 @@ fail() {
 }
 
 ORG_JSON='{"count":1,"results":[{"id":1,"name":"Default"}]}'
+INVENTORIES_JSON='{"count":2,"results":[{"id":9,"name":"Other","summary_fields":{"organization":{"id":1}}},{"id":7,"name":"Demo Inventory","summary_fields":{"organization":{"id":1}}}]}'
+EXECUTION_CREDENTIALS_JSON='{"count":2,"results":[{"id":4,"name":"aap-demo Execution OpenShift","summary_fields":{"organization":{"id":1},"credential_type":{"id":3}}},{"id":8,"name":"aap-demo Execution OpenShift","summary_fields":{"organization":{"id":2},"credential_type":{"id":3}}}]}'
 LICENSE_JSON='{"license_info":{"valid_key":true,"license_type":"enterprise"}}'
 NO_LICENSE_JSON='{"license_info":{}}'
 UNLICENSED_JSON='{"license_info":{"valid_key":false,"license_type":"UNLICENSED"}}'
@@ -125,6 +135,79 @@ else
   echo "got: $org_id" >&2
 fi
 
+DEFAULT_ORG_ID=1
+MOCK_INVENTORIES_BODY="$INVENTORIES_JSON"
+inventory_id=$(apd_default_inventory_id)
+if [ "$inventory_id" = "7" ]; then
+  pass "default_inventory_id_is_organization_scoped_and_prefers_demo_inventory"
+else
+  fail "default_inventory_id_is_organization_scoped_and_prefers_demo_inventory"
+  echo "got: $inventory_id" >&2
+fi
+
+if grep -Fq 'inventory: $inventory_id' "$LIB_SH" \
+  && ! grep -Fq 'inventory: 1' "$LIB_SH"; then
+  pass "domain_templates_do_not_assume_inventory_id_one"
+else
+  fail "domain_templates_do_not_assume_inventory_id_one"
+fi
+
+MOCK_CREDENTIALS_BODY="$EXECUTION_CREDENTIALS_JSON"
+execution_credential_id=$(apd_default_execution_credential_id 1 3)
+if [ "$execution_credential_id" = "4" ]; then
+  pass "execution_credential_lookup_reuses_matching_owned_identity"
+else
+  fail "execution_credential_lookup_reuses_matching_owned_identity"
+  echo "got: $execution_credential_id" >&2
+fi
+
+if grep -Fq 'apd_default_execution_credential_id "$org_id" "$credential_type_id"' "$LIB_SH" \
+  && grep -Fq 'Reusing the existing aap-demo execution credential' "$LIB_SH"; then
+  pass "execution_credential_reconciliation_reattaches_before_creating"
+else
+  fail "execution_credential_reconciliation_reattaches_before_creating"
+fi
+
+# The base job can report successful just before all of its controller records
+# become visible.  The hand-off must wait rather than fail the umbrella addon.
+APD_RESOURCE_READY_TIMEOUT_SECONDS=3
+APD_RESOURCE_READY_DELAY_SECONDS=1
+resolve_calls_file=$(mktemp)
+apd_resolve_domain_install_ids() {
+  local calls
+  calls=$(wc -l <"$resolve_calls_file")
+  printf 'x\n' >>"$resolve_calls_file"
+  [ "$calls" -ge 1 ]
+}
+if output=$(apd_wait_for_domain_install_ids "Product Demos EE" 2>&1) \
+  && [ "$(wc -l <"$resolve_calls_file")" -eq 2 ] \
+  && [[ "$output" == *"Waiting for Product Demos base resources"* ]] \
+  && [[ "$output" == *"Product Demos base resources are ready"* ]]; then
+  pass "domain_resource_wait_retries_controller_propagation"
+else
+  fail "domain_resource_wait_retries_controller_propagation"
+  echo "$output" >&2
+fi
+rm -f "$resolve_calls_file"
+
+APD_RESOURCE_READY_TIMEOUT_SECONDS=1
+APD_RESOURCE_READY_DELAY_SECONDS=1
+apd_resolve_domain_install_ids() { return 1; }
+if output=$(apd_wait_for_domain_install_ids "Product Demos EE" 2>&1); then
+  fail "domain_resource_wait_reports_missing_resources_after_timeout"
+  echo "$output" >&2
+else
+  if [[ "$output" == *"were not ready after 1s"* ]]; then
+    pass "domain_resource_wait_reports_missing_resources_after_timeout"
+  else
+    fail "domain_resource_wait_reports_missing_resources_after_timeout"
+    echo "$output" >&2
+  fi
+fi
+
+# Restore the real function for the remaining API helper tests.
+source "$LIB_SH"
+
 MOCK_CONFIG_BODY="$LICENSE_JSON"
 if apd_require_subscription >/dev/null 2>&1; then
   pass "require_subscription_accepts_valid_license"
@@ -166,6 +249,26 @@ else
   fail "deploy_waits_and_requires_subscription"
 fi
 
+domain_deploy_scripts=(
+  "${REPO_ROOT}/addons/product-demos/deploy.sh"
+  "${REPO_ROOT}/addons/product-demo-linux/deploy.sh"
+  "${REPO_ROOT}/addons/product-demo-windows/deploy.sh"
+  "${REPO_ROOT}/addons/product-demo-network/deploy.sh"
+  "${REPO_ROOT}/addons/product-demo-cloud/deploy.sh"
+  "${REPO_ROOT}/addons/product-demo-openshift/deploy.sh"
+  "${REPO_ROOT}/addons/product-demo-satellite/deploy.sh"
+  "${REPO_ROOT}/addons/product-demo-infrastructure/deploy.sh"
+)
+missing_readiness=$(grep -L -F 'apd_wait_for_domain_install_ids' "${domain_deploy_scripts[@]}" || true)
+legacy_resolution=$(grep -l -F 'apd_resolve_domain_install_ids' "${domain_deploy_scripts[@]}" || true)
+if [ -z "$missing_readiness" ] && [ -z "$legacy_resolution" ]; then
+  pass "all_domain_addons_wait_for_base_resource_propagation"
+else
+  fail "all_domain_addons_wait_for_base_resource_propagation"
+  printf 'Missing readiness gate: %s\nLegacy direct resolution: %s\n' \
+    "${missing_readiness:-none}" "${legacy_resolution:-none}" >&2
+fi
+
 if grep -q 'apd_wait_for_controller_api || return 1' "$LIB_SH" \
   && grep -q 'apd_require_subscription || return 1' "$LIB_SH"; then
   pass "init_connection_waits_and_requires_subscription"
@@ -183,6 +286,13 @@ if grep -Fq 'kind: RoleBinding' "$LIB_SH" \
   pass "execution_credential_is_namespaced_short_lived_and_refreshed_before_satellite_job"
 else
   fail "execution_credential_is_namespaced_short_lived_and_refreshed_before_satellite_job"
+fi
+
+if grep -Fq 'for attempt in $(seq 1 5)' "$LIB_SH" \
+  && grep -Fq 'Waiting for controller task pod/project path' "$LIB_SH"; then
+  pass "overlay_retries_controller_task_pod_handoff"
+else
+  fail "overlay_retries_controller_task_pod_handoff"
 fi
 
 saved_home="${HOME:-}"

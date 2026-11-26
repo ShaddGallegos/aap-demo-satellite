@@ -108,7 +108,8 @@ apd_init_aap_connection || exit 1
 echo "✓ AAP credentials retrieved"
 echo ""
 
-apd_resolve_domain_install_ids || exit 1
+echo "Resolving Product Demos base resources..."
+apd_wait_for_domain_install_ids || exit 1
 
 echo "Installing $DEMO_CATEGORY demo resources via AAP job template..."
 echo "This may take a few minutes..."
