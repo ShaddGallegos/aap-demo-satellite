@@ -149,6 +149,11 @@ if [ "$SATELLITE_LAB_MODE" = true ] \
   echo "Re-run 'aap-demo enable product-demo-satellite' after the controller task pod is ready." >&2
   exit 1
 fi
+if [ "$SATELLITE_LAB_MODE" = true ] && [ "$install_rc" -ne 0 ]; then
+  echo "ERROR: Satellite demo resource installation failed; credentials were not changed." >&2
+  echo "Fix the installer job and re-run 'aap-demo enable product-demo-satellite'." >&2
+  exit 1
+fi
 
 # Wire the credentials now that the install created them.
 if ! apd_wire_satellite_credentials; then

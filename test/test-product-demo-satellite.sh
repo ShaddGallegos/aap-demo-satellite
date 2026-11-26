@@ -11,6 +11,16 @@ for variable in controller_credentials controller_inventories controller_invento
     exit 1
   fi
 done
+for variable in credentials inventories inventory_sources workflows; do
+  if ! grep -Fq "satellite_lab_controller_${variable}" "$install_playbook"; then
+    echo "FAIL: local Satellite installer does not snapshot controller_${variable}" >&2
+    exit 1
+  fi
+done
+if grep -Eq '^[[:space:]]*controller_credentials: "\{\{ controller_credentials \| default\(\[\]\) \}\}"' "$install_playbook"; then
+  echo "FAIL: local Satellite installer recursively templates controller credentials" >&2
+  exit 1
+fi
 if ! grep -Fq 'controller_inventory_source_update' "$install_playbook"; then
   echo "FAIL: local Satellite installer can sync placeholder credentials" >&2
   exit 1
@@ -21,10 +31,10 @@ satellite_lib="$REPO_ROOT/addons/product-demo-satellite/lib.sh"
 satellite_deploy="$REPO_ROOT/addons/product-demo-satellite/deploy.sh"
 if grep -Fq 'APD_SATELLITE_LAB_PLAYBOOKS_STAGED=false' "$satellite_lib" \
   && grep -Fq 'APD_SATELLITE_LAB_PLAYBOOKS_STAGED=true' "$satellite_lib" \
-  && grep -Fq 'credentials were not changed' "$satellite_deploy"; then
-  echo "PASS: staging failures stop before Satellite credential wiring"
+  && [ "$(grep -Fc 'credentials were not changed' "$satellite_deploy")" -ge 2 ]; then
+  echo "PASS: staging and installer failures stop before Satellite credential wiring"
 else
-  echo "FAIL: staging failures must stop before Satellite credential wiring" >&2
+  echo "FAIL: staging and installer failures must stop before Satellite credential wiring" >&2
   exit 1
 fi
 
