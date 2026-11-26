@@ -221,6 +221,8 @@ Examples
     aap-demo enable ollama                # Add the local language-model service
     aap-demo enable eda                   # Add Event-Driven Ansible; no event source/activation
     aap-demo enable ao                    # Add Automation Orchestrator
+    aap-demo enable openshift-delivery    # Optional GitOps and Pipelines operators
+    aap-demo enable openshift-security    # Optional RHACS Operator prerequisite only
     LIGHTWELL_APP_NODE=4 aap-demo enable lightwell --prepare
                                          # Prepare Lightwell resources for dedicated Fleet node 4
     aap-demo enable product-demos         # Install the non-Satellite demo content

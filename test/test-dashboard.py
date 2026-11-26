@@ -491,6 +491,17 @@ class DashboardUnitTests(unittest.TestCase):
         inventory["pods"].pop()
         self.assertEqual(dashboard.addon_state(self.addons["openshift-delivery"], inventory), "degraded")
 
+    def test_security_health_requires_rhacs_operator(self) -> None:
+        inventory = fixture_inventory()
+        inventory["addons"].append("openshift-security")
+        inventory["pods"].append({
+            "namespace": "rhacs-operator", "name": "rhacs-operator-controller-manager-abc",
+            "phase": "Running", "ready_containers": 1, "total_containers": 1,
+        })
+        self.assertEqual(dashboard.addon_state(self.addons["openshift-security"], inventory), "running")
+        inventory["pods"][-1]["phase"] = "Pending"
+        self.assertEqual(dashboard.addon_state(self.addons["openshift-security"], inventory), "degraded")
+
     def test_operation_output_redacts_credentials(self) -> None:
         output = (
             "\x1b[0;31mAuthorization: Bearer secret-token\x1b[0m\n"

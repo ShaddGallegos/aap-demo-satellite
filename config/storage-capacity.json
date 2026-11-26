@@ -121,6 +121,11 @@
       "vm_gib": 14,
       "host_gib": 0,
       "description": "OpenShift GitOps and Pipelines operators, their controllers, images, and logs. Customer workloads and source repositories are not included."
+    },
+    "openshift-security": {
+      "vm_gib": 4,
+      "host_gib": 0,
+      "description": "RHACS Operator images and logs only. RHACS Central, SecuredCluster services, database storage, scan data, and customer telemetry are deliberately not included."
     }
   }
 }

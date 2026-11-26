@@ -122,6 +122,20 @@ aap-demo enable openshift-delivery
 See [OpenShift delivery proof of concept](../openshift-delivery.md) for its
 catalog prerequisites, ownership boundary, and safe removal behavior.
 
+## OpenShift security proof of concept
+
+The optional security scenario installs only an aap-demo-owned RHACS Operator
+subscription. It creates no Central, SecuredCluster, init bundle, policy, scan,
+credential, or workload:
+
+```bash
+aap-demo enable openshift-security
+```
+
+See [OpenShift security proof of concept](../openshift-security.md) for the
+catalog prerequisites, ownership boundary, and the deliberate RHACS follow-up
+steps.
+
 ## Automation Hub content synchronization
 
 `aap-demo enable setup-pah` reads the separate Automation Hub offline token from

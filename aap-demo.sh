@@ -408,7 +408,7 @@ for arg in "$@"; do
       # Subcommand args for fleet command
       EXTRA_ARGS+=("$arg")
       ;;
-    fleet | mcp-server | portal | portal-operator | setup-pah | ao | ao-eap | ao-pr-testing | apme-eap | local-cache | eda | product-demos-base | product-demos | product-demo-linux | product-demo-windows | product-demo-network | product-demo-cloud | product-demo-openshift | product-demo-satellite | product-demo-infrastructure | product-demo-eda | opa | ollama | keycloak | satellite-manifest | openshift-delivery | lightspeed | lightwell | gitea | gittea)
+    fleet | mcp-server | portal | portal-operator | setup-pah | ao | ao-eap | ao-pr-testing | apme-eap | local-cache | eda | product-demos-base | product-demos | product-demo-linux | product-demo-windows | product-demo-network | product-demo-cloud | product-demo-openshift | product-demo-satellite | product-demo-infrastructure | product-demo-eda | opa | ollama | keycloak | satellite-manifest | openshift-delivery | openshift-security | lightspeed | lightwell | gitea | gittea)
       # Addon names for enable/disable commands
       EXTRA_ARGS+=("$arg")
       ;;
@@ -880,6 +880,9 @@ _help_addon_summary() {
       ;;
     openshift-delivery)
       printf '%s\n' "Optional OpenShift GitOps and Pipelines operators (no workloads created)"
+      ;;
+    openshift-security)
+      printf '%s\n' "Optional RHACS Operator prerequisite (no Central or cluster monitoring created)"
       ;;
     lightspeed)
       printf '%s\n' "Ansible Lightspeed assistant backed by the local Ollama LLM"
@@ -3433,7 +3436,7 @@ cmd_fleet() {
 # ---------------------------------------------------------------------------
 # product-demos installs all APD domains (runs product-demos-base automatically).
 # product-demos-base and individual domain addons are hidden from status; enable directly if needed.
-AVAILABLE_ADDONS="fleet gitea mcp-server portal portal-operator setup-pah ao ao-pr-testing apme-eap local-cache eda product-demos product-demo-satellite product-demo-infrastructure product-demo-eda opa ollama keycloak satellite-manifest openshift-delivery lightspeed lightwell"
+AVAILABLE_ADDONS="fleet gitea mcp-server portal portal-operator setup-pah ao ao-pr-testing apme-eap local-cache eda product-demos product-demo-satellite product-demo-infrastructure product-demo-eda opa ollama keycloak satellite-manifest openshift-delivery openshift-security lightspeed lightwell"
 
 _normalize_addon_name() {
   case "$1" in
@@ -3584,6 +3587,7 @@ _addon_resource_preflight() {
     lightspeed) aap_demo_resource_preflight "Ansible Lightspeed" 700 7168 ;;
     portal-operator) aap_demo_resource_preflight "Automation Portal Operator" 1600 2048 ;;
     openshift-delivery) aap_demo_resource_preflight "OpenShift delivery operators" 1800 4096 ;;
+    openshift-security) aap_demo_resource_preflight "RHACS Operator prerequisite" 500 2048 ;;
     portal) aap_demo_resource_preflight "Automation Portal" 500 1024 ;;
     apme-eap) aap_demo_resource_preflight "APME" 500 1024 ;;
     *) return 0 ;;

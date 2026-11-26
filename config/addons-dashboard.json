@@ -269,6 +269,19 @@
      {"namespace": "openshift-pipelines", "prefix": "tekton-"}
     ]
    }
+  },
+  {
+   "id": "openshift-security",
+   "name": "OpenShift Security Proof of Concept",
+   "category": "Cloud-native security",
+   "description": "Optionally install the owned Red Hat Advanced Cluster Security Operator subscription. It discovers a supported catalog channel and creates no Central, SecuredCluster, init bundle, policy, scan, credential, integration, or customer workload.",
+   "dependencies": [],
+   "availability": "Requires OLM and a reachable Red Hat operator CatalogSource; reserves about 2 GiB RAM and 4 GiB VM storage.",
+   "health": {
+    "type": "pod-prefix",
+    "namespace": "rhacs-operator",
+    "prefix": "rhacs-operator"
+   }
   }
  ]
 }

@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "name": "openshift-security",
+  "summary": "Installs an owned RHACS Operator subscription as an optional security proof-of-concept prerequisite.",
+  "lifecycle": {
+    "enable": "deploy.sh",
+    "disable": "deploy.sh --delete",
+    "idempotency": "Reuses only the operator namespace, OperatorGroup, and Subscription marked as owned by aap-demo; the operator channel is discovered from the configured catalog.",
+    "failure_boundary": "The addon stops before applying resources when OLM, the configured CatalogSource, package metadata, or ownership checks are unavailable."
+  },
+  "dependencies": {
+    "addons": [],
+    "services": ["Kubernetes API", "OLM", "Red Hat operator CatalogSource"]
+  },
+  "inputs": [
+    {"name": "RHACS_CATALOG_SOURCE", "source": "environment:RHACS_CATALOG_SOURCE", "required": false, "secret": false},
+    {"name": "RHACS_CATALOG_NAMESPACE", "source": "environment:RHACS_CATALOG_NAMESPACE", "required": false, "secret": false},
+    {"name": "RHACS_OPERATOR_NAMESPACE", "source": "environment:RHACS_OPERATOR_NAMESPACE", "required": false, "secret": false},
+    {"name": "RHACS_WAIT_SECONDS", "source": "environment:RHACS_WAIT_SECONDS", "required": false, "secret": false}
+  ],
+  "resources": {
+    "namespaces": ["rhacs-operator"],
+    "operator_groups": ["aap-demo-rhacs-operator"],
+    "subscriptions": ["aap-demo-rhacs-operator"]
+  },
+  "readiness": [
+    "The managed RHACS subscription reports a Succeeded installed CSV.",
+    "The configured CatalogSource exposes a default channel for rhacs-operator."
+  ],
+  "security": {
+    "secret_storage": "The scenario accepts no passwords, tokens, init bundles, pull secrets, or credentials.",
+    "network_trust": "Catalog access follows the cluster's configured registry and CatalogSource trust policy.",
+    "external_actions": "No Central, SecuredCluster, init bundle, policy, scan, integration, customer credential, or workload is created automatically."
+  }
+}
