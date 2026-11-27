@@ -29,6 +29,9 @@ still run with [the older command](../guides/older-command.md).
 | `diagnose` | Print a health report: CRC on the host (the `crc` binary, its daemon, the VM's SSH forward), then the cluster. |
 | `steward scan` | Run approved read-only health checks, store redacted local evidence, and write an ignored `FIX_TRACKING.md`. It does not use AI, MCP, repair, scheduling, or vendor APIs. |
 | `support-bundle preview` / `support-bundle create --output DIR` | Preview or create owner-only, offline-scanned redacted diagnostic evidence. It excludes credentials and never uploads. |
+| `cloud requirements PROVIDER` | Print the private-network, identity, node, and approval requirements for AWS, Azure, GCP, or VMware. It is local-only. |
+| `cloud profile init PROVIDER FILE` / `cloud profile validate FILE` | Create or validate a non-secret planning profile. These commands never authenticate to a provider or create resources. |
+| `cloud plan FILE` | Confirm that a profile is complete for a future review. It has no apply mode and does not incur provider cost. |
 | `reports generate` / `reports send` | Generate a styled weekly HTML/text report, or additionally capture it as a local `.eml` message. Neither sends network email. |
 | `repair` | Fix the usual breakage after the laptop sleeps. |
 | `must-gather` | Collect logs into a folder. An optional path picks the folder. |

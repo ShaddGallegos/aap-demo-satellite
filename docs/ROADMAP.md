@@ -13,8 +13,9 @@ every task. Existing capabilities may already satisfy parts of a task; inspect
 the current checkout before proposing changes. Do not treat this document as a
 verified inventory of missing features.
 
-Cloud and VMware work remains **deferred; not started**. Editing this roadmap does
-not authorize infrastructure changes, provider spending, or scheduled actions.
+Cloud and VMware provisioning remains **deferred**. The local-only profile
+contract is implemented, but it does not authorize infrastructure changes,
+provider spending, scheduled actions, or a claim that a provider is qualified.
 
 ## 1. Copy-and-use prompt
 
@@ -293,7 +294,7 @@ a task is selected.
 | RM-05C | Next | Credible demos with verified operational controls | RM-04C/D/E evidence; existing operation boundary |
 | RM-06 | Later | Tested host/platform parity | RM-02 declarations and RM-04 evidence |
 | RM-07 | Later | Verifiable releases and dependency hygiene | Existing contribution/release rules |
-| RM-08 | Deferred | Cloud/VMware provisioning and operations | Reviewed contracts and provider scope |
+| RM-08 | Foundation only | Cloud/VMware provisioning and operations | Reviewed contracts and provider scope |
 | RM-09 | Partial | Strict test isolation and failure injection | None |
 | RM-10 | Partial | Credential recovery and private support bundles | Existing Vault and diagnostics helpers |
 | RM-11 | Next | Scoped platform firewall, SELinux and access safeguards | Enabled-component inventory; RM-09 isolation |
@@ -766,8 +767,13 @@ upgrade notes. Do not bump package versions or publish for unrelated roadmap wor
 
 ### RM-08: Cloud and VMware environments
 
-**Status:** Deferred; not started. Select one subtask and one provider for a future
-implementation slice; do not implement every provider simultaneously.
+**Status:** Foundation implemented; provisioning deferred. `aap-demo cloud`
+creates and validates versioned, local-only planning profiles for AWS, Azure,
+GCP, and VMware. They require ownership, private-network, topology, identity
+reference, and charge-approval inputs while rejecting plaintext secret-like
+fields. No provider API calls, discovery, credentials, resources, schedules, or
+costs are created. Select one subtask and one provider for a future implementation
+slice; do not implement every provider simultaneously.
 
 **Prerequisites:** Relevant addon/state/lifecycle contracts; RM-09 isolation; reviewed
 provider/runtime support and licensing constraints; explicit infrastructure scope.

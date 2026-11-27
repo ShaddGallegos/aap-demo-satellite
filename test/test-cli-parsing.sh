@@ -77,6 +77,15 @@ fi
 
 echo "PASS: support-bundle create accepts an explicit output path"
 
+if ! output=$(HOME="$test_home" QUIET=true "$AAP_DEMO_SH" cloud help 2>&1) \
+  || ! grep -Fq 'All cloud commands are local-only planning operations' <<<"$output"; then
+  echo "FAIL: cloud help should be a local command"
+  echo "$output"
+  exit 1
+fi
+
+echo "PASS: cloud planning help is a local command"
+
 if output=$(HOME="$test_home" QUIET=true "$AAP_DEMO_SH" fleet auth status 2>&1); then
   echo "FAIL: unconfigured fleet auth status unexpectedly succeeded"
   exit 1
@@ -133,7 +142,7 @@ fi
 echo "PASS: structured-output options are validated"
 
 help_output=$(QUIET=true "$AAP_DEMO_SH" --help)
-for command in deploy status watch clean redeploy redeploy-all idle preflight diagnose steward reports support-bundle \
+for command in deploy status watch clean redeploy redeploy-all idle preflight diagnose steward reports support-bundle cloud \
   must-gather wire config redhat-status update version help create destroy stop start \
   repair setup ssh kubeconfig system-info dashboard maintenance; do
   if ! grep -Eq "^[[:space:]]+${command}([[:space:]|]|\$)" <<<"$help_output"; then

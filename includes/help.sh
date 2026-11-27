@@ -70,6 +70,7 @@ Addons
 Other
   config            Configure aap-demo settings
   credentials       Manage the optional offline-token keepalive
+  cloud             Plan a private AWS, Azure, GCP, or VMware environment
   update            Pull latest code and reinstall
   v2 [args...]      Run the Python v2 CLI (for example: aap-demo v2 deploy)
   version           Show version and build timestamp
@@ -135,6 +136,11 @@ Notes
   support-bundle [preview|create] [--output DIRECTORY]
                       Preview or create an offline-scanned, owner-only redacted bundle.
                       It excludes Vault data, kubeconfig, keys, raw logs, and uploads.
+  cloud requirements PROVIDER
+  cloud profile init PROVIDER FILE [--force]
+  cloud profile validate FILE | cloud plan FILE
+                      Create or validate a local-only AWS, Azure, GCP, or VMware
+                      planning profile. It never contacts a provider or creates resources.
   dashboard [--no-open]
                       Start the localhost dashboard without opening a browser
   console [--no-open] Show the console URL without opening a browser

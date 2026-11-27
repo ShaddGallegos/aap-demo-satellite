@@ -35,6 +35,7 @@ entry is not an error until its feature is enabled.
 | Satellite lab | `aap_demo.satellite.admin_password`, `aap_demo.satellite.root_password`, `aap_demo.satellite.provisioning_root_password` |
 | Automation Orchestrator | `aap_demo.ao.initial_admin_password` |
 | Optional GitHub integration | `aap_demo.github.token` |
+| Future cloud adapters | Reserved `aap_demo.cloud.<provider>.*` namespace; no cloud secret is collected by the current planning command |
 
 `aap_demo.cluster.*` and `aap_demo.project.name` are retained metadata, not
 credentials. The Vault may also contain entries belonging to another tool; the

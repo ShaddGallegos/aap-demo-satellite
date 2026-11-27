@@ -61,6 +61,8 @@ source "${SCRIPT_DIR}/includes/steward.sh"
 source "${SCRIPT_DIR}/includes/reports.sh"
 # shellcheck source=includes/support-bundle.sh
 source "${SCRIPT_DIR}/includes/support-bundle.sh"
+# shellcheck source=includes/cloud-profile.sh
+source "${SCRIPT_DIR}/includes/cloud-profile.sh"
 # shellcheck source=includes/help.sh
 source "${SCRIPT_DIR}/includes/help.sh"
 # shellcheck source=includes/cmd-fleet.sh
@@ -343,7 +345,7 @@ for arg in "$@"; do
         COMMAND="$arg"
       fi
       ;;
-    deploy | deploy-all | repair | trust-ca | clean | maintenance | credentials | stop | restart | service | setup | storage | watch | update | config | redeploy | redeploy-all | redhat-status | rh-status | kubeconfig | idle | preflight | diagnose | check-integrations | steward | reports | support-bundle | must-gather | enable | disable | wire | system-info | dashboard | console | keycloak | gpu | v2 | version | help | --help | -h | --version | -V)
+    deploy | deploy-all | repair | trust-ca | clean | maintenance | credentials | stop | restart | service | setup | storage | watch | update | config | redeploy | redeploy-all | redhat-status | rh-status | kubeconfig | idle | preflight | diagnose | check-integrations | steward | reports | support-bundle | cloud | must-gather | enable | disable | wire | system-info | dashboard | console | keycloak | gpu | v2 | version | help | --help | -h | --version | -V)
       if [ "$COMMAND" = "gpu" ]; then
         EXTRA_ARGS+=("$arg")
       elif [ "$COMMAND" = "credentials" ]; then
@@ -359,14 +361,14 @@ for arg in "$@"; do
             if [ -z "$COMMAND" ]; then COMMAND="keycloak"; else EXTRA_ARGS+=("$arg"); fi
             ;;
           --help | -h)
-            if [ "$COMMAND" = "enable" ] || [ "$COMMAND" = "steward" ] || [ "$COMMAND" = "reports" ] || [ "$COMMAND" = "support-bundle" ]; then
+            if [ "$COMMAND" = "enable" ] || [ "$COMMAND" = "steward" ] || [ "$COMMAND" = "reports" ] || [ "$COMMAND" = "support-bundle" ] || [ "$COMMAND" = "cloud" ]; then
               EXTRA_ARGS+=("$arg")
             else
               COMMAND="help"
             fi
             ;;
           help)
-            if [ "$COMMAND" = "steward" ] || [ "$COMMAND" = "reports" ] || [ "$COMMAND" = "support-bundle" ]; then
+            if [ "$COMMAND" = "steward" ] || [ "$COMMAND" = "reports" ] || [ "$COMMAND" = "support-bundle" ] || [ "$COMMAND" = "cloud" ]; then
               EXTRA_ARGS+=("$arg")
             else
               COMMAND="help"
@@ -448,7 +450,7 @@ for arg in "$@"; do
       if [ "$COMMAND" = "must-gather" ] || [ "$COMMAND" = "clean" ] \
         || [ "$COMMAND" = "fleet" ] || [ "$COMMAND" = "maintenance" ] \
         || [ "$COMMAND" = "credentials" ] || [ "$COMMAND" = "keycloak" ] \
-        || [ "$COMMAND" = "storage" ] || [ "$COMMAND" = "steward" ] || [ "$COMMAND" = "reports" ] || [ "$COMMAND" = "support-bundle" ]; then
+        || [ "$COMMAND" = "storage" ] || [ "$COMMAND" = "steward" ] || [ "$COMMAND" = "reports" ] || [ "$COMMAND" = "support-bundle" ] || [ "$COMMAND" = "cloud" ]; then
         EXTRA_ARGS+=("$arg")
       elif [ -n "$COMMAND" ]; then
         echo "Unknown argument for '$COMMAND': $arg"
@@ -3978,7 +3980,7 @@ if aap_demo_command_requires_lock "$COMMAND" \
 fi
 
 case "$COMMAND" in
-  help | --help | -h | config | update | version | v2 | "" | destroy | status | storage | system-info | dashboard | console | service | credentials | gpu)
+  help | --help | -h | config | update | version | v2 | "" | destroy | status | storage | system-info | dashboard | console | service | credentials | cloud | gpu)
     # These commands don't need cluster access
     ;;
   enable)
@@ -4158,6 +4160,9 @@ case "$COMMAND" in
     ;;
   support-bundle)
     cmd_support_bundle "${EXTRA_ARGS[@]}" || exit $?
+    ;;
+  cloud)
+    cmd_cloud "${EXTRA_ARGS[@]}" || exit $?
     ;;
   must-gather)
     cmd_must_gather "${EXTRA_ARGS[0]:-}"

@@ -45,6 +45,8 @@ The [project home page](../README.md) is the short start. These pages are the re
   and safe configuration paths.
 - [Private support bundles](support-bundles.md) - Offline-scanned, redacted
   diagnostic evidence with no automatic upload.
+- [Cloud and VMware planning profiles](cloud-provider-profiles.md) - Local-only
+  readiness profiles for AWS, Azure, GCP, and vSphere; no provider actions.
 - [Lightwell CI/CD simulation](../addons/lightwell/README.md) -
   Prepared-service integration, human approvals, and dashboard links.
 - [Local Gitea VM](../addons/gitea/README.md) -
