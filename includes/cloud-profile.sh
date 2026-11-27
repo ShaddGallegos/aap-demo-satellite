@@ -16,10 +16,10 @@ Usage:
 
 Providers: aws, azure, gcp, vmware
 
-Profile and plan commands are local-only. AWS and GCP preflight make only
-documented read-only CLI calls when you explicitly invoke them; no cloud command
-creates resources or incurs charges. A profile stores identity references, never
-credential values.
+Profile and plan commands are local-only. AWS, GCP, and Azure preflight make
+only documented read-only CLI calls when you explicitly invoke them; no cloud
+command creates resources or incurs charges. A profile stores identity
+references, never credential values.
 EOF
 }
 
@@ -448,6 +448,140 @@ _aap_demo_cloud_gcp_preflight() {
   printf 'PASS: GCP read-only preflight completed; no GCP resource was changed.\n'
 }
 
+_aap_demo_cloud_azure_call() {
+  local az_cli="$1" subscription="$2"
+  shift 2
+  local -a command=("$az_cli" "$@" --subscription "$subscription" --output json --only-show-errors)
+  "${command[@]}" 2>/dev/null
+}
+
+_aap_demo_cloud_azure_preflight() {
+  local file="$1" az_cli subscription tenant resource_group region vnet_name nsg_name identity_name dns_zone
+  local account_json group_json vnet_json nsg_json dns_json dns_links identity_json subnet_json subnet nsg_id
+  local -a subnet_names
+
+  _aap_demo_cloud_validate "$file" || return 1
+  [ "$(jq -r '.provider' "$file")" = azure ] || {
+    _err "Azure preflight requires an azure profile; this profile targets $(jq -r '.provider' "$file")"
+    return 2
+  }
+  az_cli="${AAP_DEMO_AZ_CLI:-az}"
+  command -v "$az_cli" >/dev/null 2>&1 || {
+    _err "Azure CLI is required for Azure preflight; install/authenticate it, then retry"
+    return 1
+  }
+  subscription=$(jq -r '.provider_config.subscription_id' "$file")
+  tenant=$(jq -r '.provider_config.tenant_id' "$file")
+  resource_group=$(jq -r '.provider_config.resource_group' "$file")
+  region=$(jq -r '.location.region' "$file")
+  vnet_name=$(jq -r '.provider_config.vnet_name' "$file")
+  nsg_name=$(jq -r '.provider_config.network_security_group' "$file")
+  identity_name=$(jq -r '.provider_config.managed_identity' "$file")
+  dns_zone=$(jq -r '.network.private_dns_zone' "$file")
+  mapfile -t subnet_names < <(jq -r '.provider_config.subnet_names[]' "$file")
+
+  printf 'Azure read-only preflight: %s\n' "$file"
+  account_json=$(_aap_demo_cloud_azure_call "$az_cli" "$subscription" account show) || {
+    _err "Azure account lookup failed; authenticate with az login and select the configured subscription"
+    return 1
+  }
+  if ! jq -e --arg subscription "$subscription" --arg tenant "$tenant" '
+      .id == $subscription and .tenantId == $tenant and .state == "Enabled"
+    ' <<<"$account_json" >/dev/null; then
+    _err "Azure signed-in tenant, subscription, or subscription state does not match the profile"
+    return 1
+  fi
+  printf '  PASS: signed-in Azure tenant and subscription match the profile\n'
+
+  group_json=$(_aap_demo_cloud_azure_call "$az_cli" "$subscription" group show --name "$resource_group") || {
+    _err "Azure resource-group lookup failed"
+    return 1
+  }
+  if ! jq -e --arg group "$resource_group" '.name | ascii_downcase == ($group | ascii_downcase)' <<<"$group_json" >/dev/null; then
+    _err "Configured Azure resource group is missing"
+    return 1
+  fi
+  printf '  PASS: configured resource group exists\n'
+
+  vnet_json=$(_aap_demo_cloud_azure_call "$az_cli" "$subscription" network vnet show --resource-group "$resource_group" --name "$vnet_name") || {
+    _err "Azure VNet lookup failed"
+    return 1
+  }
+  if ! jq -e --arg vnet "$vnet_name" --arg region "$region" '
+      (.name | ascii_downcase) == ($vnet | ascii_downcase) and (.location | ascii_downcase) == ($region | ascii_downcase)
+    ' <<<"$vnet_json" >/dev/null; then
+    _err "Configured Azure VNet is missing or in a different region"
+    return 1
+  fi
+  printf '  PASS: configured VNet exists in the selected region\n'
+
+  nsg_json=$(_aap_demo_cloud_azure_call "$az_cli" "$subscription" network nsg show --resource-group "$resource_group" --name "$nsg_name") || {
+    _err "Azure network-security-group lookup failed"
+    return 1
+  }
+  nsg_id=$(jq -r '.id // empty' <<<"$nsg_json")
+  if [ -z "$nsg_id" ]; then
+    _err "Configured Azure network security group is missing"
+    return 1
+  fi
+  if ! jq -e '
+      [.securityRules[]? | select(.direction == "Inbound" and .access == "Allow") |
+       (.sourceAddressPrefix, .sourceAddressPrefixes[]?) |
+       select(. == "*" or . == "Internet" or . == "0.0.0.0/0" or . == "::/0")
+      ] | length == 0
+    ' <<<"$nsg_json" >/dev/null; then
+    _err "Azure NSG allows public inbound traffic; remove or narrow that custom rule before apply"
+    return 1
+  fi
+  printf '  PASS: configured NSG has no custom public inbound allow rule\n'
+
+  for subnet in "${subnet_names[@]}"; do
+    subnet_json=$(_aap_demo_cloud_azure_call "$az_cli" "$subscription" network vnet subnet show --resource-group "$resource_group" --vnet-name "$vnet_name" --name "$subnet") || {
+      _err "Azure subnet lookup failed for $subnet"
+      return 1
+    }
+    if ! jq -e --arg subnet "$subnet" --arg nsg_id "$nsg_id" '
+        (.name | ascii_downcase) == ($subnet | ascii_downcase) and
+        ((.networkSecurityGroup.id // "") | ascii_downcase) == ($nsg_id | ascii_downcase)
+      ' <<<"$subnet_json" >/dev/null; then
+      _err "Configured subnet $subnet is missing or is not associated with the selected NSG"
+      return 1
+    fi
+  done
+  printf '  PASS: configured subnets exist and are associated with the selected NSG\n'
+
+  dns_json=$(_aap_demo_cloud_azure_call "$az_cli" "$subscription" network private-dns zone show --resource-group "$resource_group" --name "$dns_zone") || {
+    _err "Azure private-DNS-zone lookup failed"
+    return 1
+  }
+  if ! jq -e --arg zone "$dns_zone" '.name == $zone' <<<"$dns_json" >/dev/null; then
+    _err "Configured Azure private DNS zone is missing"
+    return 1
+  fi
+  dns_links=$(_aap_demo_cloud_azure_call "$az_cli" "$subscription" network private-dns link vnet list --resource-group "$resource_group" --zone-name "$dns_zone") || {
+    _err "Azure private-DNS VNet-link lookup failed"
+    return 1
+  }
+  if ! jq -e --arg vnet "$vnet_name" '
+      any(.[]?; (.virtualNetwork.id // "") | ascii_downcase | endswith("/virtualnetworks/" + ($vnet | ascii_downcase)))
+    ' <<<"$dns_links" >/dev/null; then
+    _err "Configured Azure private DNS zone is not linked to the selected VNet"
+    return 1
+  fi
+  printf '  PASS: private DNS zone exists and is linked to the selected VNet\n'
+
+  identity_json=$(_aap_demo_cloud_azure_call "$az_cli" "$subscription" identity show --resource-group "$resource_group" --name "$identity_name") || {
+    _err "Azure user-assigned managed-identity lookup failed"
+    return 1
+  }
+  if ! jq -e --arg identity "$identity_name" '.name == $identity and .type == "UserAssigned" and (.principalId | type == "string" and length > 0)' <<<"$identity_json" >/dev/null; then
+    _err "Configured Azure user-assigned managed identity is missing or unusable"
+    return 1
+  fi
+  printf '  PASS: configured user-assigned managed identity exists\n'
+  printf 'PASS: Azure read-only preflight completed; no Azure resource was changed.\n'
+}
+
 _aap_demo_cloud_preflight() {
   local file="${1:-}" aws_profile="${AWS_PROFILE:-}" gcloud_configuration="${CLOUDSDK_ACTIVE_CONFIG_NAME:-}" argument provider
   shift || true
@@ -479,7 +613,8 @@ _aap_demo_cloud_preflight() {
   case "$provider" in
     aws) _aap_demo_cloud_aws_preflight "$file" "$aws_profile" ;;
     gcp) _aap_demo_cloud_gcp_preflight "$file" "$gcloud_configuration" ;;
-    *) _err "Read-only preflight is currently implemented only for AWS and GCP"; return 2 ;;
+    azure) _aap_demo_cloud_azure_preflight "$file" ;;
+    *) _err "Read-only preflight is currently implemented only for AWS, GCP, and Azure"; return 2 ;;
   esac
 }
 

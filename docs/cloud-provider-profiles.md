@@ -28,6 +28,8 @@ aap-demo cloud plan ~/.config/aap-demo/cloud/customer-lab.json
 aap-demo cloud preflight ~/.config/aap-demo/cloud/customer-lab.json --aws-profile customer-sso
 # Optional: query an approved GCP project with read-only permissions.
 aap-demo cloud preflight ~/.config/aap-demo/cloud/customer-gcp.json --gcloud-configuration customer-sso
+# Optional: query an approved Azure subscription with read-only permissions.
+aap-demo cloud preflight ~/.config/aap-demo/cloud/customer-azure.json
 ```
 
 `init` creates the file mode `0600`. It deliberately contains `REPLACE_ME`
@@ -141,6 +143,43 @@ firewall rules, and service account. It uses the selected local gcloud
 configuration (or `--gcloud-configuration NAME`) and does not collect a
 service-account key or write a GCP credential into the Vault.
 
+## Azure read-only preflight topology
+
+```mermaid
+flowchart TB
+  Operator["Named operator\nEntra federation or az login"]
+  Profile["Mode 0600 Azure profile\nnon-secret references only"]
+  CLI["aap-demo cloud preflight"]
+  Subscription["Enabled subscription\nand matching tenant"]
+
+  subgraph VNet["Customer-owned VNet"]
+    NSG["Subnet-attached NSG\nno custom public inbound allow"]
+    DNS["Private DNS zone\nlinked to the VNet"]
+    subgraph Private["AAP, Fleet, and optional Satellite subnets"]
+      AAP["AAP node"]
+      Fleet["Fleet nodes ×3"]
+      Satellite["Optional Satellite node"]
+    end
+    Identity["User-assigned\nmanaged identity"]
+  end
+
+  Operator --> CLI
+  Profile --> CLI
+  CLI -->|"read-only show/list"| Subscription
+  Subscription --> VNet
+  NSG --> Private
+  DNS --> Private
+  Identity --> Private
+```
+
+The Azure adapter checks the signed-in tenant and subscription, resource group,
+VNet, selected subnet-to-NSG associations, custom NSG inbound rules, private
+DNS zone/VNet link, and user-assigned managed identity. It uses only `az ...
+show` and `az network private-dns link vnet list`; it does not create, update,
+start, stop, or delete an Azure resource. The caller needs read access to those
+named resources. It does not collect a client secret or write an Azure
+credential into the Vault.
+
 ## Required private connectivity
 
 The future adapter must calculate provider-specific ports from enabled features;
@@ -220,8 +259,9 @@ backup/restore must each be qualified for the selected provider and image.
 
 AWS identity, VPC, DNS, subnet, security-group, and instance-profile discovery
 is implemented. GCP project, custom-VPC, subnet, firewall, and service-account
-discovery is implemented. AWS/GCP quota, image, private-DNS/Cloud DNS, capacity,
-and Red Hat entitlement discovery remain unimplemented. Azure and VMware remain
-profile-only. Only after provider-specific evidence exists should a separate
-adapter offer a reviewed, explicitly approved `apply`, lifecycle controls,
-dashboard status, and teardown behavior.
+discovery is implemented. Azure tenant/subscription, VNet/subnet, NSG, private
+DNS, and managed-identity discovery is implemented. Quota, image, capacity, and
+Red Hat entitlement discovery remain unimplemented for all providers. VMware
+remains profile-only. Only after provider-specific evidence exists should a
+separate adapter offer a reviewed, explicitly approved `apply`, lifecycle
+controls, dashboard status, and teardown behavior.

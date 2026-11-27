@@ -32,7 +32,7 @@ still run with [the older command](../guides/older-command.md).
 | `cloud requirements PROVIDER` | Print the private-network, identity, node, and approval requirements for AWS, Azure, GCP, or VMware. It is local-only. |
 | `cloud profile init PROVIDER FILE` / `cloud profile validate FILE` | Create or validate a non-secret planning profile. These commands never authenticate to a provider or create resources. |
 | `cloud plan FILE` | Confirm that a profile is complete for a future review. It has no apply mode and does not incur provider cost. |
-| `cloud preflight FILE [--aws-profile NAME\|--gcloud-configuration NAME]` | Run explicit read-only AWS or GCP identity, network, firewall, and workload-identity checks. It never creates or changes provider resources. |
+| `cloud preflight FILE [--aws-profile NAME\|--gcloud-configuration NAME]` | Run explicit read-only AWS, GCP, or Azure identity, network, firewall, DNS, and workload-identity checks. It never creates or changes provider resources. |
 | `reports generate` / `reports send` | Generate a styled weekly HTML/text report, or additionally capture it as a local `.eml` message. Neither sends network email. |
 | `repair` | Fix the usual breakage after the laptop sleeps. |
 | `must-gather` | Collect logs into a folder. An optional path picks the folder. |
