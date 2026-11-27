@@ -78,13 +78,25 @@ fi
 echo "PASS: support-bundle create accepts an explicit output path"
 
 if ! output=$(HOME="$test_home" QUIET=true "$AAP_DEMO_SH" cloud help 2>&1) \
-  || ! grep -Fq 'All cloud commands are local-only planning operations' <<<"$output"; then
+  || ! grep -Fq 'AWS preflight makes only documented' <<<"$output"; then
   echo "FAIL: cloud help should be a local command"
   echo "$output"
   exit 1
 fi
 
 echo "PASS: cloud planning help is a local command"
+
+if output=$(HOME="$test_home" QUIET=true "$AAP_DEMO_SH" cloud preflight "$test_home/missing.json" 2>&1); then
+  echo "FAIL: cloud preflight accepted a missing profile"
+  exit 1
+fi
+if ! grep -Fq 'Cloud profile does not exist' <<<"$output"; then
+  echo "FAIL: cloud preflight did not preserve its profile argument"
+  echo "$output"
+  exit 1
+fi
+
+echo "PASS: cloud preflight remains a local command until profile validation passes"
 
 if output=$(HOME="$test_home" QUIET=true "$AAP_DEMO_SH" fleet auth status 2>&1); then
   echo "FAIL: unconfigured fleet auth status unexpectedly succeeded"

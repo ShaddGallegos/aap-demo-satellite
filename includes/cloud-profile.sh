@@ -12,12 +12,14 @@ Usage:
   aap-demo cloud profile init PROVIDER FILE [--force]
   aap-demo cloud profile validate FILE
   aap-demo cloud plan FILE
+  aap-demo cloud preflight FILE [--aws-profile NAME]
 
 Providers: aws, azure, gcp, vmware
 
-All cloud commands are local-only planning operations. They never authenticate
-to a provider, create resources, or incur charges. A profile stores identity
-references, never credential values.
+Profile and plan commands are local-only. AWS preflight makes only documented
+read-only AWS CLI calls when you explicitly invoke it; no cloud command creates
+resources or incurs charges. A profile stores identity references, never
+credential values.
 EOF
 }
 
@@ -235,6 +237,134 @@ EOF
   esac
 }
 
+_aap_demo_cloud_aws_call() {
+  local aws_cli="$1" aws_profile="$2"
+  shift 2
+  local -a command=("$aws_cli")
+  [ -z "$aws_profile" ] || command+=(--profile "$aws_profile")
+  command+=("$@" --no-cli-pager --output json)
+  "${command[@]}" 2>/dev/null
+}
+
+_aap_demo_cloud_aws_preflight() {
+  local file="$1" aws_profile="$2" aws_cli
+  local account_id region vpc_id instance_profile caller vpc dns_support dns_hostnames subnets groups profile_roles
+  local -a subnet_ids group_ids
+
+  _aap_demo_cloud_validate "$file" || return 1
+  [ "$(jq -r '.provider' "$file")" = aws ] || {
+    _err "AWS preflight requires an aws profile; this profile targets $(jq -r '.provider' "$file")"
+    return 2
+  }
+  aws_cli="${AAP_DEMO_AWS_CLI:-aws}"
+  command -v "$aws_cli" >/dev/null 2>&1 || {
+    _err "AWS CLI is required for AWS preflight; install/configure it, then retry"
+    return 1
+  }
+  account_id=$(jq -r '.provider_config.account_id' "$file")
+  region=$(jq -r '.location.region' "$file")
+  vpc_id=$(jq -r '.provider_config.vpc_id' "$file")
+  instance_profile=$(jq -r '.provider_config.instance_profile' "$file")
+  mapfile -t subnet_ids < <(jq -r '.provider_config.subnet_ids[]' "$file")
+  mapfile -t group_ids < <(jq -r '.provider_config.security_group_ids[]' "$file")
+
+  printf 'AWS read-only preflight: %s\n' "$file"
+  caller=$(_aap_demo_cloud_aws_call "$aws_cli" "$aws_profile" sts get-caller-identity) || {
+    _err "AWS identity check failed; authenticate with federation/SSO or select a usable --aws-profile"
+    return 1
+  }
+  if ! jq -e --arg account "$account_id" '.Account == $account' <<<"$caller" >/dev/null; then
+    _err "AWS caller account does not match the profile; no resources were changed"
+    return 1
+  fi
+  printf '  PASS: caller identity matches the profile account\n'
+
+  vpc=$(_aap_demo_cloud_aws_call "$aws_cli" "$aws_profile" ec2 describe-vpcs --region "$region" --vpc-ids "$vpc_id") || {
+    _err "AWS VPC lookup failed; confirm read-only EC2 permissions and the profile region"
+    return 1
+  }
+  if ! jq -e --arg vpc "$vpc_id" '[.Vpcs[]? | select(.VpcId == $vpc and .State == "available")] | length == 1' <<<"$vpc" >/dev/null; then
+    _err "Configured VPC is missing or not available"
+    return 1
+  fi
+  printf '  PASS: configured VPC exists and is available\n'
+
+  dns_support=$(_aap_demo_cloud_aws_call "$aws_cli" "$aws_profile" ec2 describe-vpc-attribute --region "$region" --vpc-id "$vpc_id" --attribute enableDnsSupport) || {
+    _err "AWS VPC DNS-support lookup failed"
+    return 1
+  }
+  dns_hostnames=$(_aap_demo_cloud_aws_call "$aws_cli" "$aws_profile" ec2 describe-vpc-attribute --region "$region" --vpc-id "$vpc_id" --attribute enableDnsHostnames) || {
+    _err "AWS VPC DNS-hostname lookup failed"
+    return 1
+  }
+  if ! jq -e '.EnableDnsSupport.Value == true' <<<"$dns_support" >/dev/null \
+    || ! jq -e '.EnableDnsHostnames.Value == true' <<<"$dns_hostnames" >/dev/null; then
+    _err "Configured VPC must enable DNS support and DNS hostnames for private DNS readiness"
+    return 1
+  fi
+  printf '  PASS: VPC DNS support and hostnames are enabled\n'
+
+  subnets=$(_aap_demo_cloud_aws_call "$aws_cli" "$aws_profile" ec2 describe-subnets --region "$region" --subnet-ids "${subnet_ids[@]}") || {
+    _err "AWS subnet lookup failed"
+    return 1
+  }
+  if ! jq -e --arg vpc "$vpc_id" --argjson expected "$(jq -cn '$ARGS.positional' --args "${subnet_ids[@]}")" '
+      [.Subnets[]? | select(.VpcId == $vpc and .State == "available" and .MapPublicIpOnLaunch == false) | .SubnetId] as $actual |
+      ($expected | sort) == ($actual | sort)
+    ' <<<"$subnets" >/dev/null; then
+    _err "Every configured subnet must exist in the VPC, be available, and disable automatic public IP assignment"
+    return 1
+  fi
+  printf '  PASS: configured subnets are private, available, and in the VPC\n'
+
+  groups=$(_aap_demo_cloud_aws_call "$aws_cli" "$aws_profile" ec2 describe-security-groups --region "$region" --group-ids "${group_ids[@]}") || {
+    _err "AWS security-group lookup failed"
+    return 1
+  }
+  if ! jq -e --arg vpc "$vpc_id" --argjson expected "$(jq -cn '$ARGS.positional' --args "${group_ids[@]}")" '
+      [.SecurityGroups[]? | select(.VpcId == $vpc) | .GroupId] as $actual |
+      ($expected | sort) == ($actual | sort) and
+      ([.SecurityGroups[]?.IpPermissions[]? | (.IpRanges[]?.CidrIp, .Ipv6Ranges[]?.CidrIpv6) |
+        select(. == "0.0.0.0/0" or . == "::/0")] | length == 0)
+    ' <<<"$groups" >/dev/null; then
+    _err "Security groups must belong to the VPC and cannot allow public IPv4/IPv6 ingress"
+    return 1
+  fi
+  printf '  PASS: configured security groups are VPC-scoped with no public ingress\n'
+
+  profile_roles=$(_aap_demo_cloud_aws_call "$aws_cli" "$aws_profile" iam get-instance-profile --instance-profile-name "$instance_profile") || {
+    _err "AWS instance-profile lookup failed"
+    return 1
+  }
+  if ! jq -e --arg profile "$instance_profile" '.InstanceProfile.InstanceProfileName == $profile and
+      ([.InstanceProfile.Roles[]?] | length) >= 1' <<<"$profile_roles" >/dev/null; then
+    _err "Configured EC2 instance profile is missing or has no attached role"
+    return 1
+  fi
+  printf '  PASS: configured instance profile exists with an attached role\n'
+  printf 'PASS: AWS read-only preflight completed; no AWS resource was changed.\n'
+}
+
+_aap_demo_cloud_preflight() {
+  local file="${1:-}" aws_profile="${AWS_PROFILE:-}" argument
+  shift || true
+  [ -n "$file" ] || { _aap_demo_cloud_usage >&2; return 2; }
+  while [ "$#" -gt 0 ]; do
+    argument="$1"
+    shift
+    case "$argument" in
+      --aws-profile)
+        [ "$#" -gt 0 ] || { _err "--aws-profile requires a value"; return 2; }
+        aws_profile="$1"
+        shift
+        ;;
+      --aws-profile=*) aws_profile="${argument#*=}" ;;
+      *) _err "Unknown cloud preflight option: $argument"; return 2 ;;
+    esac
+  done
+  _aap_demo_cloud_aws_preflight "$file" "$aws_profile"
+}
+
 cmd_cloud() {
   local action="${1:-requirements}" provider="${2:-}" file="${3:-}" force="${4:-}"
   case "$action" in
@@ -277,6 +407,10 @@ cmd_cloud() {
       _aap_demo_cloud_validate "$file" || return 1
       printf 'PLAN ONLY: no provider API call, authentication, resource creation, or charge was performed.\n'
       printf 'A future adapter must still run provider discovery and require a separate apply approval.\n'
+      ;;
+    preflight)
+      shift
+      _aap_demo_cloud_preflight "$@"
       ;;
     *) _aap_demo_cloud_usage >&2; return 2 ;;
   esac

@@ -139,8 +139,10 @@ Notes
   cloud requirements PROVIDER
   cloud profile init PROVIDER FILE [--force]
   cloud profile validate FILE | cloud plan FILE
+  cloud preflight FILE [--aws-profile NAME]
                       Create or validate a local-only AWS, Azure, GCP, or VMware
-                      planning profile. It never contacts a provider or creates resources.
+                      planning profile. AWS preflight uses only read-only discovery;
+                      no command creates resources.
   dashboard [--no-open]
                       Start the localhost dashboard without opening a browser
   console [--no-open] Show the console URL without opening a browser

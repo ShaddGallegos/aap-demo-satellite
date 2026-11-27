@@ -9,8 +9,10 @@ tags: [cloud, vmware, planning, security]
 
 Cloud profiles are a safe preparation step for a future aap-demo environment on
 AWS, Azure, Google Cloud, or VMware vSphere. They are not a provider installer.
-They do not authenticate to a cloud account, call a provider API, create a
-machine, spend money, or change the current local lab.
+Profile commands do not authenticate to a cloud account, call a provider API,
+create a machine, spend money, or change the current local lab. The explicit
+AWS preflight is the exception: it authenticates through the already configured
+AWS CLI and performs only read-only discovery.
 
 Use one profile per customer environment. Keep it outside the repository and
 review it with the customer network, identity, and cost owners before any future
@@ -22,6 +24,8 @@ aap-demo cloud requirements aws
 aap-demo cloud profile init aws ~/.config/aap-demo/cloud/customer-lab.json
 aap-demo cloud profile validate ~/.config/aap-demo/cloud/customer-lab.json
 aap-demo cloud plan ~/.config/aap-demo/cloud/customer-lab.json
+# Optional: query an approved AWS account with read-only permissions.
+aap-demo cloud preflight ~/.config/aap-demo/cloud/customer-lab.json --aws-profile customer-sso
 ```
 
 `init` creates the file mode `0600`. It deliberately contains `REPLACE_ME`
@@ -50,6 +54,47 @@ shape. They are neither a cost quote nor a promise that a particular image,
 instance type, nested-virtualization setting, or OpenShift runtime is supported.
 The profile must be validated against the selected provider, image, AAP version,
 and Red Hat support policy before a provider adapter is enabled.
+
+## AWS read-only preflight topology
+
+```mermaid
+flowchart TB
+  Operator["Named operator\nAWS SSO or federation"]
+  Profile["Mode 0600 AWS profile\nnon-secret references only"]
+  CLI["aap-demo cloud preflight\n--aws-profile optional"]
+  STS["AWS STS\ncaller identity"]
+
+  subgraph VPC["Customer-owned private VPC"]
+    DNS["VPC DNS support\nand DNS hostnames"]
+    subgraph Private["Private subnets — no automatic public IP"]
+      AAP["AAP node"]
+      Fleet["Fleet nodes ×3"]
+      Satellite["Optional Satellite node"]
+    end
+    SG["VPC-scoped security groups\nno 0.0.0.0/0 or ::/0 ingress"]
+    Role["EC2 instance profile\nattached role"]
+  end
+
+  Operator --> CLI
+  Profile --> CLI
+  CLI -->|"read-only"| STS
+  CLI -->|"Describe* / Get* only"| VPC
+  DNS --> Private
+  SG --> Private
+  Role --> Private
+```
+
+The AWS adapter checks this contract only after profile validation. It calls STS,
+EC2 `Describe*`, and IAM `GetInstanceProfile`; it does not create, modify, start,
+or delete a resource. A failure reports the missing or unsafe prerequisite and
+leaves the account unchanged.
+
+The preflight identity needs only the following discovery actions for the
+currently implemented checks: `sts:GetCallerIdentity`, `ec2:DescribeVpcs`,
+`ec2:DescribeVpcAttribute`, `ec2:DescribeSubnets`,
+`ec2:DescribeSecurityGroups`, and `iam:GetInstanceProfile`. It uses the AWS CLI
+login already on the operator workstation (or `--aws-profile NAME`) and does
+not collect an AWS access key or write a cloud credential into the Vault.
 
 ## Required private connectivity
 
@@ -128,8 +173,9 @@ not run it inside a cloud VM. CRC nested virtualization, a Satellite deployment,
 external DNS, Red Hat entitlement, OpenShift licensing, provider quotas, and
 backup/restore must each be qualified for the selected provider and image.
 
-The next safe slice is one provider at a time: read-only identity, quota,
-network, image, and DNS discovery against a disposable customer-approved account.
-Only after that evidence exists should a separate provider adapter offer a
-reviewed, explicitly approved `apply`, lifecycle controls, dashboard status, and
-teardown behavior.
+AWS identity, VPC, DNS, subnet, security-group, and instance-profile discovery
+is implemented. AWS quota, image, Route 53/private-DNS, capacity, and Red Hat
+entitlement discovery remain unimplemented. Azure, GCP, and VMware remain
+profile-only. Only after provider-specific evidence exists should a separate
+adapter offer a reviewed, explicitly approved `apply`, lifecycle controls,
+dashboard status, and teardown behavior.

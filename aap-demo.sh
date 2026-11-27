@@ -304,7 +304,9 @@ for arg in "$@"; do
       SHOW_SECRETS=true
       ;;
     status)
-      if [ "$COMMAND" = "gpu" ]; then
+      if [ "$COMMAND" = "cloud" ]; then
+        EXTRA_ARGS+=("$arg")
+      elif [ "$COMMAND" = "gpu" ]; then
         EXTRA_ARGS+=("$arg")
       elif [ "$COMMAND" = "fleet" ] && [ "${EXTRA_ARGS[0]:-}" = "auth" ]; then
         EXTRA_ARGS+=("$arg")
@@ -346,7 +348,9 @@ for arg in "$@"; do
       fi
       ;;
     deploy | deploy-all | repair | trust-ca | clean | maintenance | credentials | stop | restart | service | setup | storage | watch | update | config | redeploy | redeploy-all | redhat-status | rh-status | kubeconfig | idle | preflight | diagnose | check-integrations | steward | reports | support-bundle | cloud | must-gather | enable | disable | wire | system-info | dashboard | console | keycloak | gpu | v2 | version | help | --help | -h | --version | -V)
-      if [ "$COMMAND" = "gpu" ]; then
+      if [ "$COMMAND" = "cloud" ]; then
+        EXTRA_ARGS+=("$arg")
+      elif [ "$COMMAND" = "gpu" ]; then
         EXTRA_ARGS+=("$arg")
       elif [ "$COMMAND" = "credentials" ]; then
         EXTRA_ARGS+=("$arg")
