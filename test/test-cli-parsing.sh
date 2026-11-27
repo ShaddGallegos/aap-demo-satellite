@@ -78,7 +78,7 @@ fi
 echo "PASS: support-bundle create accepts an explicit output path"
 
 if ! output=$(HOME="$test_home" QUIET=true "$AAP_DEMO_SH" cloud help 2>&1) \
-  || ! grep -Fq 'AWS preflight makes only documented' <<<"$output"; then
+  || ! grep -Fq 'AWS and GCP preflight make only' <<<"$output"; then
   echo "FAIL: cloud help should be a local command"
   echo "$output"
   exit 1

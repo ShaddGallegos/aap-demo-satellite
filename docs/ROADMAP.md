@@ -767,16 +767,16 @@ upgrade notes. Do not bump package versions or publish for unrelated roadmap wor
 
 ### RM-08: Cloud and VMware environments
 
-**Status:** AWS read-only preflight plus profile foundation implemented;
+**Status:** AWS/GCP read-only preflight plus profile foundation implemented;
 provisioning deferred. `aap-demo cloud` creates and validates versioned,
-local-only planning profiles for AWS, Azure, GCP, and VMware. The explicit AWS
-preflight uses only STS/EC2/IAM read operations to verify identity, VPC, DNS,
-private-subnet, security-group, and instance-profile prerequisites. Profiles
-require ownership, private-network, topology, identity-reference, and
-charge-approval inputs while rejecting plaintext secret-like fields. No
-credentials are collected and no resources, schedules, or costs are created.
-AWS quota/image/private-DNS discovery and all Azure/GCP/VMware discovery remain
-future slices; do not implement every provider simultaneously.
+local-only planning profiles for AWS, Azure, GCP, and VMware. Explicit AWS and
+GCP preflights use only provider read operations to verify identity, private
+network, DNS/egress prerequisites, firewall exposure, and workload identity.
+Profiles require ownership, topology, identity-reference, and charge-approval
+inputs while rejecting plaintext secret-like fields. No credentials are
+collected and no resources, schedules, or costs are created. AWS/GCP
+quota/image/private-DNS/Cloud-DNS discovery and all Azure/VMware discovery
+remain future slices; do not implement every provider simultaneously.
 
 **Prerequisites:** Relevant addon/state/lifecycle contracts; RM-09 isolation; reviewed
 provider/runtime support and licensing constraints; explicit infrastructure scope.

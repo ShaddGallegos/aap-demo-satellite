@@ -12,13 +12,13 @@ Usage:
   aap-demo cloud profile init PROVIDER FILE [--force]
   aap-demo cloud profile validate FILE
   aap-demo cloud plan FILE
-  aap-demo cloud preflight FILE [--aws-profile NAME]
+  aap-demo cloud preflight FILE [--aws-profile NAME|--gcloud-configuration NAME]
 
 Providers: aws, azure, gcp, vmware
 
-Profile and plan commands are local-only. AWS preflight makes only documented
-read-only AWS CLI calls when you explicitly invoke it; no cloud command creates
-resources or incurs charges. A profile stores identity references, never
+Profile and plan commands are local-only. AWS and GCP preflight make only
+documented read-only CLI calls when you explicitly invoke them; no cloud command
+creates resources or incurs charges. A profile stores identity references, never
 credential values.
 EOF
 }
@@ -345,10 +345,114 @@ _aap_demo_cloud_aws_preflight() {
   printf 'PASS: AWS read-only preflight completed; no AWS resource was changed.\n'
 }
 
+_aap_demo_cloud_gcp_call() {
+  local gcloud_cli="$1" gcloud_configuration="$2"
+  shift 2
+  local -a command=("$gcloud_cli")
+  [ -z "$gcloud_configuration" ] || command+=(--configuration "$gcloud_configuration")
+  command+=("$@" --format=json --quiet)
+  "${command[@]}" 2>/dev/null
+}
+
+_aap_demo_cloud_gcp_preflight() {
+  local file="$1" gcloud_configuration="$2" gcloud_cli
+  local project region network_name service_account project_json network_json firewall_json account_json subnet_json subnet
+  local private_google_access_warning=false
+  local -a subnet_names
+
+  _aap_demo_cloud_validate "$file" || return 1
+  [ "$(jq -r '.provider' "$file")" = gcp ] || {
+    _err "GCP preflight requires a gcp profile; this profile targets $(jq -r '.provider' "$file")"
+    return 2
+  }
+  gcloud_cli="${AAP_DEMO_GCLOUD_CLI:-gcloud}"
+  command -v "$gcloud_cli" >/dev/null 2>&1 || {
+    _err "gcloud CLI is required for GCP preflight; install/authenticate it, then retry"
+    return 1
+  }
+  project=$(jq -r '.provider_config.project_id' "$file")
+  region=$(jq -r '.location.region' "$file")
+  network_name=$(jq -r '.provider_config.network_name' "$file")
+  service_account=$(jq -r '.provider_config.service_account' "$file")
+  mapfile -t subnet_names < <(jq -r '.provider_config.subnet_names[]' "$file")
+
+  printf 'GCP read-only preflight: %s\n' "$file"
+  project_json=$(_aap_demo_cloud_gcp_call "$gcloud_cli" "$gcloud_configuration" projects describe "$project") || {
+    _err "GCP project lookup failed; authenticate with gcloud or select a usable --gcloud-configuration"
+    return 1
+  }
+  if ! jq -e --arg project "$project" '.projectId == $project and .lifecycleState == "ACTIVE"' <<<"$project_json" >/dev/null; then
+    _err "Configured GCP project is missing or not active"
+    return 1
+  fi
+  printf '  PASS: configured project exists and is active\n'
+
+  network_json=$(_aap_demo_cloud_gcp_call "$gcloud_cli" "$gcloud_configuration" compute networks describe "$network_name" --project "$project") || {
+    _err "GCP VPC lookup failed; confirm Compute Engine read permissions"
+    return 1
+  }
+  if ! jq -e --arg network "$network_name" '.name == $network and .autoCreateSubnetworks == false' <<<"$network_json" >/dev/null; then
+    _err "Configured GCP VPC must exist and use custom subnet mode"
+    return 1
+  fi
+  printf '  PASS: configured VPC exists and uses custom subnet mode\n'
+
+  for subnet in "${subnet_names[@]}"; do
+    subnet_json=$(_aap_demo_cloud_gcp_call "$gcloud_cli" "$gcloud_configuration" compute networks subnets describe "$subnet" --project "$project" --region "$region") || {
+      _err "GCP subnet lookup failed for $subnet"
+      return 1
+    }
+    if ! jq -e --arg subnet "$subnet" --arg network "$network_name" '
+        .name == $subnet and (.network | endswith("/networks/" + $network))
+      ' <<<"$subnet_json" >/dev/null; then
+      _err "Configured subnet $subnet is missing or belongs to another VPC"
+      return 1
+    fi
+    if ! jq -e '.privateIpGoogleAccess == true' <<<"$subnet_json" >/dev/null; then
+      private_google_access_warning=true
+    fi
+  done
+  printf '  PASS: configured subnets exist in the selected VPC\n'
+  if [ "$private_google_access_warning" = true ]; then
+    printf '  WARN: Private Google Access is disabled on one or more subnets; verify NAT/proxy or private API egress before apply\n' >&2
+  else
+    printf '  PASS: Private Google Access is enabled on all configured subnets\n'
+  fi
+
+  firewall_json=$(_aap_demo_cloud_gcp_call "$gcloud_cli" "$gcloud_configuration" compute firewall-rules list --project "$project") || {
+    _err "GCP firewall-rule lookup failed"
+    return 1
+  }
+  if ! jq -e --arg network "$network_name" --arg service_account "$service_account" '
+      [ .[]? |
+        select((.network | endswith("/networks/" + $network)) and .direction == "INGRESS" and (.disabled != true)) |
+        select((.targetServiceAccounts | length == 0 and (.targetTags | length == 0)) or
+               (.targetServiceAccounts | index($service_account) != null)) |
+        .sourceRanges[]? | select(. == "0.0.0.0/0" or . == "::/0")
+      ] | length == 0
+    ' <<<"$firewall_json" >/dev/null; then
+    _err "GCP VPC firewall rules allow public ingress to the workload service account or all instances"
+    return 1
+  fi
+  printf '  PASS: no public ingress applies to the workload service account or all VPC instances\n'
+
+  account_json=$(_aap_demo_cloud_gcp_call "$gcloud_cli" "$gcloud_configuration" iam service-accounts describe "$service_account" --project "$project") || {
+    _err "GCP workload service-account lookup failed"
+    return 1
+  }
+  if ! jq -e --arg service_account "$service_account" '.email == $service_account and .disabled != true' <<<"$account_json" >/dev/null; then
+    _err "Configured GCP workload service account is missing or disabled"
+    return 1
+  fi
+  printf '  PASS: configured workload service account exists and is enabled\n'
+  printf 'PASS: GCP read-only preflight completed; no GCP resource was changed.\n'
+}
+
 _aap_demo_cloud_preflight() {
-  local file="${1:-}" aws_profile="${AWS_PROFILE:-}" argument
+  local file="${1:-}" aws_profile="${AWS_PROFILE:-}" gcloud_configuration="${CLOUDSDK_ACTIVE_CONFIG_NAME:-}" argument provider
   shift || true
   [ -n "$file" ] || { _aap_demo_cloud_usage >&2; return 2; }
+  [ -f "$file" ] || { _err "Cloud profile does not exist: $file"; return 1; }
   while [ "$#" -gt 0 ]; do
     argument="$1"
     shift
@@ -359,10 +463,24 @@ _aap_demo_cloud_preflight() {
         shift
         ;;
       --aws-profile=*) aws_profile="${argument#*=}" ;;
+      --gcloud-configuration)
+        [ "$#" -gt 0 ] || { _err "--gcloud-configuration requires a value"; return 2; }
+        gcloud_configuration="$1"
+        shift
+        ;;
+      --gcloud-configuration=*) gcloud_configuration="${argument#*=}" ;;
       *) _err "Unknown cloud preflight option: $argument"; return 2 ;;
     esac
   done
-  _aap_demo_cloud_aws_preflight "$file" "$aws_profile"
+  provider=$(jq -r '.provider // empty' "$file" 2>/dev/null) || {
+    _err "Cloud profile does not contain valid JSON: $file"
+    return 1
+  }
+  case "$provider" in
+    aws) _aap_demo_cloud_aws_preflight "$file" "$aws_profile" ;;
+    gcp) _aap_demo_cloud_gcp_preflight "$file" "$gcloud_configuration" ;;
+    *) _err "Read-only preflight is currently implemented only for AWS and GCP"; return 2 ;;
+  esac
 }
 
 cmd_cloud() {

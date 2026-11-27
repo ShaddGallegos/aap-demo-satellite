@@ -11,8 +11,8 @@ Cloud profiles are a safe preparation step for a future aap-demo environment on
 AWS, Azure, Google Cloud, or VMware vSphere. They are not a provider installer.
 Profile commands do not authenticate to a cloud account, call a provider API,
 create a machine, spend money, or change the current local lab. The explicit
-AWS preflight is the exception: it authenticates through the already configured
-AWS CLI and performs only read-only discovery.
+AWS and GCP preflights are the exceptions: they authenticate through an already
+configured provider CLI and perform only read-only discovery.
 
 Use one profile per customer environment. Keep it outside the repository and
 review it with the customer network, identity, and cost owners before any future
@@ -26,6 +26,8 @@ aap-demo cloud profile validate ~/.config/aap-demo/cloud/customer-lab.json
 aap-demo cloud plan ~/.config/aap-demo/cloud/customer-lab.json
 # Optional: query an approved AWS account with read-only permissions.
 aap-demo cloud preflight ~/.config/aap-demo/cloud/customer-lab.json --aws-profile customer-sso
+# Optional: query an approved GCP project with read-only permissions.
+aap-demo cloud preflight ~/.config/aap-demo/cloud/customer-gcp.json --gcloud-configuration customer-sso
 ```
 
 `init` creates the file mode `0600`. It deliberately contains `REPLACE_ME`
@@ -95,6 +97,49 @@ currently implemented checks: `sts:GetCallerIdentity`, `ec2:DescribeVpcs`,
 `ec2:DescribeSecurityGroups`, and `iam:GetInstanceProfile`. It uses the AWS CLI
 login already on the operator workstation (or `--aws-profile NAME`) and does
 not collect an AWS access key or write a cloud credential into the Vault.
+
+## GCP read-only preflight topology
+
+```mermaid
+flowchart TB
+  Operator["Named operator\ngcloud federation or ADC"]
+  Profile["Mode 0600 GCP profile\nnon-secret references only"]
+  CLI["aap-demo cloud preflight\n--gcloud-configuration optional"]
+  Project["Active GCP project"]
+
+  subgraph VPC["Customer-owned custom-mode VPC"]
+    Firewall["VPC firewall rules\nno public ingress to workload identity"]
+    subgraph Private["Private subnets"]
+      AAP["AAP node"]
+      Fleet["Fleet nodes ×3"]
+      Satellite["Optional Satellite node"]
+    end
+    Access["Private Google Access\nor verified NAT/proxy egress"]
+    Identity["User-managed workload\nservice account"]
+  end
+
+  Operator --> CLI
+  Profile --> CLI
+  CLI -->|"read-only Describe/List"| Project
+  Project --> VPC
+  Firewall --> Private
+  Access --> Private
+  Identity --> Private
+```
+
+The GCP adapter checks the active project, custom-mode VPC, selected subnets,
+firewall exposure, and workload service account. It uses `gcloud projects
+describe`, `gcloud compute networks describe`, `gcloud compute networks
+subnets describe`, `gcloud compute firewall-rules list`, and `gcloud iam
+service-accounts describe`. It does not create, update, start, stop, or delete
+a GCP resource. A subnet without Private Google Access is a warning, not an
+automatic change: the customer must instead demonstrate approved NAT or proxy
+egress before any future apply.
+
+The preflight caller needs read access to the named project, VPC, subnet,
+firewall rules, and service account. It uses the selected local gcloud
+configuration (or `--gcloud-configuration NAME`) and does not collect a
+service-account key or write a GCP credential into the Vault.
 
 ## Required private connectivity
 
@@ -174,8 +219,9 @@ external DNS, Red Hat entitlement, OpenShift licensing, provider quotas, and
 backup/restore must each be qualified for the selected provider and image.
 
 AWS identity, VPC, DNS, subnet, security-group, and instance-profile discovery
-is implemented. AWS quota, image, Route 53/private-DNS, capacity, and Red Hat
-entitlement discovery remain unimplemented. Azure, GCP, and VMware remain
+is implemented. GCP project, custom-VPC, subnet, firewall, and service-account
+discovery is implemented. AWS/GCP quota, image, private-DNS/Cloud DNS, capacity,
+and Red Hat entitlement discovery remain unimplemented. Azure and VMware remain
 profile-only. Only after provider-specific evidence exists should a separate
 adapter offer a reviewed, explicitly approved `apply`, lifecycle controls,
 dashboard status, and teardown behavior.
