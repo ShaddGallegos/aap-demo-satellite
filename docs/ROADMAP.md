@@ -6,7 +6,7 @@ description: Selectable improvement tasks with scope, dependencies, safeguards, 
 
 # aap-demo Roadmap and Agent Prompt
 
-**Last updated:** 2026-11-18
+**Last updated:** 2026-11-26
 
 This is a directional backlog, not a release commitment or permission to execute
 every task. Existing capabilities may already satisfy parts of a task; inspect
@@ -282,8 +282,8 @@ a task is selected.
 | ID | Priority | Objective | Prerequisite |
 |----|----------|-----------|--------------|
 | RM-01 | Now | Thin CLI and consistent command contracts | Qualified baseline; RM-09 isolation |
-| RM-02 | Now | Declarative addons and versioned state | Relevant RM-01 interfaces |
-| RM-03 | Next | Observable workflows and safe reconciliation | Relevant RM-01/RM-02 contracts |
+| RM-02 | In progress | Declarative addons and versioned state | Relevant RM-01 interfaces |
+| RM-03 | In progress | Observable workflows and safe reconciliation | Relevant RM-01/RM-02 contracts |
 | RM-04 | Now | Clear publication blockers and qualify live releases | RM-09 isolation before live tests |
 | RM-04E | Now | Finish existing CI/CD integration qualification | Prepared services and RM-04C/D |
 | RM-04F | Blocked | Qualify managed full uninstall/reinstall | Reconstructible lab and RM-04E preflight |
@@ -294,8 +294,8 @@ a task is selected.
 | RM-06 | Later | Tested host/platform parity | RM-02 declarations and RM-04 evidence |
 | RM-07 | Later | Verifiable releases and dependency hygiene | Existing contribution/release rules |
 | RM-08 | Deferred | Cloud/VMware provisioning and operations | Reviewed contracts and provider scope |
-| RM-09 | Now | Strict test isolation and failure injection | None |
-| RM-10 | Next | Credential recovery and private support bundles | Existing Vault and diagnostics helpers |
+| RM-09 | Partial | Strict test isolation and failure injection | None |
+| RM-10 | Partial | Credential recovery and private support bundles | Existing Vault and diagnostics helpers |
 | RM-11 | Next | Scoped platform firewall, SELinux and access safeguards | Enabled-component inventory; RM-09 isolation |
 
 Within RM-08, prioritize private connectivity, durable state, verified backup/
@@ -397,6 +397,11 @@ comparisons, and extraction does not merely redistribute coupling into more file
 
 ### RM-02: Declarative addons and versioned state
 
+**Status:** In progress. All public add-ons now have validated scenario contracts,
+and the scenario harness derives dependency-closed compatibility cases from them.
+The remaining work is to make these declarations the single source for help,
+completion, dashboard catalog metadata, lifecycle behavior, and state migrations.
+
 **Goal:** Make extensions and upgrades predictable.
 
 **Work:**
@@ -415,6 +420,12 @@ explicitly without disclosing secrets.
 
 ### RM-03: Observable workflows and safe reconciliation
 
+**Status:** In progress. The dashboard now makes its operator-initiated Refresh a
+fresh `aap-demo status --json` observation, while automatic refreshes retain a
+bounded 30-second cache. The response identifies the collector, collection time,
+cache TTL, and whether a fresh probe was requested. Shared lifecycle phases,
+reconciliation, and cross-surface state evidence remain outstanding.
+
 **Goal:** Make interruption and health failures understandable and recoverable.
 
 **Work:**
@@ -424,6 +435,9 @@ explicitly without disclosing secrets.
   results, retry counts, and redacted error summaries.
 - Share `ready`, `progressing`, `degraded`, `blocked`, and `stopped` states across
   status, diagnostics, JSON, and dashboard views.
+- Keep status provenance explicit. Dashboard and CLI status use the same collector;
+  operator refresh must bypass the dashboard cache and report its freshness rather
+  than presenting cached data as a new observation.
 - Show active phase, elapsed time, last success, and actionable blocker.
   Resume only verified idempotent operations; confirm destructive or externally
   visible retries. Define cancellation and stale-operation-lock recovery.
@@ -722,6 +736,9 @@ sample/offline demonstrations cannot be mistaken for verified live operation.
 
 ### RM-06: Host and runtime parity
 
+**Status:** Not started. Scenario contracts are an input to the eventual generated
+capability matrix, but no host/platform qualification matrix exists yet.
+
 **Goal:** Advertise only capabilities backed by declarations and evidence.
 
 **Work:** Generate a Linux/macOS/native-Windows/WSL capability matrix; distinguish Bash
@@ -868,6 +885,12 @@ safe teardown. Unsupported or untested capabilities remain visibly labeled.
 
 ### RM-09: Strict test isolation and failure injection
 
+**Status:** Partial. The non-live runner now isolates HOME, aap-demo state,
+XDG paths, kubeconfig, and socket-probe behavior, and the current unit suite runs
+without using the caller's Vault or state directory. Remaining work includes
+systematic unexpected-call guards and broader failure-injection coverage for
+external tools and providers.
+
 **Goal:** Prevent a supposedly non-live test from affecting a shared host.
 
 **Work:** Audit the [non-live runner](../test/run-unit-tests.sh) and its fixtures.
@@ -882,6 +905,11 @@ cannot mutate real services, VMs, provider resources, or the user's Vault. Valid
 isolation with denied/unexpected-call guards, not by risking a real environment.
 
 ### RM-10: Credential recovery and private support bundles
+
+**Status:** Partial. A local-only, redacted support-bundle preview/create command
+with restrictive permissions and offline secret scanning is available. Credential
+rotation/recovery playbooks and the remaining documented recovery cases still need
+isolated acceptance evidence.
 
 **Goal:** Make diagnosis and access recovery safe without leaking or replacing secrets.
 

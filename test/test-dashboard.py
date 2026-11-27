@@ -95,6 +95,18 @@ def fixture_inventory() -> dict[str, Any]:
 
 
 class DashboardUnitTests(unittest.TestCase):
+    def test_fresh_inventory_bypasses_dashboard_cache(self) -> None:
+        app = dashboard.DashboardApp(REPO_ROOT, 0)
+        result = subprocess.CompletedProcess(
+            ["aap-demo", "status", "--json"], 0, json.dumps(fixture_inventory()), "",
+        )
+        with patch.object(app, "run_cli", return_value=result) as run_cli:
+            self.assertEqual(app.inventory()["cluster"]["state"], "running")
+            self.assertEqual(app.inventory()["cluster"]["state"], "running")
+            self.assertEqual(app.inventory(fresh=True)["cluster"]["state"], "running")
+        self.assertEqual(run_cli.call_count, 2)
+        run_cli.assert_called_with("status", "--json")
+
     def test_local_mail_and_preferences_are_private_and_do_not_render_html(self) -> None:
         with tempfile.TemporaryDirectory() as home:
             with patch.dict(os.environ, {"AAP_DEMO_DIR": home}, clear=False):
@@ -701,6 +713,22 @@ class DashboardHttpTests(unittest.TestCase):
         portal = next(addon for addon in payload["addons"] if addon["id"] == "portal")
         self.assertEqual(portal["projected_vm_disk_gib"], 170)
         self.assertEqual(portal["capacity_estimate"]["vm_gib"], 8)
+
+    def test_fresh_status_requests_bypass_the_inventory_cache(self) -> None:
+        calls: list[bool] = []
+
+        def status_payload(*, fresh: bool = False) -> dict[str, Any]:
+            calls.append(fresh)
+            return {"ok": True, "fresh": fresh}
+
+        with patch.object(self.app, "status_payload", side_effect=status_payload):
+            status, cached = self.request("/api/status")
+            self.assertEqual(status, 200)
+            self.assertFalse(cached["fresh"])
+            status, fresh = self.request("/api/status?fresh=1")
+            self.assertEqual(status, 200)
+            self.assertTrue(fresh["fresh"])
+        self.assertEqual(calls, [False, True])
 
     def test_browser_terminal_requires_session_and_origin(self) -> None:
         status, _ = self.request("/api/fleet/1/terminal", method="POST")

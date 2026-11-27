@@ -511,10 +511,12 @@ function render(payload) {
   renderNamespaces(payload.inventory.namespaces);
   renderMail(state.mail);
   renderOperation(payload.operation);
-  elements.lastUpdated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+  const observation = payload.observation || {};
+  const freshness = observation.fresh ? " (fresh probe)" : "";
+  elements.lastUpdated.textContent = `Updated ${new Date().toLocaleTimeString()}${freshness}`;
 }
 
-async function refresh() {
+async function refresh(fresh = false) {
   // Skip when a refresh is already in flight: aap-demo status --json can take
   // ~30s against a settling cluster, and overlapping fetches pile up server-side
   // and leave the UI showing an empty/stale payload (e.g. "Active routes: 0").
@@ -524,7 +526,7 @@ async function refresh() {
   state.refreshing = true;
   elements.refreshButton.disabled = true;
   try {
-    const payload = await api("/api/status");
+    const payload = await api(fresh ? "/api/status?fresh=1" : "/api/status");
     state.mail = await api("/api/mail").catch(() => ({messages: []}));
     clearAlert();
     render(payload);
@@ -713,7 +715,7 @@ async function initialize() {
   }
 }
 
-elements.refreshButton.addEventListener("click", refresh);
+elements.refreshButton.addEventListener("click", () => refresh(true));
 elements.restartButton.addEventListener("click", restartDashboard);
 elements.operationDismiss.addEventListener("click", () => {
   const operation = state.payload?.operation;

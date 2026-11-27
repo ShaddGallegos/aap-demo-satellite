@@ -28,7 +28,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.error import URLError
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from urllib.request import ProxyHandler, build_opener
 
 HOST = "127.0.0.1"
@@ -643,10 +643,19 @@ class DashboardApp:
             environment["PATH"] = os.pathsep.join(paths)
         return environment
 
-    def inventory(self) -> dict[str, Any]:
+    def inventory(self, *, fresh: bool = False) -> dict[str, Any]:
+        """Return the current CLI inventory, optionally bypassing the short cache.
+
+        The dashboard and command line intentionally use the same ``status
+        --json`` collector.  Auto-refreshes share a short cache because a
+        settling cluster can make collection slow; an operator-initiated
+        refresh must instead make a new observation.
+        """
         with self._inventory_lock:
             now = time.monotonic()
             if (
+                not fresh
+                and
                 self._inventory_cache is not None
                 and now - self._inventory_cache_at < INVENTORY_CACHE_TTL_SECONDS
             ):
@@ -664,8 +673,11 @@ class DashboardApp:
             self._inventory_cache = None
             self._inventory_cache_at = 0.0
 
-    def status_payload(self) -> dict[str, Any]:
-        inventory = self.inventory()
+    def status_payload(self, *, fresh: bool = False) -> dict[str, Any]:
+        # Keep the ordinary no-argument call for small integrations that provide
+        # an inventory fixture/callback, while fresh observations use the new
+        # explicit cache-bypass interface.
+        inventory = self.inventory(fresh=True) if fresh else self.inventory()
         host = inventory.setdefault("host", {})
         if not host.get("os") or host["os"] == "unknown":
             host["os"] = f"{platform.system()} {platform.release()}"
@@ -692,6 +704,12 @@ class DashboardApp:
             "inventory": inventory,
             "addons": addons,
             "operation": self.operation.snapshot(),
+            "observation": {
+                "collector": "aap-demo status --json",
+                "collected_at": inventory.get("generated_at"),
+                "cache_ttl_seconds": INVENTORY_CACHE_TTL_SECONDS,
+                "fresh": fresh,
+            },
             "lightwell_services": lightwell_services() if "lightwell" in enabled else [],
             "gitea_services": gitea_services() if "gitea" in enabled else [],
         }
@@ -899,7 +917,8 @@ def create_handler(app: DashboardApp) -> type[BaseHTTPRequestHandler]:
         def do_GET(self) -> None:  # noqa: N802
             if not self.valid_host():
                 return
-            path = urlparse(self.path).path
+            request_url = urlparse(self.path)
+            path = request_url.path
             if path == "/":
                 self.file_response(app.static_dir / "index.html", "text/html; charset=utf-8")
             elif path == "/app.css":
@@ -929,7 +948,8 @@ def create_handler(app: DashboardApp) -> type[BaseHTTPRequestHandler]:
                 })
             elif path == "/api/status":
                 try:
-                    self.json_response(HTTPStatus.OK, app.status_payload())
+                    fresh = parse_qs(request_url.query).get("fresh") == ["1"]
+                    self.json_response(HTTPStatus.OK, app.status_payload(fresh=fresh))
                 except Exception as error:
                     self.json_response(
                         HTTPStatus.SERVICE_UNAVAILABLE,
