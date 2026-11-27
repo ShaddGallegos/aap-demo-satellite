@@ -1,5 +1,58 @@
 # AAP Demo
 
+> Current local lab topology, as reported by the dashboard. This is a snapshot
+> of the configured demo environment, not a default installation guarantee.
+
+```mermaid
+flowchart TB
+  Host["Fedora host<br/>aap-demo"]
+
+  Vault["Encrypted credential Vault"]
+  CRC["CRC / MicroShift<br/>RUNNING"]
+  AAP["AAP Controller<br/>running in CRC"]
+
+  subgraph Fleet["Fleet QEMU nodes — RUNNING"]
+    N1["Node 1 · SSH 2201"]
+    N2["Node 2 · SSH 2202"]
+    N3["Node 3 · SSH 2203"]
+    N4["Node 4 · SSH 2204"]
+  end
+
+  subgraph Services["Configured demo services"]
+    AO["Automation Orchestrator"]
+    EDA["EDA"]
+    MCP["MCP Server"]
+    Ollama["Ollama"]
+    Lightspeed["Ansible Lightspeed"]
+    Demos["Product Demos"]
+    PAH["Private Automation Hub"]
+  end
+
+  Gitea["Local Gitea / CI"]
+  Lightwell["Lightwell CI/CD"]
+  Satellite["Satellite scenario / manifest"]
+
+  Host --> Vault
+  Host --> CRC
+  Host --> Fleet
+
+  CRC --> AAP
+  AAP --> EDA
+  AAP --> MCP
+  Ollama --> AO
+  MCP --> AO
+  EDA --> AO
+  Ollama --> Lightspeed
+  AAP --> Lightspeed
+  AAP --> Demos
+  AAP --> PAH
+
+  Gitea --> Lightwell
+  Fleet --> Lightwell
+  AO --> Lightwell
+  Satellite --> Demos
+```
+
 [![PyPI](https://img.shields.io/pypi/v/aap-demo)](https://pypi.org/project/aap-demo/)
 
 Ansible Automation Platform, on your own computer, for demos and trying things out.
