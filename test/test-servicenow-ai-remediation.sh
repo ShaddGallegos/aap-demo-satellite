@@ -38,6 +38,10 @@ for playbook in "$ADDON"/playbooks/*.yml; do
 done
 grep -Fq 'remediation_approved | bool' "$ADDON/playbooks/remediate_httpd.yml"
 grep -Fq "service_name in ['httpd', 'nginx']" "$ADDON/playbooks/remediate_httpd.yml"
+grep -Fq "aap_demo.servicenow.instance_url" "$ADDON/deploy.sh"
+grep -Fq "aap_demo.servicenow.username" "$ADDON/deploy.sh"
+grep -Fq "aap_demo.servicenow.password" "$ADDON/deploy.sh"
+grep -Fq -- '--configure --reconfigure' "$ADDON/deploy.sh"
 grep -Fq 'ansible.eda' "$ADDON/execution-environment/requirements.yml"
 grep -Fq 'servicenow.itsm' "$ADDON/execution-environment/requirements.yml"
 grep -Fq 'AI ServiceNow | Analyze HTTP outage' "$ADDON/extensions/eda/rulebooks/httpd_outage.yml"

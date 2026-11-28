@@ -104,6 +104,12 @@ survey field, Gitea variable, or command line.
 On first real configuration, prompt only for missing values and save them in
 the encrypted Vault at `~/.ansible/conf/env.yml`:
 
+```bash
+aap-demo enable servicenow-ai-remediation --configure
+# Replace retained values only when intentionally requested:
+aap-demo enable servicenow-ai-remediation --configure --reconfigure
+```
+
 ```yaml
 aap_demo:
   servicenow:

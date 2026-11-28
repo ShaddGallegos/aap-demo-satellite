@@ -6,8 +6,56 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 NAMESPACE="${NAMESPACE:-aap-operator}"
 ACTION="${1:-deploy}"
+shift || true
+
+configure_servicenow_credentials() {
+  local reconfigure="$1" instance_url username password
+  # shellcheck source=../../includes/credential-vault.sh
+  source "$REPO_ROOT/includes/credential-vault.sh"
+
+  instance_url=$(aap_demo_vault_get 'aap_demo.servicenow.instance_url' 2>/dev/null || true)
+  username=$(aap_demo_vault_get 'aap_demo.servicenow.username' 2>/dev/null || true)
+  password=$(aap_demo_vault_get 'aap_demo.servicenow.password' 2>/dev/null || true)
+  if [ "$reconfigure" = true ]; then
+    instance_url=''
+    username=''
+    password=''
+  fi
+  if [ -z "$instance_url" ] || [ -z "$username" ] || [ -z "$password" ]; then
+    [ -r "$AAP_DEMO_SECRET_PROMPT_DEVICE" ] || {
+      printf '%s\n' 'ERROR: ServiceNow configuration needs an interactive terminal for missing values.' >&2
+      return 1
+    }
+  fi
+  if [ -z "$instance_url" ]; then
+    printf '%s' 'ServiceNow instance URL (HTTPS, no path): ' >"$AAP_DEMO_SECRET_PROMPT_OUTPUT"
+    IFS= read -r instance_url <"$AAP_DEMO_SECRET_PROMPT_DEVICE" || return 1
+    if ! [[ "$instance_url" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]]; then
+      printf '%s\n' 'ERROR: ServiceNow instance URL must be HTTPS and contain only a host and optional port.' >&2
+      return 1
+    fi
+    aap_demo_vault_set 'aap_demo.servicenow.instance_url' "$instance_url" || return 1
+  fi
+  if [ -z "$username" ]; then
+    printf '%s' 'ServiceNow service-account username: ' >"$AAP_DEMO_SECRET_PROMPT_OUTPUT"
+    IFS= read -r username <"$AAP_DEMO_SECRET_PROMPT_DEVICE" || return 1
+    [ -n "$username" ] || { printf '%s\n' 'ERROR: ServiceNow username cannot be empty.' >&2; return 1; }
+    aap_demo_vault_set 'aap_demo.servicenow.username' "$username" || return 1
+  fi
+  if [ -z "$password" ]; then
+    printf '%s' 'ServiceNow service-account password (hidden): ' >"$AAP_DEMO_SECRET_PROMPT_OUTPUT"
+    IFS= read -r -s password <"$AAP_DEMO_SECRET_PROMPT_DEVICE" || return 1
+    printf '\n' >"$AAP_DEMO_SECRET_PROMPT_OUTPUT"
+    [ -n "$password" ] || { printf '%s\n' 'ERROR: ServiceNow password cannot be empty.' >&2; return 1; }
+    aap_demo_vault_set 'aap_demo.servicenow.password' "$password" || return 1
+  fi
+  unset instance_url username password
+  printf '%s\n' '✓ ServiceNow connection values are present in the encrypted credential Vault.'
+  printf '%s\n' '  No ServiceNow request was sent. Re-run with --configure --reconfigure to replace them.'
+}
 
 case "$ACTION" in
   --delete | delete)
@@ -15,9 +63,21 @@ case "$ACTION" in
     printf '%s\n' 'Disable removes only the aap-demo addon selection; remove EDA/AO/Gitea records deliberately.'
     exit 0
     ;;
+  --configure)
+    reconfigure=false
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --reconfigure) reconfigure=true ;;
+        *) printf 'ERROR: Unknown ServiceNow configuration option: %s\n' "$1" >&2; exit 2 ;;
+      esac
+      shift
+    done
+    configure_servicenow_credentials "$reconfigure"
+    exit $?
+    ;;
   deploy | --prepare) ;;
   *)
-    printf 'ERROR: Usage: deploy.sh [--prepare|--delete]\n' >&2
+    printf 'ERROR: Usage: deploy.sh [--prepare|--configure [--reconfigure]|--delete]\n' >&2
     exit 2
     ;;
 esac
