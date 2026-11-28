@@ -16,7 +16,7 @@ Usage:
 
 Providers: aws, azure, gcp, vmware
 
-Profile and plan commands are local-only. AWS, GCP, and Azure preflight make
+Profile and plan commands are local-only. AWS, GCP, Azure, and VMware preflight make
 only documented read-only CLI calls when you explicitly invoke them; no cloud
 command creates resources or incurs charges. A profile stores identity
 references, never credential values.
@@ -582,6 +582,153 @@ _aap_demo_cloud_azure_preflight() {
   printf 'PASS: Azure read-only preflight completed; no Azure resource was changed.\n'
 }
 
+_aap_demo_cloud_vmware_endpoint() {
+  # Accept a normal GOVC_URL (which may contain credentials and an /sdk path),
+  # but return only the lower-case host[:port] for a non-secret comparison.
+  local endpoint="${1#*://}"
+  endpoint="${endpoint##*@}"
+  endpoint="${endpoint%%/*}"
+  endpoint="${endpoint%.}"
+  printf '%s' "${endpoint,,}"
+}
+
+_aap_demo_cloud_vmware_fingerprint() {
+  # Accept the standard OpenSSL presentation as well as a bare SHA-256 value.
+  sed -E 's/.*[Ff]ingerprint=//; s/^[Ss][Hh][Aa]256://' | tr -cd '[:xdigit:]' | tr '[:lower:]' '[:upper:]'
+}
+
+_aap_demo_cloud_vmware_json_nonempty() {
+  jq -e '(type == "object" or type == "array") and length > 0' >/dev/null
+}
+
+_aap_demo_cloud_vmware_preflight() {
+  local file="$1" govc_cli openssl_cli vcenter_url configured_endpoint govc_endpoint
+  local datacenter cluster datastore port_group template expected_fingerprint observed_fingerprint
+  local endpoint_host endpoint_connect about_json datacenter_json cluster_json datastore_json network_json template_json govc_insecure
+
+  _aap_demo_cloud_validate "$file" || return 1
+  [ "$(jq -r '.provider' "$file")" = vmware ] || {
+    _err "VMware preflight requires a vmware profile; this profile targets $(jq -r '.provider' "$file")"
+    return 2
+  }
+  govc_cli="${AAP_DEMO_GOVC_CLI:-govc}"
+  openssl_cli="${AAP_DEMO_OPENSSL_CLI:-openssl}"
+  command -v "$govc_cli" >/dev/null 2>&1 || {
+    _err "govc is required for VMware preflight; install it and configure external GOVC_URL authentication"
+    return 1
+  }
+  command -v "$openssl_cli" >/dev/null 2>&1 || {
+    _err "openssl is required to verify the pinned VMware certificate fingerprint"
+    return 1
+  }
+  govc_insecure="${GOVC_INSECURE:-false}"
+  case "${govc_insecure,,}" in
+    1 | true | yes)
+      _err "VMware preflight refuses GOVC_INSECURE; configure trusted TLS or GOVC_TLS_CA_CERTS/GOVC_TLS_KNOWN_HOSTS"
+      return 1
+      ;;
+  esac
+  [ -n "${GOVC_URL:-}" ] || {
+    _err "VMware preflight requires GOVC_URL from an external credential source; do not add credentials to the profile"
+    return 1
+  }
+
+  vcenter_url=$(jq -r '.provider_config.vcenter_url' "$file")
+  datacenter=$(jq -r '.provider_config.datacenter' "$file")
+  cluster=$(jq -r '.provider_config.cluster' "$file")
+  datastore=$(jq -r '.provider_config.datastore' "$file")
+  port_group=$(jq -r '.provider_config.port_group' "$file")
+  template=$(jq -r '.provider_config.template' "$file")
+  expected_fingerprint=$(jq -r '.provider_config.certificate_sha256' "$file" | _aap_demo_cloud_vmware_fingerprint)
+  configured_endpoint=$(_aap_demo_cloud_vmware_endpoint "$vcenter_url")
+  govc_endpoint=$(_aap_demo_cloud_vmware_endpoint "$GOVC_URL")
+  if [ -z "$configured_endpoint" ] || [ "$configured_endpoint" != "$govc_endpoint" ]; then
+    _err "GOVC_URL host does not match the profile vCenter URL; no VMware inventory call was made"
+    return 1
+  fi
+  if [ "${#expected_fingerprint}" -ne 64 ]; then
+    _err "VMware profile certificate_sha256 must be a SHA-256 fingerprint"
+    return 1
+  fi
+  endpoint_host="${configured_endpoint%%:*}"
+  endpoint_connect="$configured_endpoint"
+  case "$endpoint_connect" in *:*) ;; *) endpoint_connect="${endpoint_connect}:443" ;; esac
+
+  printf 'VMware read-only preflight: %s\n' "$file"
+  observed_fingerprint=$("$openssl_cli" s_client -connect "$endpoint_connect" -servername "$endpoint_host" </dev/null 2>/dev/null |
+    "$openssl_cli" x509 -noout -fingerprint -sha256 2>/dev/null | _aap_demo_cloud_vmware_fingerprint) || {
+    _err "Could not obtain the vCenter TLS certificate for the configured endpoint"
+    return 1
+  }
+  if [ "$observed_fingerprint" != "$expected_fingerprint" ]; then
+    _err "vCenter TLS certificate fingerprint does not match the profile; refusing inventory discovery"
+    return 1
+  fi
+  printf '  PASS: vCenter certificate matches the pinned SHA-256 fingerprint\n'
+
+  about_json=$("$govc_cli" about -json 2>/dev/null) || {
+    _err "vCenter identity lookup failed; check externally supplied GOVC_URL credentials and least-privilege access"
+    return 1
+  }
+  _aap_demo_cloud_vmware_json_nonempty <<<"$about_json" || {
+    _err "vCenter identity lookup returned no usable JSON"
+    return 1
+  }
+  printf '  PASS: authenticated to the configured vCenter over verified TLS\n'
+
+  datacenter_json=$("$govc_cli" datacenter.info -json "$datacenter" 2>/dev/null) || {
+    _err "VMware datacenter lookup failed for $datacenter"
+    return 1
+  }
+  _aap_demo_cloud_vmware_json_nonempty <<<"$datacenter_json" || {
+    _err "Configured VMware datacenter is missing"
+    return 1
+  }
+  printf '  PASS: configured datacenter exists\n'
+
+  cluster_json=$("$govc_cli" cluster.info -json -dc "$datacenter" "$cluster" 2>/dev/null) || {
+    _err "VMware cluster lookup failed for $cluster"
+    return 1
+  }
+  _aap_demo_cloud_vmware_json_nonempty <<<"$cluster_json" || {
+    _err "Configured VMware cluster is missing"
+    return 1
+  }
+  printf '  PASS: configured cluster exists\n'
+
+  datastore_json=$("$govc_cli" datastore.info -json -dc "$datacenter" "$datastore" 2>/dev/null) || {
+    _err "VMware datastore lookup failed for $datastore"
+    return 1
+  }
+  if ! _aap_demo_cloud_vmware_json_nonempty <<<"$datastore_json" ||
+    ! jq -e '[.. | objects | (.summary? // .Summary? // empty) | select(type == "object") | (.accessible? // .Accessible?)] | any(. == true)' <<<"$datastore_json" >/dev/null; then
+    _err "Configured VMware datastore is missing or inaccessible"
+    return 1
+  fi
+  printf '  PASS: configured datastore exists and is accessible\n'
+
+  network_json=$("$govc_cli" find -json -dc "$datacenter" -type n -name "$port_group" 2>/dev/null) || {
+    _err "VMware port-group lookup failed for $port_group"
+    return 1
+  }
+  _aap_demo_cloud_vmware_json_nonempty <<<"$network_json" || {
+    _err "Configured VMware port group is missing"
+    return 1
+  }
+  printf '  PASS: configured port group exists\n'
+
+  template_json=$("$govc_cli" vm.info -json -dc "$datacenter" "$template" 2>/dev/null) || {
+    _err "VMware template lookup failed for $template"
+    return 1
+  }
+  if ! jq -e '[.. | objects | (.config? // .Config? // empty) | select(type == "object") | (.template? // .Template?)] | any(. == true)' <<<"$template_json" >/dev/null; then
+    _err "Configured VMware template is missing or is not marked as a template"
+    return 1
+  fi
+  printf '  PASS: configured VM template exists and is marked as a template\n'
+  printf 'PASS: VMware read-only preflight completed; no VMware resource was changed.\n'
+}
+
 _aap_demo_cloud_preflight() {
   local file="${1:-}" aws_profile="${AWS_PROFILE:-}" gcloud_configuration="${CLOUDSDK_ACTIVE_CONFIG_NAME:-}" argument provider
   shift || true
@@ -614,7 +761,8 @@ _aap_demo_cloud_preflight() {
     aws) _aap_demo_cloud_aws_preflight "$file" "$aws_profile" ;;
     gcp) _aap_demo_cloud_gcp_preflight "$file" "$gcloud_configuration" ;;
     azure) _aap_demo_cloud_azure_preflight "$file" ;;
-    *) _err "Read-only preflight is currently implemented only for AWS, GCP, and Azure"; return 2 ;;
+    vmware) _aap_demo_cloud_vmware_preflight "$file" ;;
+    *) _err "Read-only preflight is currently implemented only for AWS, GCP, Azure, and VMware"; return 2 ;;
   esac
 }
 

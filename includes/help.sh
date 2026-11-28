@@ -141,7 +141,7 @@ Notes
   cloud profile validate FILE | cloud plan FILE
   cloud preflight FILE [--aws-profile NAME|--gcloud-configuration NAME]
                       Create or validate a local-only AWS, Azure, GCP, or VMware
-                      planning profile. AWS/GCP/Azure preflight uses only read-only discovery;
+                      planning profile. AWS/GCP/Azure/VMware preflight uses only read-only discovery;
                       no command creates resources.
   dashboard [--no-open]
                       Start the localhost dashboard without opening a browser

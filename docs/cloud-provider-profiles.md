@@ -11,8 +11,8 @@ Cloud profiles are a safe preparation step for a future aap-demo environment on
 AWS, Azure, Google Cloud, or VMware vSphere. They are not a provider installer.
 Profile commands do not authenticate to a cloud account, call a provider API,
 create a machine, spend money, or change the current local lab. The explicit
-AWS and GCP preflights are the exceptions: they authenticate through an already
-configured provider CLI and perform only read-only discovery.
+The explicit provider preflights are the exception: they authenticate through
+an already configured provider CLI and perform only read-only discovery.
 
 Use one profile per customer environment. Keep it outside the repository and
 review it with the customer network, identity, and cost owners before any future
@@ -30,6 +30,8 @@ aap-demo cloud preflight ~/.config/aap-demo/cloud/customer-lab.json --aws-profil
 aap-demo cloud preflight ~/.config/aap-demo/cloud/customer-gcp.json --gcloud-configuration customer-sso
 # Optional: query an approved Azure subscription with read-only permissions.
 aap-demo cloud preflight ~/.config/aap-demo/cloud/customer-azure.json
+# Optional: query an approved VMware vCenter with externally supplied govc access.
+aap-demo cloud preflight ~/.config/aap-demo/cloud/customer-vmware.json
 ```
 
 `init` creates the file mode `0600`. It deliberately contains `REPLACE_ME`
@@ -180,6 +182,59 @@ start, stop, or delete an Azure resource. The caller needs read access to those
 named resources. It does not collect a client secret or write an Azure
 credential into the Vault.
 
+## VMware read-only preflight topology
+
+```mermaid
+flowchart TB
+  Operator["Named operator\nSSO or least-privilege vCenter role"]
+  Profile["Mode 0600 VMware profile\nnon-secret references only"]
+  TLS["Trusted vCenter TLS\ncertificate SHA-256 pin"]
+  CLI["aap-demo cloud preflight\ngovc inventory reads only"]
+
+  subgraph DC["Customer-owned vCenter datacenter"]
+    Cluster["Selected cluster"]
+    Datastore["Accessible datastore"]
+    PortGroup["Private port group"]
+    Template["Compatible RHEL template\nmarked as template"]
+    subgraph Workloads["Private AAP demo workloads"]
+      AAP["AAP node"]
+      Fleet["Fleet nodes ×3"]
+      Satellite["Optional Satellite node"]
+    end
+  end
+
+  Operator --> CLI
+  Profile --> CLI
+  TLS --> CLI
+  CLI -->|"about/info/find only"| DC
+  Cluster --> Workloads
+  Datastore --> Workloads
+  PortGroup --> Workloads
+  Template --> Workloads
+```
+
+The VMware adapter requires the `govc` CLI and an externally supplied
+`GOVC_URL` for the profile's vCenter. It rejects `GOVC_INSECURE=true`, requires
+that the hostname matches `provider_config.vcenter_url`, retrieves the
+certificate's SHA-256 fingerprint, and refuses discovery if it differs from
+`provider_config.certificate_sha256`. `govc` must separately trust the vCenter
+certificate through the system trust store, `GOVC_TLS_CA_CERTS`, or
+`GOVC_TLS_KNOWN_HOSTS`.
+
+After TLS pinning, the adapter uses only `govc about`, `datacenter.info`,
+`cluster.info`, `datastore.info`, `find`, and `vm.info`. It checks the named
+datacenter, cluster, accessible datastore, port group, and a VM that is marked
+as a template. It does not clone, create, reconfigure, power on, or delete a
+VM or any other vSphere object. `govc` documents `GOVC_URL`, TLS-CA, TLS-known
+hosts, and its `-k` insecure switch; this preflight deliberately refuses that
+switch. [See the official govc usage reference](https://github.com/vmware/govmomi/blob/main/govc/usage.sh).
+
+Use an external credential mechanism to provide `GOVC_URL`; never put a
+password in the profile. A future apply adapter may retrieve an exceptional
+non-federated vCenter secret from the encrypted Ansible Vault at
+`~/.ansible/conf/env.yml`, but it must expose only an `external:` reference in
+the profile and never display the value.
+
 ## Required private connectivity
 
 The future adapter must calculate provider-specific ports from enabled features;
@@ -260,8 +315,9 @@ backup/restore must each be qualified for the selected provider and image.
 AWS identity, VPC, DNS, subnet, security-group, and instance-profile discovery
 is implemented. GCP project, custom-VPC, subnet, firewall, and service-account
 discovery is implemented. Azure tenant/subscription, VNet/subnet, NSG, private
-DNS, and managed-identity discovery is implemented. Quota, image, capacity, and
-Red Hat entitlement discovery remain unimplemented for all providers. VMware
-remains profile-only. Only after provider-specific evidence exists should a
-separate adapter offer a reviewed, explicitly approved `apply`, lifecycle
-controls, dashboard status, and teardown behavior.
+DNS, and managed-identity discovery is implemented. VMware vCenter TLS and
+named-inventory discovery is implemented. Quota, image, capacity, and Red Hat
+entitlement discovery remain unimplemented for all providers. Only after
+provider-specific evidence exists should a separate adapter offer a reviewed,
+explicitly approved `apply`, lifecycle controls, dashboard status, and teardown
+behavior.
