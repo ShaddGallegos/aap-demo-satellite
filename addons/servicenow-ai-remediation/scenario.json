@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "name": "servicenow-ai-remediation",
+  "summary": "Prepares a guarded ServiceNow-approved AI remediation demonstration for a Fleet HTTP service outage.",
+  "lifecycle": {"enable": "deploy.sh", "disable": "deploy.sh --delete", "idempotency": "Revalidates the checked-in demonstration assets without opening incidents, starting activations, or changing hosts.", "failure_boundary": "Stops before external configuration when the operator has not explicitly opted in or local AAP/EDA prerequisites are unavailable."},
+  "dependencies": {"addons": ["ao", "eda", "fleet", "gitea"], "services": ["AAP controller API", "Event-Driven Ansible", "Automation Orchestrator", "local Gitea", "ServiceNow Table API"]},
+  "compatibility": {"conflicts": []},
+  "inputs": [
+    {"name": "SERVICENOW_AI_DEMO_PREPARE", "source": "environment:SERVICENOW_AI_DEMO_PREPARE", "required": true, "secret": false},
+    {"name": "snow_instance_url", "source": "vault:aap_demo.servicenow.instance_url", "required": true, "secret": true},
+    {"name": "snow_username", "source": "vault:aap_demo.servicenow.username", "required": true, "secret": true},
+    {"name": "snow_password", "source": "vault:aap_demo.servicenow.password", "required": true, "secret": true}
+  ],
+  "resources": {"rulebooks": ["HTTP service outage to approval workflow"], "playbooks": ["Create/update ServiceNow incident", "Collect HTTP evidence", "Allow-listed HTTP service recovery"], "repositories": ["operator-owned Gitea remediation repository"]},
+  "readiness": ["AAP Event-Driven Ansible is enabled.", "The operator reviews and imports the assets into an owned private Gitea repository.", "A ServiceNow approval is required before the recovery job is launched."],
+  "security": {"secret_storage": "ServiceNow URL, username, and password belong only in aap_demo.servicenow.* encrypted Vault entries and an AAP custom credential; never in Gitea, a profile, an AO variable, or an event.", "network_trust": "ServiceNow API and source-control calls must retain certificate validation; this demo forbids insecure TLS bypasses.", "external_actions": "Prepare is local-only. A human ServiceNow approval, an allow-listed playbook, an exact Fleet target, post-remediation verification, and a bounded attempt count are mandatory before a host can change."}
+}

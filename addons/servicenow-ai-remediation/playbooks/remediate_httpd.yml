@@ -1,0 +1,42 @@
+---
+- name: Recover an approved HTTP service outage
+  hosts: all
+  gather_facts: false
+  become: true
+  vars:
+    host_name: ''
+    service_name: httpd
+    remediation_approved: false
+  tasks:
+    - name: Require the ServiceNow approval gate and allow-listed service
+      ansible.builtin.assert:
+        that:
+          - remediation_approved | bool
+          - host_name | length > 0
+          - inventory_hostname == host_name
+          - service_name in ['httpd', 'nginx']
+        fail_msg: A ServiceNow-approved recovery for the selected Fleet host and HTTP service is required.
+
+    - name: Start the approved HTTP service idempotently
+      ansible.builtin.service:
+        name: "{{ service_name }}"
+        state: started
+
+    - name: Gather post-recovery service state without changing it
+      ansible.builtin.service_facts:
+
+    - name: Verify the approved HTTP service is active
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services[service_name + '.service'].state | default('missing') == 'running'
+        fail_msg: The approved HTTP service did not reach the running state.
+
+    - name: Publish the verified recovery result
+      ansible.builtin.set_stats:
+        data:
+          aap_demo_remediation_result:
+            host_name: "{{ inventory_hostname }}"
+            service_name: "{{ service_name }}"
+            recovered: true
+            action: start
+        per_host: false

@@ -76,6 +76,22 @@
    }
   },
   {
+   "id": "servicenow-ai-remediation",
+   "name": "ServiceNow-approved AI Recovery Demo",
+   "category": "AI and orchestration",
+   "description": "Prepare a bounded HTTP-service outage scenario: EDA evidence, AO advisory, Gitea-reviewed playbooks, ServiceNow approval, AAP verification, and ticket enrichment. Preparation never contacts ServiceNow or changes a host.",
+   "dependencies": [
+    {"id": "ao"},
+    {"id": "eda"},
+    {"id": "fleet"},
+    {"id": "gitea"}
+   ],
+   "availability": "Explicit prepare opt-in plus customer ServiceNow development instance, signed execution/decision environment, private Gitea project, and reviewed credentials required.",
+   "health": {
+    "type": "configured"
+   }
+  },
+  {
    "id": "ollama",
    "name": "Ollama",
    "category": "AI and orchestration",

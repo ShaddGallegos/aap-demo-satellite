@@ -1,0 +1,17 @@
+# Filebeat does not directly post arbitrary events to EDA.  This example sends
+# the narrow application log to a customer-managed Logstash/Kafka bridge, which
+# then emits the normalized, authenticated EDA event shown in the README.
+filebeat.inputs:
+  - type: filestream
+    id: aap-demo-http-service
+    paths:
+      - /var/log/aap-demo/http-service-monitor.log
+    processors:
+      - add_fields:
+          target: aap_demo
+          fields:
+            event_type: aap_demo.http_service_outage
+            service_name: httpd
+output.logstash:
+  hosts: ["logstash.internal.example:5044"]
+ssl.verification_mode: full

@@ -37,6 +37,7 @@ The [project home page](../README.md) is the short start. These pages are the re
   Shut down Fleet, CRC, and Satellite without deleting data.
 - [Assistant skills](guides/assistant-skills.md) - Task-focused validation, recovery, and publication workflows.
 - [Local AI integrations](guides/ai-integrations.md) - MCP, Ollama, and supported product integration paths.
+- [ServiceNow-approved AI remediation demo](guides/servicenow-ai-remediation-demo.md) - A bounded Fleet HTTP-service proof of concept with EDA, AO, Gitea, and ServiceNow approval.
 - [Operations steward](operations-steward.md) - Local, redacted, read-only issue tracking and safe future-agent boundaries.
 - [Weekly health reports](weekly-reports.md) - Styled local HTML reports and captured email, without an SMTP relay.
 - [Collection authentication](collection-authentication.md) - Keep the separate

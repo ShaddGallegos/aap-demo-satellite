@@ -1,0 +1,57 @@
+---
+- name: Create one ServiceNow incident for a correlated HTTP outage
+  hosts: localhost
+  gather_facts: false
+  vars:
+    snow_instance_url: "{{ lookup('ansible.builtin.env', 'SNOW_INSTANCE_URL') }}"
+    snow_username: "{{ lookup('ansible.builtin.env', 'SNOW_USERNAME') }}"
+    snow_password: "{{ lookup('ansible.builtin.env', 'SNOW_PASSWORD') }}"
+    host_name: ''
+    service_name: httpd
+    correlation_id: ''
+  tasks:
+    - name: Require a trusted ServiceNow endpoint and event identity
+      ansible.builtin.assert:
+        that:
+          - snow_instance_url is match('^https://[^/]+$')
+          - snow_username | length > 0
+          - snow_password | length > 0
+          - host_name | length > 0
+          - service_name in ['httpd', 'nginx']
+          - correlation_id | length > 0
+        fail_msg: ServiceNow credentials, a HTTPS instance URL, and a normalized outage event are required.
+      no_log: true
+
+    - name: Create a correlated ServiceNow incident
+      ansible.builtin.uri:
+        url: "{{ snow_instance_url }}/api/now/table/incident"
+        method: POST
+        user: "{{ snow_username }}"
+        password: "{{ snow_password }}"
+        force_basic_auth: true
+        validate_certs: true
+        use_proxy: false
+        body_format: json
+        body:
+          short_description: "AAP demo: {{ service_name }} outage on {{ host_name }}"
+          description: >-
+            Correlation ID {{ correlation_id }}. A normalized monitoring event
+            reported that {{ service_name }} is unavailable on {{ host_name }}.
+            Automation will collect bounded evidence and propose only an
+            allow-listed recovery after approval.
+          correlation_id: "{{ correlation_id }}"
+          impact: '3'
+          urgency: '3'
+        status_code: [200, 201]
+        return_content: true
+      register: snow_incident
+      no_log: true
+
+    - name: Publish the created incident identity without credentials
+      ansible.builtin.set_stats:
+        data:
+          aap_demo_servicenow_incident:
+            sys_id: "{{ snow_incident.json.result.sys_id }}"
+            number: "{{ snow_incident.json.result.number }}"
+            correlation_id: "{{ correlation_id }}"
+        per_host: false

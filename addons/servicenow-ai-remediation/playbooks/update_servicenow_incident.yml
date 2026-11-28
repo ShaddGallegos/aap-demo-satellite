@@ -1,0 +1,39 @@
+---
+- name: Enrich one ServiceNow incident with bounded remediation evidence
+  hosts: localhost
+  gather_facts: false
+  vars:
+    snow_instance_url: "{{ lookup('ansible.builtin.env', 'SNOW_INSTANCE_URL') }}"
+    snow_username: "{{ lookup('ansible.builtin.env', 'SNOW_USERNAME') }}"
+    snow_password: "{{ lookup('ansible.builtin.env', 'SNOW_PASSWORD') }}"
+    snow_incident_sys_id: ''
+    snow_work_notes: ''
+    snow_close: false
+  tasks:
+    - name: Require a trusted endpoint and non-secret ticket update
+      ansible.builtin.assert:
+        that:
+          - snow_instance_url is match('^https://[^/]+$')
+          - snow_username | length > 0
+          - snow_password | length > 0
+          - snow_incident_sys_id is match('^[0-9a-f]{32}$')
+          - snow_work_notes | length > 0
+        fail_msg: A HTTPS ServiceNow endpoint, credentials, incident sys_id, and work note are required.
+      no_log: true
+
+    - name: Add the recovery result to the existing incident
+      ansible.builtin.uri:
+        url: "{{ snow_instance_url }}/api/now/table/incident/{{ snow_incident_sys_id }}"
+        method: PATCH
+        user: "{{ snow_username }}"
+        password: "{{ snow_password }}"
+        force_basic_auth: true
+        validate_certs: true
+        use_proxy: false
+        body_format: json
+        body: >-
+          {{ {'work_notes': snow_work_notes}
+             | combine({'state': '6', 'close_notes': snow_work_notes}
+                       if snow_close | bool else {}) }}
+        status_code: 200
+      no_log: true

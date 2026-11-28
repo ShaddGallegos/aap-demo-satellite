@@ -53,6 +53,7 @@ jobs:
           bash test/test-fleet-aap.sh
           bash test/test-fleet-rhc.sh
           bash test/test-cli-parsing.sh
+          bash test/test-servicenow-ai-remediation.sh
           bash test/test-aws-cloud-preflight.sh
           bash test/test-gcp-cloud-preflight.sh
           bash test/test-azure-cloud-preflight.sh

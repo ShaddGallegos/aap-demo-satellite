@@ -851,6 +851,42 @@ class DashboardHttpTests(unittest.TestCase):
         self.assertEqual(payload["addon"], "product-demo-eda")
         self.assertEqual(captured, {"eda_demo_opt_in": True})
 
+    def test_guarded_servicenow_demo_requires_and_accepts_explicit_acknowledgement(self) -> None:
+        status, payload = self.request(
+            "/api/addons/servicenow-ai-remediation/enable",
+            method="POST",
+            body={},
+            token=self.app.session_token,
+            origin=self.app.origin,
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("Confirm ServiceNow demo preparation", payload["error"])
+
+        original = self.app.start_operation
+        captured: dict[str, object] = {}
+
+        def start_operation(addon: str, action: str, **kwargs: object) -> dict[str, object]:
+            captured.update(kwargs)
+            return {"id": "fixture", "addon": addon, "action": action, "status": "running"}
+
+        self.app.start_operation = start_operation
+        try:
+            status, payload = self.request(
+                "/api/addons/servicenow-ai-remediation/enable",
+                method="POST",
+                body={"confirm_servicenow_demo_prepare": True},
+                token=self.app.session_token,
+                origin=self.app.origin,
+            )
+        finally:
+            self.app.start_operation = original
+        self.assertEqual(status, 202)
+        self.assertEqual(payload["addon"], "servicenow-ai-remediation")
+        self.assertEqual(
+            captured,
+            {"eda_demo_opt_in": False, "servicenow_demo_opt_in": True},
+        )
+
     def test_invalid_host_is_rejected(self) -> None:
         request = urllib.request.Request(
             self.base_url + "/api/status",

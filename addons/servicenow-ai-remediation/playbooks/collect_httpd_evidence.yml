@@ -1,0 +1,30 @@
+---
+- name: Collect bounded evidence for a failed HTTP service
+  hosts: all
+  gather_facts: false
+  become: true
+  vars:
+    host_name: ''
+    service_name: httpd
+  tasks:
+    - name: Require the selected Fleet host and allow-listed service name
+      ansible.builtin.assert:
+        that:
+          - host_name | length > 0
+          - inventory_hostname == host_name
+          - service_name in ['httpd', 'nginx']
+        fail_msg: The AAP template must limit to the selected Fleet host and HTTP service.
+
+    - name: Gather service state without changing it
+      ansible.builtin.service_facts:
+
+    - name: Record bounded service evidence for the workflow
+      ansible.builtin.set_stats:
+        data:
+          aap_demo_http_evidence:
+            host_name: "{{ inventory_hostname }}"
+            service_name: "{{ service_name }}"
+            service_exists: "{{ (service_name + '.service') in ansible_facts.services }}"
+            service_state: "{{ ansible_facts.services[service_name + '.service'].state | default('missing') }}"
+            service_status: "{{ ansible_facts.services[service_name + '.service'].status | default('missing') }}"
+        per_host: false

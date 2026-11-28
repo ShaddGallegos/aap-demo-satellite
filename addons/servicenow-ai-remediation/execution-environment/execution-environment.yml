@@ -1,0 +1,13 @@
+---
+version: 3
+images:
+  base_image:
+    # Replace this during qualification with the customer-approved AAP 2.7
+    # supported EE image, pinned by digest in the internal registry.
+    name: registry.redhat.io/ansible-automation-platform-25/ee-supported-rhel9:latest
+dependencies:
+  galaxy: requirements.yml
+  python: requirements.txt
+  system: bindep.txt
+options:
+  package_manager_path: /usr/bin/microdnf

@@ -3457,7 +3457,7 @@ cmd_fleet() {
 # ---------------------------------------------------------------------------
 # product-demos installs all APD domains (runs product-demos-base automatically).
 # product-demos-base and individual domain addons are hidden from status; enable directly if needed.
-AVAILABLE_ADDONS="fleet gitea mcp-server portal portal-operator setup-pah ao ao-pr-testing apme-eap local-cache eda product-demos product-demo-satellite product-demo-infrastructure product-demo-eda opa ollama keycloak satellite-manifest openshift-delivery openshift-security openshift-quay openshift-acm lightspeed lightwell"
+AVAILABLE_ADDONS="fleet gitea mcp-server portal portal-operator setup-pah ao ao-pr-testing apme-eap local-cache eda product-demos product-demo-satellite product-demo-infrastructure product-demo-eda opa ollama keycloak satellite-manifest openshift-delivery openshift-security openshift-quay openshift-acm lightspeed lightwell servicenow-ai-remediation"
 
 _normalize_addon_name() {
   case "$1" in
@@ -3726,6 +3726,13 @@ cmd_enable() {
   if [ "$addon" = "lightwell" ] && [ "$_skip_addon_save" != true ]; then
     # --prepare is a Lightwell-only argument; do not pass it to AO.
     _ensure_addon_dependency ao || return 1
+  fi
+  if [ "$addon" = "servicenow-ai-remediation" ] && [ "$_skip_addon_save" != true ] \
+    && [ "${SERVICENOW_AI_DEMO_PREPARE:-false}" = true ]; then
+    _ensure_addon_dependency ao || return 1
+    _ensure_addon_dependency eda || return 1
+    _ensure_addon_dependency fleet || return 1
+    _ensure_addon_dependency gitea || return 1
   fi
   local _addon_was_enabled=false
   if echo "$(_addons_list)" | grep -qw "$addon"; then

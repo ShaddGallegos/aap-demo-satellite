@@ -562,6 +562,16 @@ async function toggleAddon(addonId, action) {
       return;
     }
   }
+  const serviceNowDemoOptIn = addonId === "servicenow-ai-remediation" && action === "enable";
+  if (serviceNowDemoOptIn) {
+    const confirmed = window.confirm(
+      "Prepare the guarded ServiceNow AI remediation package? This validates local prerequisites only. " +
+      "It will not contact ServiceNow, invoke an LLM, push to Gitea, start EDA, launch a workflow, or change a host.",
+    );
+    if (!confirmed) {
+      return;
+    }
+  }
   clearAlert();
   try {
     state.dismissedOperationId = null;
@@ -574,6 +584,7 @@ async function toggleAddon(addonId, action) {
       body: JSON.stringify({
         confirm: action === "disable",
         confirm_eda_prerequisites: edaDemoOptIn,
+        confirm_servicenow_demo_prepare: serviceNowDemoOptIn,
       }),
     });
     await refresh();

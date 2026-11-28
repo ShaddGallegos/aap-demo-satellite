@@ -725,11 +725,14 @@ class DashboardApp:
 
     def start_operation(
         self, addon_id: str, action: str, *, eda_demo_opt_in: bool = False,
+        servicenow_demo_opt_in: bool = False,
     ) -> dict[str, Any]:
         if addon_id not in self.addons or action not in {"enable", "disable", "check"}:
             raise ValueError("Unsupported dashboard operation")
         if addon_id == "product-demo-eda" and action == "enable" and not eda_demo_opt_in:
             raise ValueError("EDA demo enablement requires explicit prerequisite acknowledgement")
+        if addon_id == "servicenow-ai-remediation" and action == "enable" and not servicenow_demo_opt_in:
+            raise ValueError("ServiceNow demo preparation requires explicit acknowledgement")
         if action == "check":
             if self.addons[addon_id]["category"] != "Demo content":
                 raise ValueError("Integration checks require a known demo")
@@ -756,7 +759,7 @@ class DashboardApp:
             self.operation.completed_at = None
         thread = threading.Thread(
             target=self._execute_operation,
-            args=(operation_id, addon_id, action, eda_demo_opt_in),
+            args=(operation_id, addon_id, action, eda_demo_opt_in, servicenow_demo_opt_in),
             daemon=True,
         )
         thread.start()
@@ -772,6 +775,7 @@ class DashboardApp:
 
     def _execute_operation(
         self, operation_id: str, addon_id: str, action: str, eda_demo_opt_in: bool = False,
+        servicenow_demo_opt_in: bool = False,
     ) -> None:
         process: subprocess.Popen[str] | None = None
         output_lines: list[str] = []
@@ -782,6 +786,8 @@ class DashboardApp:
             # cloud resource, credential, or rulebook activation.
             if addon_id == "product-demo-eda" and action == "enable" and eda_demo_opt_in:
                 environment["PRODUCT_DEMOS_ENABLE_EDA"] = "true"
+            if addon_id == "servicenow-ai-remediation" and action == "enable" and servicenow_demo_opt_in:
+                environment["SERVICENOW_AI_DEMO_PREPARE"] = "true"
             process = subprocess.Popen(
                 self.cli_command("check-integrations") if action == "check"
                 else self.cli_command(action, addon_id),
@@ -1096,6 +1102,17 @@ def create_handler(app: DashboardApp) -> type[BaseHTTPRequestHandler]:
                     },
                 )
                 return
+            servicenow_demo_opt_in = (
+                addon_id == "servicenow-ai-remediation"
+                and action == "enable"
+                and body.get("confirm_servicenow_demo_prepare") is True
+            )
+            if addon_id == "servicenow-ai-remediation" and action == "enable" and not servicenow_demo_opt_in:
+                self.json_response(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "Confirm ServiceNow demo preparation before enabling this guarded scenario"},
+                )
+                return
             try:
                 inventory = app.inventory()
                 if action == "disable":
@@ -1111,9 +1128,10 @@ def create_handler(app: DashboardApp) -> type[BaseHTTPRequestHandler]:
                             },
                         )
                         return
-                operation = app.start_operation(
-                    addon_id, action, eda_demo_opt_in=eda_demo_opt_in,
-                )
+                operation_kwargs: dict[str, bool] = {"eda_demo_opt_in": eda_demo_opt_in}
+                if servicenow_demo_opt_in:
+                    operation_kwargs["servicenow_demo_opt_in"] = True
+                operation = app.start_operation(addon_id, action, **operation_kwargs)
             except RuntimeError as error:
                 self.json_response(HTTPStatus.CONFLICT, {"error": str(error)})
                 return

@@ -1,0 +1,25 @@
+---
+- name: Route a normalized HTTP service outage to Automation Orchestrator
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+  rules:
+    - name: Propose an approved recovery for a confirmed HTTP outage
+      condition: >-
+        event.payload.event_type == "aap_demo.http_service_outage" and
+        event.payload.service_name in ["httpd", "nginx"] and
+        event.payload.host_name is defined and
+        event.payload.correlation_id is defined
+      action:
+        run_job_template:
+          name: AI ServiceNow | Analyze HTTP outage
+          organization: Default
+          job_args:
+            extra_vars:
+              host_name: "{{ event.payload.host_name }}"
+              service_name: "{{ event.payload.service_name }}"
+              correlation_id: "{{ event.payload.correlation_id }}"
+              observed_at: "{{ event.payload.observed_at | default('unknown') }}"
+              event_source: "{{ event.meta.source | default('webhook') }}"

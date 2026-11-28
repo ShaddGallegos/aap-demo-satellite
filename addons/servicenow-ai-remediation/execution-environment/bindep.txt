@@ -1,0 +1,2 @@
+openssl [platform:rpm]
+ca-certificates [platform:rpm]
