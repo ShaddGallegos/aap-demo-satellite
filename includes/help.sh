@@ -143,6 +143,8 @@ Notes
                       Create or validate a local-only AWS, Azure, GCP, or VMware
                       planning profile. AWS/GCP/Azure/VMware preflight uses only read-only discovery;
                       no command creates resources.
+  Cloud topology diagrams (AWS, GCP, Azure, VMware):
+                        docs/cloud-provider-profiles.md
   dashboard [--no-open]
                       Start the localhost dashboard without opening a browser
   console [--no-open] Show the console URL without opening a browser

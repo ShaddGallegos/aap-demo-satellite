@@ -20,6 +20,8 @@ Profile and plan commands are local-only. AWS, GCP, Azure, and VMware preflight 
 only documented read-only CLI calls when you explicitly invoke them; no cloud
 command creates resources or incurs charges. A profile stores identity
 references, never credential values.
+
+Topology diagrams: docs/cloud-provider-profiles.md
 EOF
 }
 
